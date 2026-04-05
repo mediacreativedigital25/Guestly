@@ -1,0 +1,64 @@
+{
+  "entities": {
+    "users": {
+      "title": "User",
+      "description": "Application users with roles and quotas.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "client", "guest", "reseller"] },
+        "eventId": { "type": "string", "description": "Associated event ID for clients" },
+        "eventQuota": { "type": "number", "description": "Max events a reseller can create" },
+        "eventsCreated": { "type": "number", "description": "Number of events created by reseller" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "createdAt"]
+    },
+    "events": {
+      "title": "Event",
+      "description": "Wedding or event details.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "location": { "type": "string" },
+        "slug": { "type": "string", "description": "URL slug for the event" },
+        "clientUid": { "type": "string", "description": "UID of the event owner" },
+        "resellerUid": { "type": "string", "description": "UID of the reseller who created this" },
+        "clientEmail": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "date", "location", "slug", "clientUid", "clientEmail", "isActive", "createdAt"]
+    },
+    "guests": {
+      "title": "Guest Entry",
+      "description": "Guestbook messages and attendance.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "attendance": { "type": "string", "enum": ["hadir", "tidak_hadir", "ragu_ragu"] },
+        "message": { "type": "string" },
+        "eventId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "reply": { "type": "string" }
+      },
+      "required": ["name", "attendance", "message", "eventId", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "users",
+      "description": "User profiles"
+    },
+    "/events/{eventId}": {
+      "schema": "events",
+      "description": "Event details"
+    },
+    "/guests/{guestId}": {
+      "schema": "guests",
+      "description": "Guestbook entries"
+    }
+  }
+}

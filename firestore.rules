@@ -1,0 +1,166 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: uid (Firebase Auth UID)
+    // Fields:
+    //   - name: string (required)
+    //   - email: string (required, email format)
+    //   - password: string (optional, for reference)
+    //   - role: string (required, 'admin', 'client', or 'reseller')
+    //   - eventQuota: number (optional, for resellers)
+    //   - eventsCreated: number (optional, for resellers)
+    //   - belongsToReseller: string (optional, references users.uid)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: events
+    // Document ID: auto-generated
+    // Fields:
+    //   - title: string (required)
+    //   - date: string (required, ISO 8601 format)
+    //   - location: string (required)
+    //   - slug: string (required, unique)
+    //   - clientUid: string (required, references users.uid)
+    //   - resellerUid: string (optional, references users.uid)
+    //   - clientEmail: string (required)
+    //   - isActive: bool (required)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: guests
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - attendance: string (required, 'hadir', 'tidak', 'ragu')
+    //   - message: string (required)
+    //   - eventId: string (required, references events.id)
+    //   - timestamp: timestamp (required)
+    //   - reply: string (optional)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+             (
+               (request.auth.token.email == "64.iklas@gmail.com" && request.auth.token.email_verified == true) ||
+               (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+             );
+    }
+
+    function isReseller() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'reseller';
+    }
+
+    function canResellerCreateEvent() {
+      let userData = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return ('eventQuota' in userData) && 
+             ('eventsCreated' in userData) && 
+             (userData.eventsCreated < userData.eventQuota);
+    }
+
+    function isEventOwner(eventData) {
+      return isAuthenticated() && (eventData.clientUid == request.auth.uid || eventData.resellerUid == request.auth.uid);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isEventStaff(eventId) {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'staff' &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.eventId == eventId;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Allow users to read their own profile
+      // Allow admins to read all profiles
+      // Allow resellers to read their own clients
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isAdmin() ||
+        (isReseller() && resource.data.belongsToReseller == request.auth.uid) ||
+        (isReseller() && resource.data.role == 'admin')
+      );
+      
+      // Admins can create/update/delete any user
+      // Resellers can create clients that belong to them
+      allow create: if isAdmin() || (
+        isReseller() && 
+        request.resource.data.role == 'client' && 
+        request.resource.data.belongsToReseller == request.auth.uid
+      );
+
+      allow update: if isAdmin() || (
+        isAuthenticated() && (
+          // Resellers can update their own clients
+          (isReseller() && resource.data.belongsToReseller == request.auth.uid && request.resource.data.belongsToReseller == request.auth.uid) ||
+          // Resellers can update their own eventsCreated count
+          (request.auth.uid == userId && isReseller() && 
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['eventsCreated']))
+        )
+      );
+
+      allow delete: if isAdmin() || (
+        isReseller() && 
+        resource.data.belongsToReseller == request.auth.uid
+      );
+    }
+
+    match /events/{eventId} {
+      // Events are publicly readable so guests can view the guestbook
+      allow read: if true;
+      
+      // Admins or Resellers with quota can create events
+      allow create: if isAdmin() || (isReseller() && canResellerCreateEvent());
+      
+      // Admins or the event owner (client or reseller) can update event details
+      allow update: if isAdmin() || isEventOwner(resource.data);
+      
+      // Only admins can delete events
+      allow delete: if isAdmin();
+    }
+
+    match /guests/{guestId} {
+      // Guest entries are publicly readable
+      allow read: if true;
+      
+      // Anyone can sign the guestbook
+      allow create: if true;
+      
+      // Admins, event owner, or event staff can update/delete guest entries
+      allow update, delete: if isAdmin() || 
+                             isEventOwner(get(/databases/$(database)/documents/events/$(resource.data.eventId)).data) ||
+                             isEventStaff(resource.data.eventId);
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

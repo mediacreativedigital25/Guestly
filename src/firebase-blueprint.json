@@ -1,0 +1,57 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System user (Admin or Client).",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "client"] },
+        "eventId": { "type": "string" }
+      },
+      "required": ["email", "role"]
+    },
+    "Event": {
+      "title": "Event",
+      "description": "A wedding or special event managed by a client.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "location": { "type": "string" },
+        "clientUid": { "type": "string" },
+        "subscriptionStatus": { "type": "string", "enum": ["active", "expired"] },
+        "slug": { "type": "string" }
+      },
+      "required": ["title", "date", "location", "clientUid", "subscriptionStatus", "slug"]
+    },
+    "GuestEntry": {
+      "title": "Guest Entry",
+      "description": "A message left by a guest.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "message": { "type": "string" },
+        "reply": { "type": "string" },
+        "attendance": { "type": "string", "enum": ["hadir", "tidak_hadir", "ragu_ragu"] },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "eventId": { "type": "string" }
+      },
+      "required": ["name", "message", "attendance", "timestamp", "eventId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and roles."
+    },
+    "/events/{eventId}": {
+      "schema": "Event",
+      "description": "Event details."
+    },
+    "/guests/{guestId}": {
+      "schema": "GuestEntry",
+      "description": "Guestbook entries."
+    }
+  }
+}

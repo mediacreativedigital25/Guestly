@@ -1,0 +1,5 @@
+{
+  "name": "Guestly",
+  "description": "Layanan buku tamu digital modern untuk undangan pernikahan dan acara spesial.<br> V1.0",
+  "requestFramePermissions": ["camera"]
+}
