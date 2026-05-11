@@ -1,59 +1,78 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
+export type Role = 'superadmin' | 'partner' | 'client';
 
-export type AttendanceStatus = 'hadir' | 'tidak_hadir' | 'ragu_ragu';
-export type UserRole = 'admin' | 'client' | 'guest' | 'reseller' | 'staff';
+export interface User {
+  id?: string;
+  role: Role;
+  name: string;
+  email: string;
+  partnerId: string | null;
+  clientId: string | null;
+  businessName?: string;
+  logoUrl?: string;
+  phone?: string;
+  createdAt: any;
+  updatedAt: any;
+}
 
-export type PackageTier = 'trial' | 'lite' | 'standard' | 'pro';
-
-export interface GuestEntry {
+export interface Partner {
   id?: string;
   name: string;
-  message: string;
-  reply?: string;
-  attendance: AttendanceStatus;
-  timestamp: any;
-  eventId: string;
-  souvenirClaimed?: boolean;
-  souvenirType?: string;
-  checkInTime?: any;
+  logoUrl: string;
+  brandColor: string;
+  fontFamily?: string;
+  createdAt: any;
+  updatedAt: any;
 }
 
-export interface EventDetails {
-  id: string;
-  title: string;
-  date: string;
-  location: string;
-  coverImage?: string;
-  clientUid: string;
-  clientEmail?: string;
-  resellerUid?: string;
-  subscriptionStatus: 'active' | 'expired';
-  slug: string;
-  maxGuests: number;
-  maxStaff: number;
-  maxSouvenirTypes: number;
-  souvenirTypes: string[];
-  activeDays: number;
-  features?: string[];
-  invitationUrl?: string;
-  createdAt?: any;
-}
-
-export interface AppUser {
-  uid: string;
-  email: string;
-  name?: string;
+export interface Client {
+  id?: string;
+  partnerId: string;
+  name: string;
+  contactEmail?: string;
   phone?: string;
-  brandName?: string;
-  brandLogo?: string;
-  password?: string;
-  role: UserRole;
-  eventId?: string;
-  eventQuota?: number;
-  eventsCreated?: number;
-  package?: PackageTier;
-  fonnteToken?: string;
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface EventRecord {
+  id?: string;
+  partnerId: string;
+  clientId: string;
+  title: string;
+  description?: string;
+  date: string;
+  time?: string;
+  location?: string;
+  digitalInviteLink?: string;
+  frameOverlayUrl?: string;
+  guestCategories?: string[];
+  primaryColor?: string;
+  fontFamily?: string;
+  status: 'draft' | 'published' | 'completed';
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface Guest {
+  id?: string;
+  eventId: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  category?: string;
+  ticketCode: string;
+  rsvpStatus: 'pending' | 'attending' | 'declined';
+  attended: boolean;
+  attendedAt?: any;
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface ChangelogEntry {
+  id?: string;
+  version: string;
+  date: string;
+  changes: string[];
+  createdAt: any;
 }

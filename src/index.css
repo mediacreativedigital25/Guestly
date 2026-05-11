@@ -1,57 +1,40 @@
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-serif: "Cormorant Garamond", serif;
-  --font-sans: "Inter", sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   
-  --color-olive: #5A5A40;
-  --color-cream: #f5f5f0;
+  /* Brand Theme Overrides */
+  --color-indigo-50: #f5eff5; /* Soft background */
+  --color-indigo-100: #D8C7F3; /* Secondary Lavender Pastel */
+  --color-indigo-500: #C98F9D; /* Accent Rose Gold */
+  --color-indigo-600: #E7B8C4; /* Primary Soft Rose Pink */
+  --color-indigo-700: #C98F9D; /* Accent Rose Gold for hover */
+  --color-indigo-800: #b07080;
+  
+  --color-gray-50: #FAF8FB; /* Background Soft White */
+  --color-gray-100: #f2eef5; 
+  --color-gray-200: #e6dfec;
+  --color-gray-300: #D8C7F3; /* Secondary Lavender Pastel */
+  --color-gray-400: #b5a4ce;
+  --color-gray-500: #9382ab;
+  --color-gray-600: #74638a;
+  --color-gray-700: #5B4B63; /* Text Dark Elegant Plum */
+  --color-gray-800: #493b50;
+  --color-gray-900: #5B4B63; /* Text Dark Elegant Plum */
 }
 
-body {
-  font-family: var(--font-serif);
-  background-color: var(--color-cream);
-  color: #1a1a1a;
-}
-
-/* html5-qrcode styling */
-#reader {
-  border: none !important;
-}
-
-#reader__scan_region {
-  background: white !important;
-}
-
-#reader__dashboard_section_csr button {
-  background-color: #5A5A40 !important;
-  color: white !important;
-  border-radius: 12px !important;
-  padding: 8px 16px !important;
-  font-size: 12px !important;
-  font-weight: 600 !important;
-  border: none !important;
-  cursor: pointer !important;
-  transition: all 0.2s !important;
-  margin: 5px !important;
-}
-
-#reader__dashboard_section_csr button:hover {
-  opacity: 0.9 !important;
-  transform: translateY(-1px) !important;
-}
-
-#reader__dashboard_section_csr select {
-  padding: 8px !important;
-  border-radius: 12px !important;
-  border: 1px solid rgba(90, 90, 64, 0.2) !important;
-  font-size: 12px !important;
-  margin: 5px !important;
-}
-
-#reader__status_span {
-  font-size: 12px !important;
-  color: #5A5A40 !important;
-  font-weight: 500 !important;
+@layer base {
+  body {
+    @apply font-sans antialiased text-gray-900 bg-gray-50 leading-[1.5] text-[14px];
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply leading-[1.2];
+  }
+  input, select, textarea {
+    @apply text-[14px] leading-[1.5];
+  }
+  button {
+    @apply text-[14px] leading-[1.5];
+  }
 }

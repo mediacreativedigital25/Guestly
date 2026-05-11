@@ -1,64 +1,125 @@
 {
   "entities": {
-    "users": {
+    "User": {
       "title": "User",
-      "description": "Application users with roles and quotas.",
+      "description": "System users including Super Admins, Partners, and Clients.",
       "type": "object",
       "properties": {
-        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "role": { "type": "string", "enum": ["superadmin", "partner", "client"] },
+        "name": { "type": "string" },
         "email": { "type": "string", "format": "email" },
-        "role": { "type": "string", "enum": ["admin", "client", "guest", "reseller"] },
-        "eventId": { "type": "string", "description": "Associated event ID for clients" },
-        "eventQuota": { "type": "number", "description": "Max events a reseller can create" },
-        "eventsCreated": { "type": "number", "description": "Number of events created by reseller" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "partnerId": { "type": "string", "description": "Null for superadmins, ID reference for partners/clients" },
+        "clientId": { "type": "string", "description": "Null for superadmins/partners, ID reference for clients" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["uid", "email", "role", "createdAt"]
+      "required": ["role", "name", "email", "createdAt", "updatedAt"]
     },
-    "events": {
-      "title": "Event",
-      "description": "Wedding or event details.",
-      "type": "object",
-      "properties": {
-        "title": { "type": "string" },
-        "date": { "type": "string", "format": "date" },
-        "location": { "type": "string" },
-        "slug": { "type": "string", "description": "URL slug for the event" },
-        "clientUid": { "type": "string", "description": "UID of the event owner" },
-        "resellerUid": { "type": "string", "description": "UID of the reseller who created this" },
-        "clientEmail": { "type": "string" },
-        "isActive": { "type": "boolean" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["title", "date", "location", "slug", "clientUid", "clientEmail", "isActive", "createdAt"]
-    },
-    "guests": {
-      "title": "Guest Entry",
-      "description": "Guestbook messages and attendance.",
+    "Partner": {
+      "title": "Partner",
+      "description": "White-label partner configurations.",
       "type": "object",
       "properties": {
         "name": { "type": "string" },
-        "attendance": { "type": "string", "enum": ["hadir", "tidak_hadir", "ragu_ragu"] },
-        "message": { "type": "string" },
-        "eventId": { "type": "string" },
-        "timestamp": { "type": "string", "format": "date-time" },
-        "reply": { "type": "string" }
+        "logoUrl": { "type": "string" },
+        "brandColor": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["name", "attendance", "message", "eventId", "timestamp"]
+      "required": ["name", "createdAt", "updatedAt"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Clients belonging to partners.",
+      "type": "object",
+      "properties": {
+        "partnerId": { "type": "string" },
+        "name": { "type": "string" },
+        "contactEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["partnerId", "name", "createdAt", "updatedAt"]
+    },
+    "Event": {
+      "title": "Event",
+      "description": "An event managed by a partner.",
+      "type": "object",
+      "properties": {
+        "partnerId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "time": { "type": "string" },
+        "location": { "type": "string" },
+        "frameOverlayUrl": { "type": "string" },
+        "guestCategories": { "type": "array", "items": { "type": "string" } },
+        "primaryColor": { "type": "string" },
+        "fontFamily": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "published", "completed"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["partnerId", "clientId", "title", "date", "status", "createdAt", "updatedAt"]
+    },
+    "Guest": {
+      "title": "Guest",
+      "description": "A guest invited to an event.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "category": { "type": "string" },
+        "ticketCode": { "type": "string" },
+        "rsvpStatus": { "type": "string", "enum": ["pending", "attending", "declined"] },
+        "attended": { "type": "boolean" },
+        "attendedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "name", "ticketCode", "rsvpStatus", "attended", "createdAt", "updatedAt"]
+    },
+    "ChangelogEntry": {
+      "title": "Changelog Entry",
+      "description": "System updates.",
+      "type": "object",
+      "properties": {
+        "version": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "changes": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["version", "date", "changes", "createdAt"]
     }
   },
   "firestore": {
-    "/users/{uid}": {
-      "schema": "users",
-      "description": "User profiles"
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles and roles."
     },
-    "/events/{eventId}": {
-      "schema": "events",
-      "description": "Event details"
+    "partners/{partnerId}": {
+      "schema": { "$ref": "#/entities/Partner" },
+      "description": "Stores partner branding."
     },
-    "/guests/{guestId}": {
-      "schema": "guests",
-      "description": "Guestbook entries"
+    "clients/{clientId}": {
+      "schema": { "$ref": "#/entities/Client" },
+      "description": "Stores client details."
+    },
+    "events/{eventId}": {
+      "schema": { "$ref": "#/entities/Event" },
+      "description": "Stores event details."
+    },
+    "guests/{guestId}": {
+      "schema": { "$ref": "#/entities/Guest" },
+      "description": "Stores guest list and RSVPs. Could also be a subcollection events/{eventId}/guests/{guestId} but flat is often easier if we query by ticketCode."
+    },
+    "changelog/{entryId}": {
+      "schema": { "$ref": "#/entities/ChangelogEntry" },
+      "description": "System changelog."
     }
   }
 }
