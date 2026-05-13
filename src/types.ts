@@ -10,6 +10,9 @@ export interface User {
   businessName?: string;
   logoUrl?: string;
   phone?: string;
+  eventQuota?: number;
+  clientQuota?: number;
+  guestQuota?: number;
   createdAt: any;
   updatedAt: any;
 }
@@ -49,6 +52,9 @@ export interface EventRecord {
   primaryColor?: string;
   fontFamily?: string;
   status: 'draft' | 'published' | 'completed';
+  activeUntil?: string;
+  eventQuota?: number;
+  guestQuota?: number;
   createdAt: any;
   updatedAt: any;
 }
@@ -65,6 +71,23 @@ export interface Guest {
   rsvpStatus: 'pending' | 'attending' | 'declined';
   attended: boolean;
   attendedAt?: any;
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface GuestlyService {
+  id?: string;
+  name: string;
+  description: string;
+  type: 'package' | 'addon';
+  targetRole: 'client' | 'partner' | 'all';
+  activePeriodDays?: number;
+  eventQuota?: number;
+  clientQuota?: number;
+  guestQuota?: number;
+  price: number;
+  normalPrice?: number;
+  isActive: boolean;
   createdAt: any;
   updatedAt: any;
 }

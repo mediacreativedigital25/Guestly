@@ -21,25 +21,25 @@ service cloud.firestore {
       return isSignedIn() && (
         request.auth.token.email == '64.iklas@gmail.com' ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'superadmin')
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'none') == 'superadmin')
       );
     }
 
     function getAssociatedPartnerId(uid) {
        let u = exists(/databases/$(database)/documents/users/$(uid)) ? get(/databases/$(database)/documents/users/$(uid)).data : null;
-       return u != null ? (u.role == 'partner' ? uid : u.partnerId) : null;
+       return u != null ? (u.get('role', 'none') == 'partner' ? uid : u.get('partnerId', null)) : null;
     }
 
     function isPartnerUser(partnerId) {
       return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
         && getAssociatedPartnerId(request.auth.uid) == partnerId
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'partner';
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'none') == 'partner';
     }
 
     function isClientUser(clientId) {
       return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.clientId == clientId
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'client';
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('clientId', 'none') == clientId
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'none') == 'client';
     }
 
     function isAppAdmin() {
@@ -49,13 +49,19 @@ service cloud.firestore {
     // --- Validation Helpers ---
 
     function isValidUser(data) {
-      return data.size() >= 5 && data.size() <= 7 &&
+      return data.size() >= 5 && data.size() <= 13 &&
         data.keys().hasAll(['role', 'name', 'email', 'createdAt', 'updatedAt']) &&
         data.role is string && (data.role == 'superadmin' || data.role == 'partner' || data.role == 'client') &&
         data.name is string && data.name.size() <= 150 &&
         data.email is string && data.email.size() <= 200 &&
         (!('partnerId' in data) || data.partnerId == null || (data.partnerId is string && data.partnerId.size() <= 128)) &&
         (!('clientId' in data) || data.clientId == null || (data.clientId is string && data.clientId.size() <= 128)) &&
+        (!('businessName' in data) || data.businessName == null || (data.businessName is string && data.businessName.size() <= 150)) &&
+        (!('logoUrl' in data) || data.logoUrl == null || (data.logoUrl is string && data.logoUrl.size() <= 1000)) &&
+        (!('phone' in data) || data.phone == null || (data.phone is string && data.phone.size() <= 20)) &&
+        (!('eventQuota' in data) || data.eventQuota == null || (data.eventQuota is number && data.eventQuota >= 0)) &&
+        (!('clientQuota' in data) || data.clientQuota == null || (data.clientQuota is number && data.clientQuota >= 0)) &&
+        (!('guestQuota' in data) || data.guestQuota == null || (data.guestQuota is number && data.guestQuota >= 0)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -119,6 +125,38 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidService(data) {
+      return data.size() >= 8 && data.size() <= 13 &&
+        data.keys().hasAll(['name', 'description', 'type', 'targetRole', 'price', 'isActive', 'createdAt', 'updatedAt']) &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 150 &&
+        data.description is string && data.description.size() <= 1000 &&
+        data.type is string && (data.type == 'package' || data.type == 'addon') &&
+        data.targetRole is string && (data.targetRole == 'client' || data.targetRole == 'partner' || data.targetRole == 'all') &&
+        data.price is number && data.price >= 0 &&
+        (!('normalPrice' in data) || data.normalPrice == null || (data.normalPrice is number && data.normalPrice >= 0)) &&
+        data.isActive is bool &&
+        (!('activePeriodDays' in data) || data.activePeriodDays == null || (data.activePeriodDays is number && data.activePeriodDays >= 0)) &&
+        (!('eventTokens' in data) || data.eventTokens == null || (data.eventTokens is number && data.eventTokens >= 0)) &&
+        (!('eventQuota' in data) || data.eventQuota == null || (data.eventQuota is number && data.eventQuota >= 0)) &&
+        (!('guestQuota' in data) || data.guestQuota == null || (data.guestQuota is number && data.guestQuota >= 0)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidInvoice(data) {
+      return data.size() >= 7 && data.size() <= 10 &&
+        data.keys().hasAll(['userId', 'serviceId', 'serviceName', 'amount', 'status', 'createdAt', 'updatedAt']) &&
+        data.userId is string && data.userId.size() <= 128 &&
+        (!('userName' in data) || data.userName == null || (data.userName is string && data.userName.size() <= 200)) &&
+        data.serviceId is string && data.serviceId.size() <= 128 &&
+        data.serviceName is string && data.serviceName.size() <= 150 &&
+        data.amount is number && data.amount >= 0 &&
+        data.status is string && (data.status == 'pending' || data.status == 'paid' || data.status == 'cancelled') &&
+        (!('paymentMethod' in data) || data.paymentMethod == null || (data.paymentMethod is string && data.paymentMethod.size() <= 100)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     function isValidChangelog(data) {
       return data.size() == 4 &&
         data.keys().hasAll(['version', 'date', 'changes', 'createdAt']) &&
@@ -127,6 +165,12 @@ service cloud.firestore {
         data.changes is list && data.changes.size() <= 20 &&
         (data.changes.size() == 0 || (data.changes[0] is string && data.changes[0].size() <= 500)) &&
         data.createdAt is timestamp;
+    }
+
+    function isValidCounter(data) {
+      return data.size() == 1 &&
+        data.keys().hasAll(['seq']) &&
+        data.seq is number && data.seq > 0;
     }
 
     // --- Collections ---
@@ -141,7 +185,9 @@ service cloud.firestore {
          (isPartnerUser(incoming().partnerId) && incoming().role == 'client')
         );
       allow update: if isValidId(userId) && isSignedIn() && isValidUser(incoming()) && incoming().updatedAt == request.time &&
-        (isSuperAdmin() || (request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'updatedAt'])));
+        (isSuperAdmin() || (request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'updatedAt', 'eventQuota', 'clientQuota']) &&
+        (incoming().get('eventQuota', 0) <= existing().get('eventQuota', 0)) &&
+        (incoming().get('clientQuota', 0) <= existing().get('clientQuota', 0))));
       allow delete: if isValidId(userId) && isSuperAdmin();
     }
 
@@ -196,9 +242,34 @@ service cloud.firestore {
       allow create, update, delete: if isSuperAdmin();
     }
 
+    match /services/{serviceId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSuperAdmin() && isValidService(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isSuperAdmin() && isValidId(serviceId) && isValidService(incoming()) && incoming().updatedAt == request.time;
+      allow delete: if isSuperAdmin() && isValidId(serviceId);
+    }
+
     match /settings/{docId} {
       allow get, list: if true;
       allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /invoices/{invoiceId} {
+      allow get, list: if isSignedIn() && (isSuperAdmin() || existing().get('userId', 'none') == request.auth.uid);
+      allow create: if isSignedIn() && isValidInvoice(incoming()) && incoming().userId == request.auth.uid && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(invoiceId) && isValidInvoice(incoming()) && incoming().updatedAt == request.time && incoming().userId == existing().userId &&
+        (
+          isSuperAdmin()
+          ||
+          (isSignedIn() && incoming().userId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentMethod', 'updatedAt']))
+        );
+      allow delete: if isSuperAdmin() && isValidId(invoiceId);
+    }
+
+    match /counters/{counterId} {
+      allow get: if isSignedIn();
+      allow create: if isSignedIn() && isValidCounter(incoming()) && incoming().seq == 1;
+      allow update: if isSignedIn() && isValidCounter(incoming()) && incoming().seq == existing().seq + 1;
     }
   }
 }

@@ -94,6 +94,31 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["version", "date", "changes", "createdAt"]
+    },
+    "Counter": {
+      "title": "Counter",
+      "description": "System counters for auto-incrementing IDs.",
+      "type": "object",
+      "properties": {
+        "seq": { "type": "number" }
+      },
+      "required": ["seq"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Invoice for a service purchase.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "serviceId": { "type": "string" },
+        "serviceName": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "paid", "cancelled"] },
+        "paymentMethod": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "serviceId", "serviceName", "amount", "status", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -120,6 +145,14 @@
     "changelog/{entryId}": {
       "schema": { "$ref": "#/entities/ChangelogEntry" },
       "description": "System changelog."
+    },
+    "invoices/{invoiceId}": {
+      "schema": { "$ref": "#/entities/Invoice" },
+      "description": "Stores user invoices for service purchases."
+    },
+    "counters/{counterId}": {
+      "schema": { "$ref": "#/entities/Counter" },
+      "description": "Stores system counters."
     }
   }
 }

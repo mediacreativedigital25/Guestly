@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { useSettings } from './SettingsContext';
-import { LayoutDashboard, Users, CalendarDays, Settings, LogOut, FileText, ChevronDown, ChevronRight, UserCog, Menu, X, Shield, User, Briefcase, CreditCard } from 'lucide-react';
+import { LayoutDashboard, Users, CalendarDays, Settings, LogOut, FileText, ChevronDown, ChevronRight, UserCog, Menu, X, Shield, User, Briefcase, CreditCard, ShoppingBag, Package, Receipt } from 'lucide-react';
 import { cn } from './lib/utils';
 import { loginWithGoogle, auth } from './lib/firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
@@ -14,6 +14,7 @@ export default function AppLayout() {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isPartnerMenuOpen, setIsPartnerMenuOpen] = useState(false);
   const [isAdminPanelMenuOpen, setIsAdminPanelMenuOpen] = useState(false);
+  const [isServiceInfoMenuOpen, setIsServiceInfoMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -178,6 +179,72 @@ export default function AppLayout() {
               {item.name}
             </Link>
           ))}
+
+           {/* Informasi Layanan Dropdown */}
+          <div className="mt-2">
+            <button 
+              onClick={() => setIsServiceInfoMenuOpen(!isServiceInfoMenuOpen)}
+              className="w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                 <ShoppingBag className="h-5 w-5" />
+                 Informasi Layanan
+              </div>
+              {isServiceInfoMenuOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </button>
+            {isServiceInfoMenuOpen && (
+              <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
+                 <Link
+                   to="/services/dashboard"
+                   className={cn(
+                     "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                     location.pathname === '/services/dashboard' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                   )}
+                 >
+                   <div className="flex items-center gap-2">
+                     <ShoppingBag className="h-4 w-4" />
+                     Dashboard
+                   </div>
+                 </Link>
+                 <Link
+                   to="/services/catalog"
+                   className={cn(
+                     "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                     location.pathname === '/services/catalog' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                   )}
+                 >
+                   <div className="flex items-center gap-2">
+                     <Package className="h-4 w-4" />
+                     Layanan
+                   </div>
+                 </Link>
+                 <Link
+                   to="/invoices/my"
+                   className={cn(
+                     "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                     location.pathname === '/invoices/my' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                   )}
+                 >
+                   <div className="flex items-center gap-2">
+                     <Receipt className="h-4 w-4" />
+                     Invoice
+                   </div>
+                 </Link>
+                 <Link
+                   to="/services/my"
+                   className={cn(
+                     "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                     location.pathname === '/services/my' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                   )}
+                 >
+                   <div className="flex items-center gap-2">
+                     <Briefcase className="h-4 w-4" />
+                     Layanan Saya
+                   </div>
+                 </Link>
+              </div>
+            )}
+          </div>
 
           {appUser.role === 'superadmin' && (
              <>

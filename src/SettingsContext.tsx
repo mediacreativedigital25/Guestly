@@ -6,10 +6,17 @@ interface GlobalSettings {
   logoUrl?: string;
   faviconUrl?: string;
   fonnteToken?: string;
+  activePaymentMethod?: 'manual' | 'tripay';
   paymentGateway?: {
     serverKey?: string;
     clientKey?: string;
-  }
+  };
+  manualPayment?: {
+    bankName?: string;
+    accountNumber?: string;
+    accountName?: string;
+    instructions?: string;
+  };
 }
 
 interface SettingsContextType {

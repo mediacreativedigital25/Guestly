@@ -5,6 +5,7 @@ import { User, Role } from '../types';
 import { Shield, Trash2, Edit, Plus } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { Modal } from '../components/Modal';
+import { showAlert, showConfirm } from '../lib/alerts';
 
 export default function UsersList() {
   const [users, setUsers] = useState<User[]>([]);
@@ -40,22 +41,36 @@ export default function UsersList() {
   }, [appUser]);
 
   const handleDelete = async (userId: string) => {
-    if (window.confirm('Yakin ingin menghapus pengguna ini?')) {
+    const confirmed = await showConfirm('Yakin ingin menghapus pengguna ini?');
+    if (confirmed) {
       try {
         await deleteDoc(doc(db, 'users', userId));
         setUsers(users.filter(u => u.id !== userId));
+        showAlert('Berhasil', 'Pengguna berhasil dihapus!', 'success');
       } catch (error) {
         console.error('Error deleting user:', error);
+        showAlert('Gagal', 'Gagal menghapus pengguna.', 'error');
       }
     }
   };
 
   const handleRoleChange = async (userId: string, newRole: string) => {
+    const confirmed = await showConfirm('Yakin ingin mengubah role pengguna ini?');
+    if (!confirmed) {
+      // Revert select visually if possible, or just let React handle it.
+      // Better to fetch again, but for now we rely on the state not changing if canceled.
+      // Easiest is just trigger a re-render by doing setUsers([...users]) to revert select visually
+      setUsers([...users]);
+      return;
+    }
+    
     try {
       await updateDoc(doc(db, 'users', userId), { role: newRole });
       setUsers(users.map(u => u.id === userId ? { ...u, role: newRole as any } : u));
+      showAlert('Berhasil', 'Role berhasil diperbarui!', 'success');
     } catch (error) {
       console.error('Error updating role:', error);
+      showAlert('Gagal', 'Gagal memperbarui role.', 'error');
     }
   };
 
@@ -95,7 +110,7 @@ export default function UsersList() {
       setNewUserPartnerId('');
       setNewUserClientId('');
       setIsAddingUser(false);
-      alert('User berhasil ditambahkan!');
+      showAlert('Berhasil', 'User berhasil ditambahkan!', 'success');
     } catch (err: any) {
       console.error('Error adding user:', err);
       setError(err.message || 'Gagal menambahkan user');

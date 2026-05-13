@@ -29,11 +29,8 @@ export default function Dashboard() {
         let q = query(eventsRef);
         
         if (appUser?.role === 'partner') {
-          if (!appUser?.partnerId) {
-             setLoading(false);
-             return;
-          }
-          q = query(eventsRef, where('partnerId', '==', appUser.partnerId));
+          const partnerId = appUser.id;
+          q = query(eventsRef, where('partnerId', '==', partnerId));
         } else if (appUser?.role === 'client') {
           if (!appUser?.clientId) {
              setLoading(false);

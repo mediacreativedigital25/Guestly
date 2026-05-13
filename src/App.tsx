@@ -23,6 +23,12 @@ import AdminProfile from './pages/admin/AdminProfile';
 import AdminServices from './pages/admin/AdminServices';
 import AdminInvoice from './pages/admin/AdminInvoice';
 import AdminSettings from './pages/admin/AdminSettings';
+import ServicesCatalog from './pages/services/ServicesCatalog';
+import MyServices from './pages/services/MyServices';
+import ServiceCheckout from './pages/services/ServiceCheckout';
+import MyInvoices from './pages/invoices/MyInvoices';
+
+import ServicesDashboard from './pages/services/ServicesDashboard';
 
 export default function App() {
   return (
@@ -40,6 +46,14 @@ export default function App() {
             <Route path="users" element={<UsersList />} />
             <Route path="roles" element={<RolesSettings />} />
             <Route path="changelog" element={<Changelog />} />
+            
+            {/* Informasi Layanan Routes */}
+            <Route path="services/dashboard" element={<ServicesDashboard />} />
+            <Route path="services/catalog" element={<ServicesCatalog />} />
+            <Route path="services/checkout/:serviceId" element={<ServiceCheckout />} />
+            <Route path="services/my" element={<MyServices />} />
+            <Route path="invoices/my" element={<MyInvoices />} />
+
             <Route path="admin/profile" element={<AdminProfile />} />
             <Route path="admin/services" element={<AdminServices />} />
             <Route path="admin/invoice" element={<AdminInvoice />} />

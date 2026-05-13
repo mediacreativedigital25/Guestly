@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
-import { collection, query, getDocs, where, addDoc, serverTimestamp, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, getDocs, where, addDoc, serverTimestamp, doc, setDoc, deleteDoc, updateDoc, runTransaction } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, createAuthUserSilently } from '../lib/firebase';
 import { Client, User } from '../types';
 import { parseFirestoreDate } from '../lib/utils';
 import { format } from 'date-fns';
 import { Plus, Trash2, Edit, Eye } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { showAlert, showConfirm } from '../lib/alerts';
 
 export default function ClientsList() {
   const { appUser } = useAuth();
+  const navigate = useNavigate();
   const [clients, setClients] = useState<Client[]>([]);
   const [partners, setPartners] = useState<{id: string, name: string, logoUrl?: string}[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,12 +92,15 @@ export default function ClientsList() {
   }, [appUser]);
 
   const handleDeleteClient = async (clientId: string) => {
-    if (window.confirm('Apakah Anda yakin ingin menghapus client ini?')) {
+    const confirmed = await showConfirm('Apakah Anda yakin ingin menghapus client ini?');
+    if (confirmed) {
       try {
         await deleteDoc(doc(db, 'clients', clientId));
         setClients(clients.filter(c => c.id !== clientId));
+        showAlert('Berhasil', 'Client berhasil dihapus!', 'success');
       } catch (error) {
         handleFirestoreError(error, OperationType.DELETE, 'clients');
+        showAlert('Gagal', 'Gagal menghapus client.', 'error');
       }
     }
   };
@@ -103,6 +108,9 @@ export default function ClientsList() {
   const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!appUser) return;
+    
+    const confirmed = await showConfirm('Apakah Anda yakin ingin menambahkan client ini?');
+    if (!confirmed) return;
     
     setIsSubmitting(true);
     setError('');
@@ -126,7 +134,26 @@ export default function ClientsList() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };
-      const docRef = await addDoc(collection(db, 'clients'), clientData);
+      
+      let newDocId = '';
+      await runTransaction(db, async (transaction) => {
+        const userRef = doc(db, 'users', appUser.id!);
+        const userDoc = await transaction.get(userRef);
+        if (!userDoc.exists()) throw new Error("User not found");
+        
+        const currentQuota = userDoc.data().clientQuota || 0;
+        if (appUser.role !== 'superadmin' && currentQuota <= 0) {
+          throw new Error("QUOTA_EXCEEDED");
+        }
+
+        if (appUser.role !== 'superadmin') {
+          transaction.update(userRef, { clientQuota: currentQuota - 1 });
+        }
+
+        const newClientRef = doc(collection(db, 'clients'));
+        newDocId = newClientRef.id;
+        transaction.set(newClientRef, clientData);
+      });
       
       if (createAccount) {
          const uid = await createAuthUserSilently(newClientEmail, newClientPassword);
@@ -135,19 +162,20 @@ export default function ClientsList() {
             email: newClientEmail,
             role: 'client',
             partnerId: partnerId,
-            clientId: docRef.id,
+            clientId: newDocId,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp()
          };
          await setDoc(doc(db, 'users', uid), newUserDoc);
       }
 
-      setClients([...clients, { id: docRef.id, ...clientData } as unknown as Client]);
+      setClients([...clients, { id: newDocId, ...clientData } as unknown as Client]);
       setNewClientName('');
       setNewClientEmail('');
       setCreateAccount(false);
       setNewClientPassword('');
       setIsAddingClient(false);
+      showAlert('Berhasil', 'Client berhasil ditambahkan!', 'success');
     } catch (error: any) {
       console.error(error);
       setError(error.message || 'Terjadi kesalahan saat menambahkan client.');
@@ -172,6 +200,10 @@ export default function ClientsList() {
   const handleUpdateClient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingClient || !editingClient.id) return;
+    
+    const confirmed = await showConfirm('Apakah Anda yakin ingin menyimpan perubahan client ini?');
+    if (!confirmed) return;
+    
     setIsSubmitting(true);
     setError('');
 
@@ -190,6 +222,7 @@ export default function ClientsList() {
       ));
       
       setEditingClient(null);
+      showAlert('Berhasil', 'Client berhasil diperbarui!', 'success');
     } catch (error: any) {
       console.error(error);
       setError(error.message || 'Terjadi kesalahan saat mengupdate client.');
@@ -204,7 +237,14 @@ export default function ClientsList() {
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-900">Clients</h1>
         <button 
-          onClick={() => setIsAddingClient(!isAddingClient)}
+          onClick={() => {
+            if (!isAddingClient && appUser?.role !== 'superadmin' && (!appUser?.clientQuota || appUser.clientQuota <= 0)) {
+               showAlert('Akses Ditolak', 'Anda tidak memiliki kuota klien. Silakan beli layanan terlebih dahulu.', 'warning');
+               navigate('/services/catalog');
+               return;
+            }
+            setIsAddingClient(!isAddingClient)
+          }}
           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium"
         >
           <Plus className="w-4 h-4" />

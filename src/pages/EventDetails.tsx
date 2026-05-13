@@ -12,9 +12,12 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Modal } from '../components/Modal';
+import { useAuth } from '../AuthContext';
+import { showAlert, showConfirm } from '../lib/alerts';
 
 export default function EventDetails() {
   const { eventId } = useParams();
+  const { appUser } = useAuth();
   const [event, setEvent] = useState<EventRecord | null>(null);
   const [guests, setGuests] = useState<Guest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,9 +61,12 @@ export default function EventDetails() {
   const handleAddGuest = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    const confirmed = await showConfirm("Apakah Anda yakin ingin menambahkan tamu ini?");
+    if (!confirmed) return;
+    
     const cleanedGuestName = newGuestName.trim();
     if (guests.some(g => g.name.toLowerCase() === cleanedGuestName.toLowerCase())) {
-      alert(`Info: Tamu dengan nama "${cleanedGuestName}" sudah tersedia di daftar.`);
+      showAlert('Peringatan', `Tamu dengan nama "${cleanedGuestName}" sudah tersedia di daftar.`, 'warning');
       return;
     }
 
@@ -87,8 +93,9 @@ export default function EventDetails() {
       setNewGuestPhone('');
       setNewGuestCategory('');
       setIsAddingGuest(false);
+      showAlert('Berhasil', "Tamu berhasil ditambahkan!", "success");
     } catch (error) {
-      alert("Failed to add guest. Check permissions.");
+      showAlert("Gagal", "Failed to add guest. Check permissions.", "error");
       handleFirestoreError(error, OperationType.CREATE, `events/${eventId}/guests`);
     }
   };
@@ -105,8 +112,9 @@ export default function EventDetails() {
       await deleteDoc(doc(db, 'events', eventId!, 'guests', guestToDelete));
       setGuests(guests.filter(g => g.id !== guestToDelete));
       setGuestToDelete(null);
+      showAlert("Berhasil", "Tamu berhasil dihapus!", "success");
     } catch (error) {
-       alert("Gagal menghapus tamu");
+       showAlert("Gagal", "Gagal menghapus tamu", "error");
        handleFirestoreError(error, OperationType.DELETE, `events/${eventId}/guests/${guestToDelete}`);
        setGuestToDelete(null);
     }
@@ -114,19 +122,27 @@ export default function EventDetails() {
 
   const handleStatusChange = async (newStatus: string) => {
     if (!eventId || !event) return;
+    
+    const confirmed = await showConfirm(`Apakah Anda yakin ingin mengubah status acara menjadi ${newStatus}?`);
+    if (!confirmed) return;
+    
     try {
       await updateDoc(doc(db, 'events', eventId), {
         status: newStatus,
         updatedAt: serverTimestamp()
       });
       setEvent({ ...event, status: newStatus as any });
+      showAlert("Berhasil", "Status acara berhasil diubah!", "success");
     } catch (error) {
-      alert("Gagal mengubah status acara");
+      showAlert("Gagal", "Gagal mengubah status acara", "error");
       handleFirestoreError(error, OperationType.UPDATE, `events/${eventId}`);
     }
   };
 
   const handleToggleAttendance = async (guestId: string, currentStatus: boolean) => {
+    const confirmed = await showConfirm(`Apakah Anda yakin ingin ${currentStatus ? 'membatalkan' : 'mengonfirmasi'} kehadiran tamu ini?`);
+    if (!confirmed) return;
+
     try {
       const newStatus = !currentStatus;
       const updateData: any = {
@@ -143,8 +159,9 @@ export default function EventDetails() {
       await updateDoc(doc(db, 'events', eventId!, 'guests', guestId), updateData);
       
       setGuests(guests.map(g => g.id === guestId ? { ...g, attended: newStatus } : g));
+      showAlert('Berhasil', `Status kehadiran berhasil ${newStatus ? 'dikonfirmasi' : 'dibatalkan'}!`, 'success');
     } catch (error) {
-      alert("Gagal memperbarui status kehadiran");
+      showAlert('Gagal', "Gagal memperbarui status kehadiran", 'error');
       handleFirestoreError(error, OperationType.UPDATE, `events/${eventId}/guests/${guestId}`);
     }
   };
@@ -315,17 +332,17 @@ export default function EventDetails() {
               const duplicatesList = duplicateNames.slice(0, 10).join(', ') + (duplicateNames.length > 10 ? ` dan ${duplicateNames.length - 10} lainnya` : '');
               msg += `\n\nInfo: Data tamu berikut sudah tersedia (duplikat nama diabaikan):\n${duplicatesList}`;
           }
-          alert(msg);
+          showAlert('Info Import', msg, 'info');
           if (addedCount > 0) {
               setGuests(prev => [...prev, ...newGuests]);
           }
         } else {
-          alert('Tidak ada data tamu yang valid untuk diimpor. Pastikan ada baris "Nama Tamu".');
+          showAlert('Peringatan', 'Tidak ada data tamu yang valid untuk diimpor. Pastikan ada baris "Nama Tamu".', 'warning');
         }
 
       } catch (error) {
         console.error(error);
-        alert('Terjadi kesalahan saat mengimpor file Excel.');
+        showAlert('Error', 'Terjadi kesalahan saat mengimpor file Excel.', 'error');
       }
     };
     reader.readAsBinaryString(file);
@@ -367,15 +384,17 @@ export default function EventDetails() {
                }`}>
                  {event.status}
                </span>
-               <select 
-                  value={event.status}
-                  onChange={(e) => handleStatusChange(e.target.value)}
-                  className="block text-sm border-gray-300 rounded-md py-1 pl-3 pr-8 focus:ring-indigo-500 focus:border-indigo-500"
-               >
-                  <option value="draft">Draft</option>
-                  <option value="published">Published</option>
-                  <option value="completed">Completed</option>
-               </select>
+               {appUser?.role !== 'client' && (
+                 <select 
+                    value={event.status}
+                    onChange={(e) => handleStatusChange(e.target.value)}
+                    className="block text-sm border-gray-300 rounded-md py-1 pl-3 pr-8 focus:ring-indigo-500 focus:border-indigo-500"
+                 >
+                    <option value="draft">Draft</option>
+                    <option value="published">Published</option>
+                    <option value="completed">Completed</option>
+                 </select>
+               )}
              </div>
            )}
         </div>
@@ -429,10 +448,10 @@ export default function EventDetails() {
       </div>
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        <div className="px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-100 bg-gray-50 gap-4">
-          <div className="flex items-center gap-4">
-            <h2 className="text-lg font-medium text-gray-900">Guest List ({filteredGuests.length})</h2>
-            <div className="relative">
+        <div className="px-4 sm:px-6 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-gray-100 bg-gray-50 gap-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
+            <h2 className="text-lg font-medium text-gray-900 whitespace-nowrap">Guest List ({filteredGuests.length})</h2>
+            <div className="relative w-full sm:w-64">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-4 w-4 text-gray-400" />
               </div>
@@ -441,11 +460,11 @@ export default function EventDetails() {
                 placeholder="Cari nama atau tiket..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="block w-full pl-10 pr-3 py-1.5 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
+                className="block w-full pl-10 pr-3 py-2 sm:py-1.5 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
               />
             </div>
           </div>
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
             <input 
               type="file" 
               ref={fileInputRef} 
@@ -455,35 +474,35 @@ export default function EventDetails() {
             />
             <button 
               onClick={handleDownloadTemplate}
-              className="text-sm text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-colors whitespace-nowrap"
+              className="flex-1 sm:flex-none justify-center text-sm text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-md transition-colors whitespace-nowrap"
               title="Download Template"
             >
               <DownloadIcon className="w-4 h-4 text-gray-500" /> Template
             </button>
             <button 
               onClick={handleImportClick}
-              className="text-sm text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-colors whitespace-nowrap"
+              className="flex-1 sm:flex-none justify-center text-sm text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-md transition-colors whitespace-nowrap"
               title="Import Excel"
             >
               <FileSpreadsheet className="w-4 h-4 text-green-600"/> Import
             </button>
             <button 
               onClick={handleExportPDF}
-              className="text-sm text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-colors whitespace-nowrap"
+              className="flex-1 sm:flex-none justify-center text-sm text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-md transition-colors whitespace-nowrap"
               title="Export PDF"
             >
               <FileText className="w-4 h-4 text-red-500"/> PDF
             </button>
             <button 
               onClick={handleExportExcel}
-              className="text-sm text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-colors whitespace-nowrap"
+              className="flex-1 sm:flex-none justify-center text-sm text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-md transition-colors whitespace-nowrap"
               title="Export Excel"
             >
               <FileSpreadsheet className="w-4 h-4 text-green-600"/> Excel
             </button>
             <button 
               onClick={() => setIsAddingGuest(!isAddingGuest)}
-              className="text-sm text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1.5 bg-indigo-50 px-3 py-1.5 rounded-md hover:bg-indigo-100 transition-colors whitespace-nowrap"
+              className="flex-1 sm:flex-none justify-center text-sm text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1.5 bg-indigo-50 px-3 py-2 sm:py-1.5 rounded-md hover:bg-indigo-100 transition-colors whitespace-nowrap lg:ml-2"
             >
               <Plus className="w-4 h-4"/> {isAddingGuest ? 'Batal' : 'Tambah Tamu'}
             </button>
@@ -599,7 +618,7 @@ export default function EventDetails() {
                              <QrCode className="w-4 h-4" />
                            </button>
                            <button 
-                               onClick={() => alert("Edit tamu not fully implemented yet.")} 
+                               onClick={() => showAlert('Info', "Edit tamu not fully implemented yet.", 'info')} 
                                className="text-blue-600 hover:text-blue-900 flex items-center justify-center p-1.5 rounded-full hover:bg-blue-50 transition-colors" 
                                title="Edit Tamu"
                            >
@@ -675,7 +694,7 @@ export default function EventDetails() {
                 <button 
                   onClick={() => {
                     navigator.clipboard.writeText(generateShareLink(activeQrGuest));
-                    alert('Link berhasil disalin!');
+                    showAlert('Berhasil', 'Link berhasil disalin!', 'success');
                   }}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-gray-700 bg-gray-100 font-medium rounded-lg hover:bg-gray-200 transition-colors"
                 >

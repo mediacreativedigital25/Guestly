@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
-import { collection, query, getDocs, where, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, deleteField } from 'firebase/firestore';
+import { collection, query, getDocs, where, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, deleteField, runTransaction } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { EventRecord, Client } from '../types';
 import { parseFirestoreDate } from '../lib/utils';
@@ -8,6 +8,7 @@ import { format } from 'date-fns';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Image as ImageIcon, Trash2, Edit, ScanLine, Eye } from 'lucide-react';
 import { Modal } from '../components/Modal';
+import { showAlert, showConfirm } from '../lib/alerts';
 
 export default function EventsList() {
   const { appUser } = useAuth();
@@ -44,6 +45,11 @@ export default function EventsList() {
   };
 
   const openCreateModal = () => {
+    if (appUser?.role !== 'superadmin' && (!appUser?.eventQuota || appUser.eventQuota <= 0)) {
+       showAlert('Akses Ditolak', 'Anda tidak memiliki kuota acara. Silakan beli layanan terlebih dahulu.', 'warning');
+       navigate('/services/catalog');
+       return;
+    }
     resetForm();
     setIsCreating(true);
   };
@@ -74,12 +80,9 @@ export default function EventsList() {
         let cQuery = query(clientsRef);
         
         if (appUser?.role === 'partner') {
-          if (!appUser?.partnerId) {
-            setEvents([]);
-            return;
-          }
-          q = query(eventsRef, where('partnerId', '==', appUser.partnerId));
-          cQuery = query(clientsRef, where('partnerId', '==', appUser.partnerId));
+          const partnerId = appUser.id;
+          q = query(eventsRef, where('partnerId', '==', partnerId));
+          cQuery = query(clientsRef, where('partnerId', '==', partnerId));
         } else if (appUser?.role === 'client') {
           if (!appUser?.clientId) {
             setEvents([]);
@@ -121,11 +124,15 @@ export default function EventsList() {
   const handleSaveEvent = async () => {
     if (!appUser) return;
     if (!newEventTitle || !newEventDate || !newEventClientId) {
-      alert("Nama acara, tanggal, dan client wajib diisi.");
+      showAlert('Peringatan', 'Nama acara, tanggal, dan client wajib diisi.', 'warning');
       return;
     }
     
-    const partnerId = appUser.partnerId || 'default-partner'; 
+    const confirmed = await showConfirm('Apakah Anda yakin ingin menyimpan acara ini?');
+    if (!confirmed) return;
+    
+    const selectedClient = clients.find(c => c.id === newEventClientId);
+    const partnerId = selectedClient?.partnerId || (appUser.role === 'partner' ? appUser.id : (appUser.partnerId || 'default-partner'));
     
     try {
       const payload: any = {
@@ -157,15 +164,36 @@ export default function EventsList() {
           ev.id === editingEventId ? { ...ev, ...payload, updatedAt: new Date() } : ev
         ));
         setIsCreating(false);
+        showAlert('Berhasil', 'Acara berhasil diperbarui!', 'success');
       } else {
         payload.status = 'draft';
         payload.partnerId = partnerId;
         payload.createdAt = serverTimestamp();
-        const docRef = await addDoc(collection(db, 'events'), payload);
-        navigate(`/events/${docRef.id}`);
+        let newDocId = '';
+        await runTransaction(db, async (transaction) => {
+          const userRef = doc(db, 'users', appUser.id!);
+          const userDoc = await transaction.get(userRef);
+          if (!userDoc.exists()) throw new Error("User not found");
+          
+          const currentQuota = userDoc.data().eventQuota || 0;
+          if (appUser.role !== 'superadmin' && currentQuota <= 0) {
+            throw new Error("QUOTA_EXCEEDED");
+          }
+
+          if (appUser.role !== 'superadmin') {
+            transaction.update(userRef, { eventQuota: currentQuota - 1 });
+          }
+
+          const newEventRef = doc(collection(db, 'events'));
+          newDocId = newEventRef.id;
+          transaction.set(newEventRef, payload);
+        });
+        
+        showAlert('Berhasil', 'Acara berhasil dibuat!', 'success');
+        navigate(`/events/${newDocId}`);
       }
     } catch (error) {
-      alert("Failed to save event. Pastikan Anda memiliki pengaturan yang valid.");
+      showAlert('Gagal', 'Failed to save event. Pastikan Anda memiliki pengaturan yang valid.', 'error');
       handleFirestoreError(error, editingEventId ? OperationType.UPDATE : OperationType.CREATE, editingEventId ? `events/${editingEventId}` : 'events');
     }
   };
@@ -189,9 +217,11 @@ export default function EventsList() {
       await deleteDoc(doc(db, 'events', eventToDelete));
       setEvents(events.filter(event => event.id !== eventToDelete));
       setEventToDelete(null);
+      showAlert('Berhasil', 'Acara berhasil dihapus!', 'success');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `events/${eventToDelete}`);
       setEventToDelete(null);
+      showAlert('Gagal', 'Gagal menghapus acara.', 'error');
     }
   };
 
