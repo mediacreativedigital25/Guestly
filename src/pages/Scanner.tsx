@@ -124,9 +124,9 @@ export default function Scanner() {
       )}
 
       {scanMode === 'camera' && (
-          <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-            <div id="reader" width="600px" className="mx-auto"></div>
-            <p className="text-center text-gray-500 text-sm mt-4">Arahkan kamera ke QRCode untuk memindai tiket.</p>
+          <div className="bg-white p-2 sm:p-4 rounded-lg shadow-sm border border-gray-200 overflow-hidden w-full">
+            <div id="reader" className="w-full max-w-sm sm:max-w-md mx-auto aspect-square overflow-hidden [&>video]:object-cover"></div>
+            <p className="text-center text-gray-500 text-xs sm:text-sm mt-4">Arahkan kamera ke QRCode untuk memindai tiket.</p>
           </div>
       )}
 

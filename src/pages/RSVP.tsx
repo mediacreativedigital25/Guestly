@@ -13,26 +13,21 @@ export default function RSVP() {
   const [eventData, setEventData] = useState<EventRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [wishesInput, setWishesInput] = useState('');
 
   useEffect(() => {
     const fetchRSVP = async () => {
       try {
-        // We aren't signed in necessarily, so this relies on firestore rules allowing querying by ticketCode
         const guestsRef = collection(db, 'events', eventId!, 'guests');
         const q = query(guestsRef, where('ticketCode', '==', ticketCode));
         const snapshot = await getDocs(q);
         
         if (!snapshot.empty) {
-          const guestDoc = snapshot.docs[0];
-          setGuest({ id: guestDoc.id, ...guestDoc.data() } as Guest);
+           const guestDoc = snapshot.docs[0];
+           const guestData = { id: guestDoc.id, ...guestDoc.data() } as Guest;
+           setGuest(guestData);
+           if (guestData.wishes) setWishesInput(guestData.wishes);
         }
-        
-        // Also fetch event info if we can, let's assume public event read is allowed in our robust rules ("allow get: if isValidId(eventId)")
-        // Actually, our rules say `allow get: if isValidId(eventId);` on /events/{eventId} but for guests it needs the event partnerId if not query
-        // "allow list: if isSuperAdmin() || isPartnerUser(get(/databases/$(database)/documents/events/$(eventId)).data.partnerId) || (incoming().ticketCode == existing().ticketCode);"
-        // actually we don't have `incoming()` in get/list, so my rule might fail for public list.
-        // For standard public RSVP read, we should use getDoc if we know guestId, or allow list if the client sends where('ticketCode', '==', ticketCode) and rule matches.
-        // Wait, for this demo, I'll bypass tight RSVP public query logic by simulating if it fails.
       } catch (error) {
         console.error(error);
       } finally {
@@ -48,11 +43,11 @@ export default function RSVP() {
     try {
       await updateDoc(doc(db, 'events', eventId!, 'guests', guest.id), {
         rsvpStatus: status,
+        wishes: wishesInput,
         updatedAt: serverTimestamp()
       });
-      setGuest({ ...guest, rsvpStatus: status });
+      setGuest({ ...guest, rsvpStatus: status, wishes: wishesInput });
     } catch (error) {
-       // Ignore strict error handling UI for MVP demo
        console.error("RSVP update failed. ", error);
     } finally {
       setSubmitting(false);
@@ -90,6 +85,16 @@ export default function RSVP() {
           </div>
 
           <div className="space-y-4">
+            <div className="text-left mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Pesan & Doa (Opsional)</label>
+              <textarea
+                value={wishesInput}
+                onChange={(e) => setWishesInput(e.target.value)}
+                placeholder="Tuliskan ucapan dan doa untuk penyelenggara acara..."
+                className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-indigo-500 focus:border-indigo-500 resize-none h-24"
+              />
+            </div>
+            
             <p className="text-center text-sm font-medium text-gray-700">Apakah Anda akan hadir?</p>
             <div className="flex gap-4">
               <button

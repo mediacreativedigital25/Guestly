@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '../../AuthContext';
-import { Package, Users, PartyPopper } from 'lucide-react';
+import { Package, Users, PartyPopper, CalendarDays } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function ServicesDashboard() {
@@ -11,13 +11,14 @@ export default function ServicesDashboard() {
   }
 
   const isSuperAdmin = appUser.role === 'superadmin';
+  const activeUntilDate = appUser.activeUntil ? new Date(appUser.activeUntil.seconds * 1000).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }) : null;
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Dashboard Layanan</h1>
-          <p className="text-sm text-gray-500 mt-1">Pantau sisa kuota layanan Anda.</p>
+          <p className="text-sm text-gray-500 mt-1">Pantau sisa kuota dan masa aktif layanan Anda.</p>
         </div>
         {!isSuperAdmin && (
           <Link
@@ -29,7 +30,26 @@ export default function ServicesDashboard() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Masa Aktif</p>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className={`text-xl sm:text-2xl font-bold ${activeUntilDate ? 'text-gray-900' : 'text-gray-400'}`}>
+                  {isSuperAdmin ? 'Selamanya' : (activeUntilDate || 'Tidak Aktif')}
+                </span>
+              </div>
+            </div>
+            <div className="p-3 bg-rose-50 rounded-full shrink-0">
+              <CalendarDays className="w-8 h-8 text-rose-600" />
+            </div>
+          </div>
+          {isSuperAdmin && (
+            <p className="text-xs text-gray-500 mt-4">Superadmin aktif selamanya.</p>
+          )}
+        </div>
+
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -41,7 +61,7 @@ export default function ServicesDashboard() {
                 {!isSuperAdmin && <span className="text-sm text-gray-500">tersisa</span>}
               </div>
             </div>
-            <div className="p-3 bg-blue-50 rounded-full">
+            <div className="p-3 bg-blue-50 rounded-full shrink-0">
               <Users className="w-8 h-8 text-blue-600" />
             </div>
           </div>
@@ -61,7 +81,7 @@ export default function ServicesDashboard() {
                 {!isSuperAdmin && <span className="text-sm text-gray-500">tersisa</span>}
               </div>
             </div>
-            <div className="p-3 bg-indigo-50 rounded-full">
+            <div className="p-3 bg-indigo-50 rounded-full shrink-0">
               <PartyPopper className="w-8 h-8 text-indigo-600" />
             </div>
           </div>
@@ -81,7 +101,7 @@ export default function ServicesDashboard() {
                 {!isSuperAdmin && <span className="text-sm text-gray-500">tersisa</span>}
               </div>
             </div>
-            <div className="p-3 bg-emerald-50 rounded-full">
+            <div className="p-3 bg-emerald-50 rounded-full shrink-0">
               <Package className="w-8 h-8 text-emerald-600" />
             </div>
           </div>

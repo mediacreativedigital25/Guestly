@@ -16,7 +16,7 @@ export default function EventsList() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
-  const [activeTab, setActiveTab] = useState<'info' | 'frame' | 'categories'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'frame' | 'categories' | 'theme'>('info');
   
   // Event Form State
   const [newEventTitle, setNewEventTitle] = useState('');
@@ -25,6 +25,7 @@ export default function EventsList() {
   const [newEventLocation, setNewEventLocation] = useState('');
   const [newEventDigitalInviteLink, setNewEventDigitalInviteLink] = useState('');
   const [newEventFrame, setNewEventFrame] = useState('');
+  const [newEventTheme, setNewEventTheme] = useState('default');
   const [newEventClientId, setNewEventClientId] = useState('');
   const [guestCategories, setGuestCategories] = useState<string[]>(['VIP', 'Keluarga', 'Reguler']);
   const [newCategory, setNewCategory] = useState('');
@@ -37,6 +38,7 @@ export default function EventsList() {
     setNewEventLocation('');
     setNewEventDigitalInviteLink('');
     setNewEventFrame('');
+    setNewEventTheme('default');
     setNewEventClientId('');
     setGuestCategories(['VIP', 'Keluarga', 'Reguler']);
     setNewCategory('');
@@ -62,6 +64,7 @@ export default function EventsList() {
     setNewEventLocation(event.location || '');
     setNewEventDigitalInviteLink(event.digitalInviteLink || '');
     setNewEventFrame(event.frameOverlayUrl || '');
+    setNewEventTheme(event.rsvpTheme || 'default');
     setNewEventClientId(event.clientId || '');
     setGuestCategories(event.guestCategories || []);
     setNewCategory('');
@@ -154,6 +157,9 @@ export default function EventsList() {
       if (newEventFrame) payload.frameOverlayUrl = newEventFrame;
       else if (editingEventId) payload.frameOverlayUrl = deleteField();
       
+      if (newEventTheme) payload.rsvpTheme = newEventTheme;
+      else if (editingEventId) payload.rsvpTheme = deleteField();
+
       if (guestCategories && guestCategories.length > 0) payload.guestCategories = guestCategories;
       else if (editingEventId) payload.guestCategories = deleteField();
 
@@ -267,6 +273,12 @@ export default function EventsList() {
             >
               Kategori Tamu
             </button>
+            <button
+              onClick={() => setActiveTab('theme')}
+              className={`${activeTab === 'theme' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors`}
+            >
+              Tema RSVP
+            </button>
           </nav>
         </div>
 
@@ -303,6 +315,23 @@ export default function EventsList() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Link Undangan Digital</label>
                 <input value={newEventDigitalInviteLink} onChange={e => setNewEventDigitalInviteLink(e.target.value)} type="url" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: https://undangan.com/john-jane" />
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'theme' && (
+            <div className="space-y-4">
+              <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg text-sm text-blue-800">
+                Tema ini akan mengubah tampilan Form RSVP Publik. Anda bisa mencobanya dengan melihat form rsvp publik setelah memilih tema.
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Pilih Tema Form RSVP</label>
+                <select value={newEventTheme} onChange={e => setNewEventTheme(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white">
+                  <option value="default">Default</option>
+                  <option value="facebook">Facebook</option>
+                  <option value="gold">Gold</option>
+                  <option value="tiktok">Tiktok</option>
+                </select>
               </div>
             </div>
           )}

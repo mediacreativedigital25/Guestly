@@ -123,8 +123,8 @@ export default function AppLayout() {
 
   const navItems = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-    { name: 'Events', path: '/events', icon: CalendarDays },
     { name: 'Clients', path: '/clients', icon: Users, role: ['superadmin', 'partner'] },
+    { name: 'Events', path: '/events', icon: CalendarDays },
     { name: 'White Label', path: '/settings', icon: Settings, role: ['superadmin', 'partner'] },
     { name: 'Changelog', path: '/changelog', icon: FileText },
   ];

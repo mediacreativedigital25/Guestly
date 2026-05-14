@@ -115,13 +115,13 @@ export default function GreetingScreen() {
          )}
 
          {showGreeting && latestGuest ? (
-           <div className="flex flex-col items-center space-y-4 animate-in slide-in-from-bottom-8 fade-in zoom-in duration-700 ease-out">
-             <h2 className="text-3xl md:text-5xl lg:text-6xl text-white font-light tracking-[0.2em] drop-shadow-lg uppercase mb-4">
+           <div className="flex flex-col items-center space-y-4 animate-in slide-in-from-bottom-8 fade-in zoom-in duration-700 ease-out w-full px-4">
+             <h2 className="text-2xl sm:text-3xl md:text-5xl lg:text-6xl text-white font-light tracking-[0.2em] drop-shadow-lg uppercase mb-2 sm:mb-4 text-center">
                Selamat Datang
              </h2>
              
              <h1 
-               className="text-6xl md:text-8xl lg:text-9xl text-white font-bold tracking-tight drop-shadow-2xl my-6 text-center"
+               className="text-4xl sm:text-6xl md:text-8xl lg:text-9xl text-white font-bold tracking-tight drop-shadow-2xl my-4 sm:my-6 text-center leading-tight max-w-full break-words"
                style={{ 
                  fontFamily: eventData.fontFamily || 'inherit',
                  color: eventData.primaryColor || '#ffffff',
@@ -131,21 +131,21 @@ export default function GreetingScreen() {
                {latestGuest.name}
              </h1>
              
-             <div className="h-1 w-24 bg-white/50 rounded-full my-6" />
+             <div className="h-1 w-16 sm:w-24 bg-white/50 rounded-full my-4 sm:my-6" />
 
-             <p className="text-2xl md:text-3xl text-gray-100 font-medium tracking-wide drop-shadow-md">
+             <p className="text-xl sm:text-2xl md:text-3xl text-gray-100 font-medium tracking-wide drop-shadow-md text-center max-w-full break-words">
                Di Acara {eventData.title}
              </p>
            </div>
          ) : (
-           <div className="flex flex-col items-center justify-center space-y-6 animate-in fade-in duration-1000">
+           <div className="flex flex-col items-center justify-center space-y-4 sm:space-y-6 animate-in fade-in duration-1000 w-full px-4">
              <h1 
-               className="text-5xl md:text-7xl lg:text-8xl text-white/70 font-bold tracking-tight drop-shadow-xl text-center"
+               className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl text-white/70 font-bold tracking-tight drop-shadow-xl text-center max-w-full break-words leading-tight"
                style={{ fontFamily: eventData.fontFamily || 'inherit' }}
              >
                {eventData.title}
              </h1>
-             <p className="text-xl md:text-2xl text-white/50 tracking-[0.3em] uppercase drop-shadow-md">
+             <p className="text-lg sm:text-xl md:text-2xl text-white/50 tracking-[0.2em] sm:tracking-[0.3em] uppercase drop-shadow-md text-center">
                Menunggu Tamu...
              </p>
            </div>

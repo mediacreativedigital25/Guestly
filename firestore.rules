@@ -49,7 +49,7 @@ service cloud.firestore {
     // --- Validation Helpers ---
 
     function isValidUser(data) {
-      return data.size() >= 5 && data.size() <= 13 &&
+      return data.size() >= 5 && data.size() <= 14 &&
         data.keys().hasAll(['role', 'name', 'email', 'createdAt', 'updatedAt']) &&
         data.role is string && (data.role == 'superadmin' || data.role == 'partner' || data.role == 'client') &&
         data.name is string && data.name.size() <= 150 &&
@@ -62,6 +62,7 @@ service cloud.firestore {
         (!('eventQuota' in data) || data.eventQuota == null || (data.eventQuota is number && data.eventQuota >= 0)) &&
         (!('clientQuota' in data) || data.clientQuota == null || (data.clientQuota is number && data.clientQuota >= 0)) &&
         (!('guestQuota' in data) || data.guestQuota == null || (data.guestQuota is number && data.guestQuota >= 0)) &&
+        (!('activeUntil' in data) || data.activeUntil == null || data.activeUntil is timestamp) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -89,7 +90,7 @@ service cloud.firestore {
     }
 
     function isValidEvent(data) {
-      return data.size() >= 7 && data.size() <= 14 &&
+      return data.size() >= 7 && data.size() <= 15 &&
         data.keys().hasAll(['partnerId', 'clientId', 'title', 'date', 'status', 'createdAt', 'updatedAt']) &&
         data.partnerId is string && data.partnerId.size() <= 128 &&
         data.clientId is string && data.clientId.size() <= 128 &&
@@ -104,6 +105,7 @@ service cloud.firestore {
         (!('guestCategories' in data) || data.guestCategories == null || (data.guestCategories is list && data.guestCategories.size() <= 50)) &&
         (!('primaryColor' in data) || data.primaryColor == null || (data.primaryColor is string && data.primaryColor.size() <= 20)) &&
         (!('fontFamily' in data) || data.fontFamily == null || (data.fontFamily is string && data.fontFamily.size() <= 100)) &&
+        (!('rsvpTheme' in data) || data.rsvpTheme == null || (data.rsvpTheme is string && data.rsvpTheme.size() <= 50)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -120,6 +122,7 @@ service cloud.firestore {
         (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 200)) &&
         (!('phone' in data) || data.phone == null || (data.phone is string && data.phone.size() <= 50)) &&
         (!('address' in data) || data.address == null || (data.address is string && data.address.size() <= 500)) &&
+        (!('wishes' in data) || data.wishes == null || (data.wishes is string && data.wishes.size() <= 1000)) &&
         (!('attendedAt' in data) || data.attendedAt == null || data.attendedAt is timestamp) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -225,14 +228,13 @@ service cloud.firestore {
     match /events/{eventId}/guests/{guestId} {
       allow get: if isValidId(eventId) && isValidId(guestId); // Public could read own guest info if they have ticket code, handled by query?
       allow list: if isValidId(eventId); // Public can list guests for a known eventId (used for Greeting Screen)
-      allow create: if isValidId(eventId) && isSignedIn() && isValidGuest(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time &&
-        (isSuperAdmin() || isPartnerUser(get(/databases/$(database)/documents/events/$(eventId)).data.partnerId) || isClientUser(get(/databases/$(database)/documents/events/$(eventId)).data.clientId));
+      allow create: if isValidId(eventId) && isValidGuest(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isValidId(eventId) && isValidId(guestId) && isValidGuest(incoming()) && incoming().updatedAt == request.time &&
         incoming().eventId == existing().eventId &&
         (
           (isSuperAdmin() || isPartnerUser(get(/databases/$(database)/documents/events/$(eventId)).data.partnerId) || isClientUser(get(/databases/$(database)/documents/events/$(eventId)).data.clientId))
           ||
-          (!isSignedIn() && incoming().diff(existing()).affectedKeys().hasOnly(['rsvpStatus', 'updatedAt']))
+          (!isSignedIn() && incoming().diff(existing()).affectedKeys().hasOnly(['rsvpStatus', 'wishes', 'updatedAt']))
         );
       allow delete: if isValidId(eventId) && isValidId(guestId) && (isSuperAdmin() || isPartnerUser(get(/databases/$(database)/documents/events/$(eventId)).data.partnerId) || isClientUser(get(/databases/$(database)/documents/events/$(eventId)).data.clientId));
     }

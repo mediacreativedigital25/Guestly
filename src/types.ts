@@ -13,6 +13,7 @@ export interface User {
   eventQuota?: number;
   clientQuota?: number;
   guestQuota?: number;
+  activeUntil?: any;
   createdAt: any;
   updatedAt: any;
 }
@@ -51,6 +52,7 @@ export interface EventRecord {
   guestCategories?: string[];
   primaryColor?: string;
   fontFamily?: string;
+  rsvpTheme?: string;
   status: 'draft' | 'published' | 'completed';
   activeUntil?: string;
   eventQuota?: number;
@@ -69,6 +71,7 @@ export interface Guest {
   category?: string;
   ticketCode: string;
   rsvpStatus: 'pending' | 'attending' | 'declined';
+  wishes?: string;
   attended: boolean;
   attendedAt?: any;
   createdAt: any;

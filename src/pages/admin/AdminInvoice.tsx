@@ -84,11 +84,20 @@ export default function AdminInvoice() {
         const currentEventQuota = userData.eventQuota || 0;
         const currentClientQuota = userData.clientQuota || 0;
         const currentGuestQuota = userData.guestQuota || 0;
+        
+        let newActiveUntil = userData.activeUntil;
+        if (serviceData.activePeriodDays) {
+           const now = new Date();
+           const currentActiveUntil = userData.activeUntil ? new Date(userData.activeUntil.toMillis()) : now;
+           const baseDate = currentActiveUntil > now ? currentActiveUntil : now;
+           newActiveUntil = new Date(baseDate.getTime() + serviceData.activePeriodDays * 24 * 60 * 60 * 1000);
+        }
 
         transaction.update(userRef, {
           eventQuota: currentEventQuota + (serviceData.eventQuota || 0),
           clientQuota: currentClientQuota + (serviceData.clientQuota || 0),
           guestQuota: currentGuestQuota + (serviceData.guestQuota || 0),
+          ...(newActiveUntil ? { activeUntil: newActiveUntil } : {}),
           updatedAt: serverTimestamp()
         });
 

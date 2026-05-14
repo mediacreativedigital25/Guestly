@@ -15,6 +15,7 @@ import WhiteLabelSettings from './pages/WhiteLabelSettings';
 import UsersList from './pages/UsersList';
 import RolesSettings from './pages/RolesSettings';
 import RSVP from './pages/RSVP';
+import PublicRSVP from './pages/PublicRSVP';
 import Scanner from './pages/Scanner';
 import Changelog from './pages/Changelog';
 
@@ -61,6 +62,7 @@ export default function App() {
           </Route>
           {/* Public Route */}
           <Route path="/rsvp/:eventId/:ticketCode" element={<RSVP />} />
+          <Route path="/public/rsvp/:eventId" element={<PublicRSVP />} />
           <Route path="/events/:eventId/greeting" element={<GreetingScreen />} />
         </Routes>
         </BrowserRouter>

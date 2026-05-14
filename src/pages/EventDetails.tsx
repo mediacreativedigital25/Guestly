@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom';
-import { QrCode, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor } from 'lucide-react';
+import { QrCode, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'react-qr-code';
 import * as htmlToImage from 'html-to-image';
@@ -27,6 +27,8 @@ export default function EventDetails() {
   const [newGuestPhone, setNewGuestPhone] = useState('');
   const [newGuestCategory, setNewGuestCategory] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState<'guest-list' | 'rsvp'>('guest-list');
+  const [isEmbedModalOpen, setIsEmbedModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrRef = useRef<HTMLDivElement>(null);
   const [activeQrGuest, setActiveQrGuest] = useState<Guest | null>(null);
@@ -166,7 +168,9 @@ export default function EventDetails() {
     }
   };
 
-  const filteredGuests = guests.filter(guest => 
+  const baseFilteredGuests = activeTab === 'guest-list' ? guests.filter(g => g.rsvpStatus === 'attending') : guests;
+  
+  const filteredGuests = baseFilteredGuests.filter(guest => 
     guest.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     (guest.ticketCode && guest.ticketCode.toLowerCase().includes(searchTerm.toLowerCase()))
   );
@@ -351,23 +355,42 @@ export default function EventDetails() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-2xl font-bold text-gray-900">Detail Acara</h1>
-        <div className="flex gap-4">
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <button
+             onClick={() => setIsEmbedModalOpen(true)}
+             className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 sm:px-4 py-2 border border-gray-300 bg-white text-gray-700 rounded-md hover:bg-gray-50 font-medium text-sm sm:text-base"
+           >
+             <Code className="w-4 sm:w-5 h-4 sm:h-5 hidden sm:block" />
+             <span className="hidden sm:inline">Embed</span>
+             <span className="sm:hidden">Embed</span>
+           </button>
+          <Link
+             to={`/public/rsvp/${eventId}`}
+             target="_blank"
+             className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-pink-500 text-white rounded-md hover:bg-pink-600 font-medium text-sm sm:text-base"
+           >
+             <FileText className="w-4 sm:w-5 h-4 sm:h-5 hidden sm:block" />
+             <span className="hidden sm:inline">Form RSVP</span>
+             <span className="sm:hidden">RSVP</span>
+           </Link>
           <Link
             to={`/events/${eventId}/greeting`}
             target="_blank"
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-md hover:bg-indigo-600 font-medium"
+            className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-indigo-500 text-white rounded-md hover:bg-indigo-600 font-medium text-sm sm:text-base"
           >
-            <Monitor className="w-5 h-5" />
-            Layar Sapa
+            <Monitor className="w-4 sm:w-5 h-4 sm:h-5 hidden sm:block" />
+            <span className="hidden sm:inline">Layar Sapa</span>
+            <span className="sm:hidden">Layar</span>
           </Link>
           <Link
             to={`/events/${eventId}/scan`}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium"
+            className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium text-sm sm:text-base"
           >
-            <ScanLine className="w-5 h-5" />
-            Scanner
+            <ScanLine className="w-4 sm:w-5 h-4 sm:h-5" />
+            <span className="hidden sm:inline">Scanner</span>
+            <span className="sm:hidden">Scan</span>
           </Link>
         </div>
       </div>
@@ -447,10 +470,29 @@ export default function EventDetails() {
         </div>
       </div>
 
+      <div className="border-b border-gray-200 mb-6 mt-8">
+        <nav className="-mb-px flex space-x-8">
+          <button
+            onClick={() => setActiveTab('rsvp')}
+            className={`whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'rsvp' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+          >
+            RSVP & Undangan
+          </button>
+          <button
+            onClick={() => setActiveTab('guest-list')}
+            className={`whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'guest-list' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+          >
+            Guest List
+          </button>
+        </nav>
+      </div>
+
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-4 sm:px-6 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-gray-100 bg-gray-50 gap-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
-            <h2 className="text-lg font-medium text-gray-900 whitespace-nowrap">Guest List ({filteredGuests.length})</h2>
+            <h2 className="text-lg font-medium text-gray-900 whitespace-nowrap">
+               {activeTab === 'rsvp' ? 'Undangan' : 'Daftar Tamu'} ({filteredGuests.length})
+            </h2>
             <div className="relative w-full sm:w-64">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-4 w-4 text-gray-400" />
@@ -570,8 +612,17 @@ export default function EventDetails() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Alamat</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No. Hp</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kategori</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Waktu Kehadiran</th>
+                    {activeTab === 'rsvp' ? (
+                      <>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status RSVP</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ucapan</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status Scan</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Waktu Kehadiran</th>
+                      </>
+                    )}
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
                   </tr>
                 </thead>
@@ -589,14 +640,33 @@ export default function EventDetails() {
                           <span className="inline-flex px-2 py-1 bg-indigo-50 text-indigo-700 text-xs font-medium rounded-md">{guest.category}</span>
                         ) : '-'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                         <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold leading-4 ${guest.attended ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                           {guest.attended ? 'Hadir' : 'Belum Hadir'}
-                         </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {guest.attendedAt && parseFirestoreDate(guest.attendedAt) ? parseFirestoreDate(guest.attendedAt)!.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '-'}
-                      </td>
+                      {activeTab === 'rsvp' ? (
+                        <>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                             <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold leading-4 ${
+                               guest.rsvpStatus === 'attending' ? 'bg-green-100 text-green-800' : 
+                               guest.rsvpStatus === 'declined' ? 'bg-red-100 text-red-800' : 
+                               'bg-yellow-100 text-yellow-800'
+                             }`}>
+                               {guest.rsvpStatus === 'attending' ? 'Hadir' : guest.rsvpStatus === 'declined' ? 'Tidak Hadir' : 'Pending'}
+                             </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate" title={guest.wishes || '-'}>
+                            {guest.wishes || '-'}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                             <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold leading-4 ${guest.attended ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                               {guest.attended ? 'Sudah Scan' : 'Belum Hadir'}
+                             </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {guest.attendedAt && parseFirestoreDate(guest.attendedAt) ? parseFirestoreDate(guest.attendedAt)!.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '-'}
+                          </td>
+                        </>
+                      )}
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         <div className="flex space-x-2">
                            <button 
@@ -705,6 +775,32 @@ export default function EventDetails() {
           </div>
         )}
       </Modal>
+
+      <Modal isOpen={isEmbedModalOpen} onClose={() => setIsEmbedModalOpen(false)} title="Integrasi Undangan Digital (Elementor dll)">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-500">
+            Anda dapat menempelkan kode iframe berikut pada widget HTML di Elementor (atau pembuat website lainnya) untuk menampilkan form RSVP beserta daftar ucapan tamu secara langsung pada halaman undangan digital.
+          </p>
+          <div className="bg-gray-100 p-4 rounded-md relative text-sm font-mono text-gray-800 break-all select-all">
+            {`<iframe src="${window.location.origin}/public/rsvp/${eventId}?embed=true" width="100%" height="800px" frameborder="0" scrolling="yes" style="border: none; max-width: 100%; border-radius: 12px; overflow: hidden;"></iframe>`}
+          </div>
+          <p className="text-sm text-gray-500 mt-2">
+            Sesuaikan <code className="bg-gray-100 px-1 py-0.5 rounded">height="800px"</code> sesuai dengan kebutuhan desain halaman website Anda.
+          </p>
+          <div className="flex justify-end pt-4">
+            <button
+               onClick={() => {
+                 navigator.clipboard.writeText(`<iframe src="${window.location.origin}/public/rsvp/${eventId}?embed=true" width="100%" height="800px" frameborder="0" scrolling="yes" style="border: none; max-width: 100%; border-radius: 12px; overflow: hidden;"></iframe>`);
+                 showAlert('Berhasil', 'Kode iframe disalin ke clipboard!', 'success');
+               }}
+               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors"
+            >
+              <Copy className="w-5 h-5" /> Salin Kode iframe
+            </button>
+          </div>
+        </div>
+      </Modal>
+
     </div>
   );
 }
