@@ -13,6 +13,9 @@ export default function Scanner() {
   const [manualInput, setManualInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  const isProcessingRef = useRef(false);
+  const lastScannedCodeRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (scanMode === 'tool' && inputRef.current) {
@@ -21,9 +24,18 @@ export default function Scanner() {
   }, [scanMode]);
 
   const processTicket = async (decodedText: string) => {
-    if (isProcessing) return;
+    if (isProcessingRef.current) return;
+    
+    // Prevent scanning the same code multiple times within a short duration
+    if (lastScannedCodeRef.current === decodedText) {
+       return;
+    }
+    
+    isProcessingRef.current = true;
     setIsProcessing(true);
     setScanResult(null);
+    lastScannedCodeRef.current = decodedText;
+
     try {
       const guestsRef = collection(db, 'events', eventId!, 'guests');
       const q = query(guestsRef, where('ticketCode', '==', decodedText));
@@ -35,7 +47,7 @@ export default function Scanner() {
         const guestDoc = snapshot.docs[0];
         if (guestDoc.data().attended) {
           const attendedDate = parseFirestoreDate(guestDoc.data().attendedAt);
-          setScanResult({ status: 'error', message: `Tiket sudah digunakan pada ${attendedDate ? attendedDate.toLocaleString() : '-'}`});
+          setScanResult({ status: 'error', message: `Tiket sudah digunakan pada ${attendedDate ? attendedDate.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '-'}`});
         } else {
           // Mark attended
           await updateDoc(doc(db, 'events', eventId!, 'guests', guestDoc.id), {
@@ -44,42 +56,66 @@ export default function Scanner() {
             updatedAt: serverTimestamp()
           });
           setScanResult({ status: 'success', message: `${guestDoc.data().name} berhasil check-in!`});
-          // Auto hide after 3 secs
-          setTimeout(() => setScanResult(null), 3000);
         }
       }
     } catch (error) {
       setScanResult({ status: 'error', message: "Terjadi kesalahan sistem"});
       handleFirestoreError(error, OperationType.UPDATE, `events/${eventId}/guests`);
     } finally {
+      isProcessingRef.current = false;
       setIsProcessing(false);
+      
+      // Clear the last scanned code after a delay so it can be scanned again if needed
+      setTimeout(() => {
+        if (lastScannedCodeRef.current === decodedText) {
+          lastScannedCodeRef.current = null;
+        }
+      }, 3000);
+      
+      // Auto hide scan result after 3 secs
+      setTimeout(() => setScanResult(null), 3000);
     }
   };
 
   useEffect(() => {
     let scanner: Html5QrcodeScanner | null = null;
+    let isStarted = false;
     
     if (scanMode === 'camera') {
-      scanner = new Html5QrcodeScanner(
-        "reader",
-        { fps: 10, qrbox: {width: 250, height: 250} },
-        /* verbose= */ false
-      );
+      const initScanner = () => {
+        scanner = new Html5QrcodeScanner(
+          "reader",
+          { fps: 10, qrbox: {width: 250, height: 250} },
+          /* verbose= */ false
+        );
 
-      scanner.render(async (decodedText) => {
-        if (!isProcessing) {
-            await processTicket(decodedText);
+        scanner.render(async (decodedText) => {
+          if (!isProcessingRef.current) {
+              await processTicket(decodedText);
+          }
+        }, (error) => {
+          // ignore empty scans
+        });
+        isStarted = true;
+      };
+
+      // Slight delay to ensure DOM is ready and prevent strict mode double-init 
+      // issues from blocking the camera permanently
+      const timer = setTimeout(() => {
+        const readerElement = document.getElementById("reader");
+        if (readerElement) {
+           initScanner();
         }
-      }, (error) => {
-        // ignore empty scans
-      });
+      }, 100);
+      
+      return () => {
+        clearTimeout(timer);
+        if (scanner && isStarted) {
+          scanner.clear().catch(e => console.error("Scanner clear error", e));
+        }
+      };
     }
 
-    return () => {
-      if (scanner) {
-        scanner.clear().catch(console.error);
-      }
-    };
   }, [eventId, scanMode]); // re-run if mode changes
 
   const handleManualSubmit = async (e: React.FormEvent) => {

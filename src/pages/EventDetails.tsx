@@ -19,6 +19,7 @@ export default function EventDetails() {
   const { eventId } = useParams();
   const { appUser } = useAuth();
   const [event, setEvent] = useState<EventRecord | null>(null);
+  const [clientName, setClientName] = useState<string>('');
   const [guests, setGuests] = useState<Guest[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddingGuest, setIsAddingGuest] = useState(false);
@@ -41,7 +42,20 @@ export default function EventDetails() {
         if (eventId) {
           const eventDoc = await getDoc(doc(db, 'events', eventId));
           if (eventDoc.exists()) {
-            setEvent({ id: eventDoc.id, ...eventDoc.data() } as EventRecord);
+            const eventData = { id: eventDoc.id, ...eventDoc.data() } as EventRecord;
+            setEvent(eventData);
+            
+            // Fetch client name
+            if (eventData.clientId) {
+              try {
+                const clientDoc = await getDoc(doc(db, 'clients', eventData.clientId));
+                if (clientDoc.exists()) {
+                  setClientName(clientDoc.data().name);
+                }
+              } catch (clientErr) {
+                console.warn('Failed to fetch client details:', clientErr);
+              }
+            }
           }
         }
         
@@ -241,7 +255,7 @@ export default function EventDetails() {
         digitalInviteLink = `${event.digitalInviteLink}${separator}to=${encodeURIComponent(guest.name)}`;
     }
 
-    const text = `Halo *${guest.name}* 👋🏻\n\nDengan penuh rasa hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara spesial kami:\n\n✨ *${event?.title}* ✨\n\nUntuk konfirmasi kehadiran saat acara berlangsung, silakan tunjukkan QR Code berikut:\n🔳 ${qrLink}\n\nDetail lengkap acara dapat dilihat melalui undangan digital berikut:\n💌 ${digitalInviteLink}\n\nMerupakan suatu kebahagiaan bagi kami apabila Bapak/Ibu/Saudara/i berkenan hadir serta memberikan doa dan restu kepada kami.\n\nAtas perhatian dan kehadirannya, kami ucapkan terima kasih 🙏🏻\n\nHormat kami,\n*${event?.title}*`;
+    const text = `Halo *${guest.name}* 👋🏻\n\nDengan penuh rasa hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara spesial kami:\n\n✨ *${event?.title}* ✨\n\nUntuk konfirmasi kehadiran saat acara berlangsung, silakan tunjukkan QR Code berikut:\n🔳 ${qrLink}\n\nDetail lengkap acara dapat dilihat melalui undangan digital berikut:\n💌 ${digitalInviteLink}\n\nMerupakan suatu kebahagiaan bagi kami apabila Bapak/Ibu/Saudara/i berkenan hadir serta memberikan doa dan restu kepada kami.\n\nAtas perhatian dan kehadirannya, kami ucapkan terima kasih 🙏🏻\n\nHormat kami,\n*${clientName || event?.title}*`;
 
     const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
     window.open(waUrl, '_blank');
@@ -357,7 +371,7 @@ export default function EventDetails() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-2xl font-bold text-gray-900">Detail Acara</h1>
-        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+        <div className="grid grid-cols-2 sm:flex sm:flex-row gap-2 w-full sm:w-auto">
           <button
              onClick={() => setIsEmbedModalOpen(true)}
              className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 sm:px-4 py-2 border border-gray-300 bg-white text-gray-700 rounded-md hover:bg-gray-50 font-medium text-sm sm:text-base"
@@ -544,9 +558,13 @@ export default function EventDetails() {
             </button>
             <button 
               onClick={() => setIsAddingGuest(!isAddingGuest)}
-              className="flex-1 sm:flex-none justify-center text-sm text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1.5 bg-indigo-50 px-3 py-2 sm:py-1.5 rounded-md hover:bg-indigo-100 transition-colors whitespace-nowrap lg:ml-2"
+              className={`flex-1 sm:flex-none justify-center text-sm font-medium flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-md transition-colors whitespace-nowrap lg:ml-2 ${
+                isAddingGuest 
+                  ? 'text-gray-700 bg-gray-100 hover:bg-gray-200' 
+                  : 'text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm'
+              }`}
             >
-              <Plus className="w-4 h-4"/> {isAddingGuest ? 'Batal' : 'Tambah Tamu'}
+              <Plus className="w-4 h-4"/> {isAddingGuest ? 'Batal Tambah' : 'Tambah Tamu'}
             </button>
           </div>
         </div>

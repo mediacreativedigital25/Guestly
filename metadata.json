@@ -1,5 +1,5 @@
 {
-  "name": "Guestly V1.0.2",
+  "name": "Guestly | Smart Guest Management",
   "description": "Digital guestbook application with event management, RSVP, barcode scanning, and white-label capabilities.",
   "requestFramePermissions": [
     "camera"

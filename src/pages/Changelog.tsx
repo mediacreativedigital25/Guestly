@@ -1,6 +1,14 @@
 export default function Changelog() {
   const versions = [
     {
+      version: 'v1.0.3',
+      date: '15 Mei 2026',
+      changes: [
+        'Memperbarui template pesan WhatsApp Broadcast dengan menampilkan Nama Client secara otomatis',
+        'Perbaikan aturan keamanan database untuk akses data Client'
+      ]
+    },
+    {
       version: 'v1.0.2',
       date: '11 Mei 2026',
       changes: [
