@@ -4,8 +4,9 @@ import { useAuth } from './AuthContext';
 import { useSettings } from './SettingsContext';
 import { LayoutDashboard, Users, CalendarDays, Settings, LogOut, FileText, ChevronDown, ChevronRight, UserCog, Menu, X, Shield, User, Briefcase, CreditCard, ShoppingBag, Package, Receipt } from 'lucide-react';
 import { cn } from './lib/utils';
-import { loginWithGoogle, auth } from './lib/firebase';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth, db } from './lib/firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export default function AppLayout() {
   const { currentUser, appUser, loading, logout } = useAuth();
@@ -18,17 +19,47 @@ export default function AppLayout() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
 
-  const handleEmailLogin = async (e: React.FormEvent) => {
+  const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoggingIn(true);
     setLoginError('');
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      if (isRegistering) {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const newUser = {
+          role: email === '64.iklas@gmail.com' ? 'superadmin' : 'client',
+          name: name || 'Unnamed User',
+          email: email,
+          phone: phone || null,
+          partnerId: null,
+          clientId: null,
+          eventQuota: 1,
+          guestQuota: 10,
+          activeUntil: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        await setDoc(doc(db, 'users', userCredential.user.uid), newUser);
+        
+        // Send WhatsApp Notification for new registration
+        if (settings?.fonnteToken && phone) {
+          import('./lib/fonnte').then(({ sendFonnteMessage }) => {
+            const loginUrl = window.location.origin;
+            const message = `NOTIFIKASI AKUN GUESTLY\n\n🔐 Informasi Akun Guestly\n\nHalo kak ${name} 👋\nBerikut informasi akun Guestly kakak:\n\n📧 Email : ${email}\n🔑 Password : ${password}\n🌐 Login : ${loginUrl}\n\nMohon simpan informasi akun dengan baik 😊\n\n📞 Jika memiliki kendala atau membutuhkan bantuan, jangan ragu menghubungi 085158636606`;
+            sendFonnteMessage(settings.fonnteToken!, phone, message);
+          });
+        }
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
     } catch (error: any) {
-      setLoginError(error.message || 'Login gagal. Periksa kembali email dan password Anda.');
+      setLoginError(error.message || 'Otentikasi gagal. Periksa kembali data Anda.');
     } finally {
       setIsLoggingIn(false);
     }
@@ -48,25 +79,53 @@ export default function AppLayout() {
             ) : (
               <h1 className="text-3xl font-bold tracking-tight text-gray-900">Guestly</h1>
             )}
-            <p className="mt-2 text-sm text-gray-500">Masuk untuk mengelola acara dan tamu Anda</p>
+            <p className="mt-2 text-sm text-gray-500">
+              {isRegistering ? 'Daftar untuk membuat akun baru' : 'Masuk untuk mengelola acara dan tamu Anda'}
+            </p>
           </div>
           
-          <form className="mt-8 space-y-6" onSubmit={handleEmailLogin}>
+          <form className="mt-8 space-y-6" onSubmit={handleEmailAuth}>
             {loginError && (
               <div className="bg-red-50 text-red-600 p-3 rounded text-sm text-center">
                 {loginError}
               </div>
             )}
             <div className="space-y-4">
+              {isRegistering && (
+                <>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-1">Nama Lengkap</label>
+                    <input
+                      type="text"
+                      required
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="Nama Anda"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-1">No. WhatsApp / HP</label>
+                    <input
+                      type="tel"
+                      required
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="08123456789"
+                    />
+                  </div>
+                </>
+              )}
               <div>
-                <label className="text-sm font-medium text-gray-700 block mb-1">Email / Username</label>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Email</label>
                 <input
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
-                  placeholder="admin@example.com"
+                  placeholder="email@example.com"
                 />
               </div>
               <div>
@@ -87,34 +146,18 @@ export default function AppLayout() {
               disabled={isLoggingIn}
               className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
             >
-              {isLoggingIn ? 'Memproses...' : 'Masuk'}
+              {isLoggingIn ? 'Memproses...' : (isRegistering ? 'Daftar' : 'Masuk')}
             </button>
           </form>
 
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">Atau masuk dengan</span>
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <button
-                onClick={loginWithGoogle}
-                className="w-full flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
-              >
-                <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
-                  <path
-                    fill="currentColor"
-                    d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.701-6.033-6.032s2.701-6.032,6.033-6.032c1.498,0,2.866,0.549,3.921,1.453l2.814-2.814C17.503,2.988,15.139,2,12.545,2C7.021,2,2.543,6.477,2.543,12s4.478,10,10.002,10c8.396,0,10.249-7.85,9.426-11.748L12.545,10.239z"
-                  />
-                </svg>
-                Google
-              </button>
-            </div>
+          <div className="mt-6 text-center">
+            <button
+              type="button"
+              onClick={() => setIsRegistering(!isRegistering)}
+              className="text-sm text-indigo-600 hover:text-indigo-500 font-medium"
+            >
+              {isRegistering ? 'Sudah punya akun? Masuk' : 'Belum punya akun? Daftar'}
+            </button>
           </div>
         </div>
       </div>
@@ -230,21 +273,31 @@ export default function AppLayout() {
                      Invoice
                    </div>
                  </Link>
-                 <Link
-                   to="/services/my"
-                   className={cn(
-                     "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                     location.pathname === '/services/my' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                   )}
-                 >
-                   <div className="flex items-center gap-2">
-                     <Briefcase className="h-4 w-4" />
-                     Layanan Saya
-                   </div>
-                 </Link>
+                 
+                 {/* Conditionally display "Layanan Saya" based on active status/quotas */}
+                 {!!(appUser && (
+                    (appUser.eventQuota && appUser.eventQuota > 0) || 
+                    (appUser.clientQuota && appUser.clientQuota > 0) || 
+                    (appUser.guestQuota && appUser.guestQuota > 0) ||
+                    appUser.activeUntil
+                 )) && (
+                   <Link
+                     to="/services/my"
+                     className={cn(
+                       "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                       location.pathname === '/services/my' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                     )}
+                   >
+                     <div className="flex items-center gap-2">
+                       <Briefcase className="h-4 w-4" />
+                       Layanan Saya
+                     </div>
+                   </Link>
+                 )}
               </div>
             )}
           </div>
+
 
           {appUser.role === 'superadmin' && (
              <>
@@ -297,18 +350,6 @@ export default function AppLayout() {
                {isAdminPanelMenuOpen && (
                  <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
                     <Link
-                      to="/admin/profile"
-                      className={cn(
-                        "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        location.pathname === '/admin/profile' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <User className="h-4 w-4" />
-                        Profil
-                      </div>
-                    </Link>
-                    <Link
                       to="/admin/services"
                       className={cn(
                         "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
@@ -352,6 +393,16 @@ export default function AppLayout() {
 
         </nav>
         <div className="p-4 border-t border-gray-200">
+          <Link
+            to="/profile"
+            className={cn(
+              "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium mb-1 transition-colors",
+              location.pathname === '/profile' ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+            )}
+          >
+            <User className="h-5 w-5" />
+            Profil Saya
+          </Link>
           <button
             onClick={logout}
             className="w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"

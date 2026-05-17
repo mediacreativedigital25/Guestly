@@ -43,6 +43,7 @@ export interface EventRecord {
   partnerId: string;
   clientId: string;
   title: string;
+  coupleName?: string;
   description?: string;
   date: string;
   time?: string;

@@ -18,9 +18,10 @@ import RSVP from './pages/RSVP';
 import PublicRSVP from './pages/PublicRSVP';
 import Scanner from './pages/Scanner';
 import Changelog from './pages/Changelog';
+import PublicQR from './pages/PublicQR';
 
 import GreetingScreen from './pages/GreetingScreen';
-import AdminProfile from './pages/admin/AdminProfile';
+import UserProfile from './pages/UserProfile';
 import AdminServices from './pages/admin/AdminServices';
 import AdminInvoice from './pages/admin/AdminInvoice';
 import AdminSettings from './pages/admin/AdminSettings';
@@ -55,7 +56,7 @@ export default function App() {
             <Route path="services/my" element={<MyServices />} />
             <Route path="invoices/my" element={<MyInvoices />} />
 
-            <Route path="admin/profile" element={<AdminProfile />} />
+            <Route path="profile" element={<UserProfile />} />
             <Route path="admin/services" element={<AdminServices />} />
             <Route path="admin/invoice" element={<AdminInvoice />} />
             <Route path="admin/settings" element={<AdminSettings />} />
@@ -63,6 +64,7 @@ export default function App() {
           {/* Public Route */}
           <Route path="/rsvp/:eventId/:ticketCode" element={<RSVP />} />
           <Route path="/public/rsvp/:eventId" element={<PublicRSVP />} />
+          <Route path="/public/qr" element={<PublicQR />} />
           <Route path="/events/:eventId/greeting" element={<GreetingScreen />} />
         </Routes>
         </BrowserRouter>

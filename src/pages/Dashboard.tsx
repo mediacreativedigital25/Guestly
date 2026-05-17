@@ -6,6 +6,22 @@ import { EventRecord, Guest } from '../types';
 
 export default function Dashboard() {
   const { appUser } = useAuth();
+  
+  // Parse activeUntil safely
+  let isTrial = false;
+  if (appUser?.role === 'client') {
+    let activeDate: Date | null = null;
+    if (appUser.activeUntil) {
+       if (appUser.activeUntil.toDate) activeDate = appUser.activeUntil.toDate();
+       else if (typeof appUser.activeUntil === 'string') activeDate = new Date(appUser.activeUntil);
+       else if (appUser.activeUntil.seconds) activeDate = new Date(appUser.activeUntil.seconds * 1000);
+    }
+    // Consider trial if no active date, or active date is less than 7 days from now, or low event quota
+    if (!activeDate || activeDate < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) || (appUser.eventQuota && appUser.eventQuota <= 1)) {
+      isTrial = true;
+    }
+  }
+
   const [metrics, setMetrics] = useState({
     totalEvents: 0,
     draftEvents: 0,
@@ -32,11 +48,12 @@ export default function Dashboard() {
           const partnerId = appUser.id;
           q = query(eventsRef, where('partnerId', '==', partnerId));
         } else if (appUser?.role === 'client') {
-          if (!appUser?.clientId) {
+          const targetClientId = appUser?.clientId || appUser?.id;
+          if (!targetClientId) {
              setLoading(false);
              return;
           }
-          q = query(eventsRef, where('clientId', '==', appUser.clientId));
+          q = query(eventsRef, where('clientId', '==', targetClientId));
         }
 
         if (appUser?.role === 'superadmin') {
@@ -113,6 +130,23 @@ export default function Dashboard() {
       <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
       <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
         <p className="text-gray-600">Selamat datang, {appUser?.name}! Anda login sebagai <span className="font-medium text-indigo-600">{appUser?.role}</span>.</p>
+        
+        {isTrial && (
+          <div className="mt-4 p-4 bg-indigo-50 border border-indigo-100 rounded-lg flex items-start gap-3">
+            <div className="p-2 bg-indigo-100 rounded-full text-indigo-600">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-indigo-900">Tingkatkan Layanan Anda</h3>
+              <p className="text-sm text-indigo-700 mt-1">
+                Anda saat ini menggunakan akses masa percobaan. Untuk membuat lebih banyak acara dan mengundang lebih banyak tamu tanpa batas waktu, silakan upgrade layanan Anda.
+              </p>
+              <a href="/services/catalog" className="text-sm font-medium text-indigo-600 hover:text-indigo-800 mt-2 inline-block">
+                Lihat Katalog Layanan &rarr;
+              </a>
+            </div>
+          </div>
+        )}
       </div>
       
       {loading ? (

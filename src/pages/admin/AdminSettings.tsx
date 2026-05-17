@@ -12,6 +12,9 @@ export default function AdminSettings() {
   const [logoUrl, setLogoUrl] = useState(settings?.logoUrl || '');
   const [faviconUrl, setFaviconUrl] = useState(settings?.faviconUrl || '');
   const [fonnteToken, setFonnteToken] = useState(settings?.fonnteToken || '');
+  const [templateOrderCreated, setTemplateOrderCreated] = useState(settings?.fonnteTemplates?.orderCreated || '');
+  const [templateOrderPaid, setTemplateOrderPaid] = useState(settings?.fonnteTemplates?.orderPaid || '');
+  const [templateOrderCancelled, setTemplateOrderCancelled] = useState(settings?.fonnteTemplates?.orderCancelled || '');
   const [activePaymentMethod, setActivePaymentMethod] = useState(settings?.activePaymentMethod || 'manual');
   const [serverKey, setServerKey] = useState(settings?.paymentGateway?.serverKey || '');
   const [clientKey, setClientKey] = useState(settings?.paymentGateway?.clientKey || '');
@@ -28,6 +31,9 @@ export default function AdminSettings() {
       setLogoUrl(settings.logoUrl || '');
       setFaviconUrl(settings.faviconUrl || '');
       setFonnteToken(settings.fonnteToken || '');
+      setTemplateOrderCreated(settings.fonnteTemplates?.orderCreated || '');
+      setTemplateOrderPaid(settings.fonnteTemplates?.orderPaid || '');
+      setTemplateOrderCancelled(settings.fonnteTemplates?.orderCancelled || '');
       setActivePaymentMethod(settings.activePaymentMethod || 'manual');
       setServerKey(settings.paymentGateway?.serverKey || '');
       setClientKey(settings.paymentGateway?.clientKey || '');
@@ -76,8 +82,16 @@ export default function AdminSettings() {
         await setDoc(globalSettingsRef, { ...currentData, logoUrl, faviconUrl }, { merge: true });
         showAlert('Berhasil', 'Branding saved successfully!', 'success');
       } else if (tab === 'fonnte') {
-        await setDoc(globalSettingsRef, { ...currentData, fonnteToken }, { merge: true });
-        showAlert('Berhasil', 'Fonnte token saved successfully!', 'success');
+        await setDoc(globalSettingsRef, { 
+          ...currentData, 
+          fonnteToken,
+          fonnteTemplates: {
+            orderCreated: templateOrderCreated,
+            orderPaid: templateOrderPaid,
+            orderCancelled: templateOrderCancelled
+          }
+        }, { merge: true });
+        showAlert('Berhasil', 'Fonnte settings saved successfully!', 'success');
       } else if (tab === 'payment_methods') {
         await setDoc(globalSettingsRef, { 
           ...currentData, 
@@ -187,16 +201,54 @@ export default function AdminSettings() {
                   <MessageSquare className="w-5 h-5 text-indigo-500" /> Integrasi WhatsApp Fonnte (Beta)
                 </h2>
                 <p className="text-sm text-gray-500 mb-4">Pengaturan token untuk API Fonnte pengiriman pesan WhatsApp.</p>
-                <div className="space-y-4">
+                <div className="space-y-4 max-w-3xl">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">API Token</label>
-                    <input type="password" value={fonnteToken} onChange={e => setFonnteToken(e.target.value)} placeholder="Masukkan Token Fonnte" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white" />
+                    <input type="password" value={fonnteToken} onChange={e => setFonnteToken(e.target.value)} placeholder="Masukkan Token Fonnte" className="w-full border border-gray-300 rounded-md px-3 py-2 flex-1 focus:ring-indigo-500 focus:border-indigo-500 bg-white" />
+                  </div>
+                  
+                  <div className="pt-4 mt-4 border-t border-gray-200">
+                    <h3 className="text-md font-semibold text-gray-900 mb-3">Template Pesan WhatsApp</h3>
+                    <p className="text-xs text-gray-500 mb-4">Anda dapat menggunakan variabel berikut dalam template: <br/><code>{"{userName}"}</code>, <code>{"{serviceName}"}</code>, <code>{"{invoiceId}"}</code>, <code>{"{amount}"}</code></p>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Pesanan Dibuat (Pending)</label>
+                        <textarea 
+                          value={templateOrderCreated} 
+                          onChange={e => setTemplateOrderCreated(e.target.value)} 
+                          placeholder={"Halo {userName},\n\nPesanan Anda untuk {serviceName} berhasil dibuat.\nNomor: {invoiceId}\nTotal: {amount}"} 
+                          rows={4} 
+                          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Pesanan Dibayar (Sukses)</label>
+                        <textarea 
+                          value={templateOrderPaid} 
+                          onChange={e => setTemplateOrderPaid(e.target.value)} 
+                          placeholder={"Halo {userName},\n\nPembayaran untuk pesanan {serviceName} ({invoiceId}) telah berhasil dikonfirmasi.\nLayanan Anda sudah aktif."} 
+                          rows={4} 
+                          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Pesanan Dibatalkan</label>
+                        <textarea 
+                          value={templateOrderCancelled} 
+                          onChange={e => setTemplateOrderCancelled(e.target.value)} 
+                          placeholder={"Halo {userName},\n\nMohon maaf, pesanan layanan {serviceName} ({invoiceId}) telah dibatalkan."} 
+                          rows={4} 
+                          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white" 
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
               <div className="pt-4 border-t border-gray-100 flex justify-end">
                 <button type="button" onClick={() => handleSave('fonnte')} disabled={isSaving} className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors disabled:opacity-50">
-                  {isSaving ? 'Menyimpan...' : 'Simpan Token'}
+                  {isSaving ? 'Menyimpan...' : 'Simpan Pengaturan Fonnte'}
                 </button>
               </div>
             </div>

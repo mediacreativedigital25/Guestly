@@ -20,6 +20,7 @@ export default function EventsList() {
   
   // Event Form State
   const [newEventTitle, setNewEventTitle] = useState('');
+  const [newEventCoupleName, setNewEventCoupleName] = useState('');
   const [newEventDate, setNewEventDate] = useState('');
   const [newEventTime, setNewEventTime] = useState('');
   const [newEventLocation, setNewEventLocation] = useState('');
@@ -33,6 +34,7 @@ export default function EventsList() {
 
   const resetForm = () => {
     setNewEventTitle('');
+    setNewEventCoupleName('');
     setNewEventDate('');
     setNewEventTime('');
     setNewEventLocation('');
@@ -47,18 +49,52 @@ export default function EventsList() {
   };
 
   const openCreateModal = () => {
-    if (appUser?.role !== 'superadmin' && (!appUser?.eventQuota || appUser.eventQuota <= 0)) {
+    let isActive = false;
+    let hasQuota = false;
+
+    if (appUser?.role === 'superadmin') {
+      isActive = true;
+      hasQuota = true;
+    } else {
+      let activeDate: Date | null = null;
+      if (appUser?.activeUntil) {
+         if (appUser.activeUntil.toDate) activeDate = appUser.activeUntil.toDate();
+         else if (typeof appUser.activeUntil === 'string') activeDate = new Date(appUser.activeUntil);
+         else if (appUser.activeUntil.seconds) activeDate = new Date(appUser.activeUntil.seconds * 1000);
+      }
+      if (activeDate && activeDate > new Date()) {
+         isActive = true;
+      }
+      if (appUser?.eventQuota && appUser.eventQuota > 0) {
+         hasQuota = true;
+      }
+    }
+
+    if (!isActive) {
+       showAlert('Akses Ditolak', 'Masa aktif akun Anda telah habis. Silakan beli layanan terlebih dahulu.', 'warning');
+       navigate('/services/catalog');
+       return;
+    }
+    
+    if (!hasQuota) {
        showAlert('Akses Ditolak', 'Anda tidak memiliki kuota acara. Silakan beli layanan terlebih dahulu.', 'warning');
        navigate('/services/catalog');
        return;
     }
+
     resetForm();
+    if (appUser?.role === 'client') {
+      setNewEventClientId(appUser.id || '');
+    } else if (clients.length > 0) {
+      setNewEventClientId(clients[0].id!);
+    }
     setIsCreating(true);
   };
 
   const openEditModal = (event: EventRecord) => {
     setEditingEventId(event.id || null);
     setNewEventTitle(event.title);
+    setNewEventCoupleName(event.coupleName || '');
     setNewEventDate(event.date);
     setNewEventTime(event.time || '');
     setNewEventLocation(event.location || '');
@@ -87,11 +123,12 @@ export default function EventsList() {
           q = query(eventsRef, where('partnerId', '==', partnerId));
           cQuery = query(clientsRef, where('partnerId', '==', partnerId));
         } else if (appUser?.role === 'client') {
-          if (!appUser?.clientId) {
+          const targetClientId = appUser?.clientId || appUser?.id;
+          if (!targetClientId) {
             setEvents([]);
             return;
           }
-          q = query(eventsRef, where('clientId', '==', appUser.clientId));
+          q = query(eventsRef, where('clientId', '==', targetClientId));
           // No need to fetch all clients for a client user, just their own record if needed, but we don't necessarily need the list for the dropdown since they can't create events.
         }
 
@@ -140,6 +177,7 @@ export default function EventsList() {
     try {
       const payload: any = {
         title: newEventTitle,
+        coupleName: newEventCoupleName,
         date: newEventDate,
         clientId: newEventClientId,
         updatedAt: serverTimestamp()
@@ -172,28 +210,26 @@ export default function EventsList() {
         setIsCreating(false);
         showAlert('Berhasil', 'Acara berhasil diperbarui!', 'success');
       } else {
-        payload.status = 'draft';
+        payload.status = 'published';
         payload.partnerId = partnerId;
         payload.createdAt = serverTimestamp();
         let newDocId = '';
-        await runTransaction(db, async (transaction) => {
-          const userRef = doc(db, 'users', appUser.id!);
-          const userDoc = await transaction.get(userRef);
-          if (!userDoc.exists()) throw new Error("User not found");
-          
-          const currentQuota = userDoc.data().eventQuota || 0;
-          if (appUser.role !== 'superadmin' && currentQuota <= 0) {
-            throw new Error("QUOTA_EXCEEDED");
-          }
+        
+        const docRef = await addDoc(collection(db, 'events'), payload);
+        newDocId = docRef.id;
 
-          if (appUser.role !== 'superadmin') {
-            transaction.update(userRef, { eventQuota: currentQuota - 1 });
-          }
-
-          const newEventRef = doc(collection(db, 'events'));
-          newDocId = newEventRef.id;
-          transaction.set(newEventRef, payload);
-        });
+        // Deduct quota if not superadmin
+        if (appUser?.role !== 'superadmin') {
+           const newQuota = Math.max(0, (appUser?.eventQuota || 0) - 1);
+           try {
+             await updateDoc(doc(db, 'users', appUser!.id), {
+               eventQuota: newQuota,
+               updatedAt: serverTimestamp()
+             });
+           } catch(e) {
+             console.error('Failed to deduct quota:', e);
+           }
+        }
         
         showAlert('Berhasil', 'Acara berhasil dibuat!', 'success');
         navigate(`/events/${newDocId}`);
@@ -241,15 +277,13 @@ export default function EventsList() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-900">Events</h1>
-        {appUser?.role !== 'client' && (
-          <button 
-            onClick={openCreateModal}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium"
-          >
-            <Plus className="w-4 h-4" />
-            Create Event
-          </button>
-        )}
+        <button 
+          onClick={openCreateModal}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium"
+        >
+          <Plus className="w-4 h-4" />
+          Create Event
+        </button>
       </div>
 
       <Modal isOpen={isCreating} onClose={() => setIsCreating(false)} title={editingEventId ? "Edit Acara" : "Buat Acara Baru"}>
@@ -285,18 +319,24 @@ export default function EventsList() {
         <div className="space-y-6">
           {activeTab === 'info' && (
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Client *</label>
-                <select required value={newEventClientId} onChange={e => setNewEventClientId(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500">
-                  <option value="" disabled>Pilih Client</option>
-                  {clients.map(client => (
-                    <option key={client.id} value={client.id}>{client.name}</option>
-                  ))}
-                </select>
-              </div>
+              {appUser?.role !== 'client' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Client *</label>
+                  <select required value={newEventClientId} onChange={e => setNewEventClientId(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500">
+                    <option value="" disabled>Pilih Client</option>
+                    {clients.map(client => (
+                      <option key={client.id} value={client.id}>{client.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nama Acara *</label>
                 <input required value={newEventTitle} onChange={e => setNewEventTitle(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: Resepsi Pernikahan John & Jane" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nama Mempelai</label>
+                <input value={newEventCoupleName} onChange={e => setNewEventCoupleName(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: Romeo & Juliet" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>

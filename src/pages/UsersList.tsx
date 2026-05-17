@@ -4,6 +4,7 @@ import { db, createAuthUserSilently } from '../lib/firebase';
 import { User, Role } from '../types';
 import { Shield, Trash2, Edit, Plus } from 'lucide-react';
 import { useAuth } from '../AuthContext';
+import { useSettings } from '../SettingsContext';
 import { Modal } from '../components/Modal';
 import { showAlert, showConfirm } from '../lib/alerts';
 
@@ -14,6 +15,7 @@ export default function UsersList() {
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserPhone, setNewUserPhone] = useState('');
   const [newUserRole, setNewUserRole] = useState<Role>('client');
   const [newUserPartnerId, setNewUserPartnerId] = useState('');
   const [newUserClientId, setNewUserClientId] = useState('');
@@ -21,6 +23,7 @@ export default function UsersList() {
   const [error, setError] = useState('');
 
   const { appUser } = useAuth();
+  const { settings } = useSettings();
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -91,6 +94,7 @@ export default function UsersList() {
       const newUserDoc: User = {
         name: newUserName,
         email: newUserEmail,
+        phone: newUserPhone,
         role: newUserRole,
         partnerId: newUserPartnerId || null,
         clientId: newUserClientId || null,
@@ -102,10 +106,20 @@ export default function UsersList() {
 
       setUsers([...users, { id: uid, ...newUserDoc }]);
       
+      // 3. Send WhatsApp Notification
+      if (settings?.fonnteToken && newUserPhone) {
+        import('../lib/fonnte').then(({ sendFonnteMessage }) => {
+          const loginUrl = window.location.origin;
+          const message = `NOTIFIKASI AKUN GUESTLY\n\n🔐 Informasi Akun Guestly\n\nHalo kak ${newUserName} 👋\nBerikut informasi akun Guestly kakak:\n\n📧 Email : ${newUserEmail}\n🔑 Password : ${newUserPassword}\n🌐 Login : ${loginUrl}\n\nMohon simpan informasi akun dengan baik 😊\n\n📞 Jika memiliki kendala atau membutuhkan bantuan, jangan ragu menghubungi 085158636606`;
+          sendFonnteMessage(settings.fonnteToken!, newUserPhone, message);
+        });
+      }
+
       // Reset form
       setNewUserName('');
       setNewUserEmail('');
       setNewUserPassword('');
+      setNewUserPhone('');
       setNewUserRole('client');
       setNewUserPartnerId('');
       setNewUserClientId('');
@@ -146,6 +160,10 @@ export default function UsersList() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email / Username</label>
             <input required value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} type="email" className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="email@contoh.com" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">No. WhatsApp / Telepon</label>
+            <input required value={newUserPhone} onChange={e => setNewUserPhone(e.target.value)} type="tel" className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="08123456789" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>

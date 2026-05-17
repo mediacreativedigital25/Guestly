@@ -6,6 +6,11 @@ interface GlobalSettings {
   logoUrl?: string;
   faviconUrl?: string;
   fonnteToken?: string;
+  fonnteTemplates?: {
+    orderCreated?: string;
+    orderPaid?: string;
+    orderCancelled?: string;
+  };
   activePaymentMethod?: 'manual' | 'tripay';
   paymentGateway?: {
     serverKey?: string;

@@ -68,6 +68,7 @@ export default function ServiceCheckout() {
     
     try {
       const counterRef = doc(db, 'counters', 'invoice');
+      let createdInvoiceId = '';
       
       await runTransaction(db, async (transaction) => {
         const counterDoc = await transaction.get(counterRef);
@@ -84,12 +85,14 @@ export default function ServiceCheckout() {
         const year = now.getFullYear();
         const month = (now.getMonth() + 1).toString().padStart(2, '0');
         const invoiceId = `IN${year}${month}${paddedSeq}`;
+        createdInvoiceId = invoiceId;
 
         const newInvoiceRef = doc(db, 'invoices', invoiceId);
         
         transaction.set(newInvoiceRef, {
           userId: currentUser.uid,
           userName: appUser?.name || currentUser.displayName || currentUser.email || 'Unknown User',
+          userPhone: appUser?.phone || '',
           serviceId: service.id,
           serviceName: service.name,
           amount: service.price,
@@ -99,6 +102,23 @@ export default function ServiceCheckout() {
           updatedAt: serverTimestamp()
         });
       });
+      
+      // Send Fonnte WhatsApp Notification
+      if (settings?.fonnteToken && appUser?.phone) {
+        import('../../lib/fonnte').then(({ sendFonnteMessage }) => {
+          let message = `Halo ${appUser.name || 'User'},\n\nPesanan Anda untuk layanan *${service.name}* telah berhasil dibuat.\nNomor Invoice: *${createdInvoiceId}*\nTotal: *Rp ${service.price.toLocaleString('id-ID')}*\nStatus: *Pending*\n\nSilakan selesaikan pembayaran sesuai instruksi pada aplikasi.\n\nTerima kasih,\nAdmin Guestly`;
+          
+          if (settings.fonnteTemplates?.orderCreated) {
+            message = settings.fonnteTemplates.orderCreated
+              .replace(/{userName}/g, appUser.name || 'User')
+              .replace(/{serviceName}/g, service.name)
+              .replace(/{invoiceId}/g, createdInvoiceId)
+              .replace(/{amount}/g, `Rp ${service.price.toLocaleString('id-ID')}`);
+          }
+          
+          sendFonnteMessage(settings.fonnteToken!, appUser.phone!, message);
+        });
+      }
       
       showAlert('Berhasil', 'Pesanan berhasil dibuat!', 'success');
       // Navigate to my invoices page

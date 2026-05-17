@@ -27,19 +27,17 @@ service cloud.firestore {
 
     function getAssociatedPartnerId(uid) {
        let u = exists(/databases/$(database)/documents/users/$(uid)) ? get(/databases/$(database)/documents/users/$(uid)).data : null;
-       return u != null ? (u.get('role', 'none') == 'partner' ? uid : u.get('partnerId', null)) : null;
+       return u != null && 'partnerId' in u && u.partnerId != null ? u.partnerId : 'default-partner';
     }
 
     function isPartnerUser(partnerId) {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
-        && getAssociatedPartnerId(request.auth.uid) == partnerId
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'none') == 'partner';
+      let u = exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data : null;
+      return u != null && u.role == 'partner' && (request.auth.uid == partnerId || ('partnerId' in u && u.partnerId == partnerId));
     }
 
     function isClientUser(clientId) {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('clientId', 'none') == clientId
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'none') == 'client';
+      let u = exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data : null;
+      return u != null && u.role == 'client' && (request.auth.uid == clientId || ('clientId' in u && u.clientId == clientId));
     }
 
     function isAppAdmin() {
@@ -62,7 +60,7 @@ service cloud.firestore {
         (!('eventQuota' in data) || data.eventQuota == null || (data.eventQuota is number && data.eventQuota >= 0)) &&
         (!('clientQuota' in data) || data.clientQuota == null || (data.clientQuota is number && data.clientQuota >= 0)) &&
         (!('guestQuota' in data) || data.guestQuota == null || (data.guestQuota is number && data.guestQuota >= 0)) &&
-        (!('activeUntil' in data) || data.activeUntil == null || data.activeUntil is timestamp) &&
+        (!('activeUntil' in data) || data.activeUntil == null || data.activeUntil is timestamp || data.activeUntil is string) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -90,11 +88,12 @@ service cloud.firestore {
     }
 
     function isValidEvent(data) {
-      return data.size() >= 7 && data.size() <= 15 &&
+      return data.size() >= 7 && data.size() <= 16 &&
         data.keys().hasAll(['partnerId', 'clientId', 'title', 'date', 'status', 'createdAt', 'updatedAt']) &&
         data.partnerId is string && data.partnerId.size() <= 128 &&
         data.clientId is string && data.clientId.size() <= 128 &&
         data.title is string && data.title.size() <= 200 &&
+        (!('coupleName' in data) || data.coupleName == null || (data.coupleName is string && data.coupleName.size() <= 200)) &&
         data.date is string && data.date.size() <= 50 &&
         data.status is string && (data.status == 'draft' || data.status == 'published' || data.status == 'completed') &&
         (!('description' in data) || data.description == null || (data.description is string && data.description.size() <= 2000)) &&
@@ -215,12 +214,15 @@ service cloud.firestore {
 
     match /events/{eventId} {
       allow get: if isValidId(eventId); // Public can read event details for RSVP
-      allow list: if isSuperAdmin() || isPartnerUser(existing().partnerId) || isClientUser(existing().clientId);
-      // Event must be created by superadmin or partner
+      allow list: if isSuperAdmin() || 
+        (isSignedIn() && (
+          ('partnerId' in resource.data && isPartnerUser(resource.data.partnerId)) || 
+          ('clientId' in resource.data && isClientUser(resource.data.clientId))
+        ));
+      // Event must be created by superadmin or partner or client
       allow create: if isSignedIn() && isValidEvent(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time &&
-        (isSuperAdmin() || isPartnerUser(incoming().partnerId));
+        (isSuperAdmin() || isPartnerUser(incoming().partnerId) || isClientUser(incoming().clientId));
       allow update: if isValidId(eventId) && isSignedIn() && isValidEvent(incoming()) && incoming().updatedAt == request.time &&
-        incoming().partnerId == existing().partnerId &&
         (isSuperAdmin() || isPartnerUser(existing().partnerId) || isClientUser(existing().clientId));
       allow delete: if isValidId(eventId) && (isSuperAdmin() || isPartnerUser(existing().partnerId));
     }

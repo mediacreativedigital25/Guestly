@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, updateDoc, query, orderBy, serverTimestamp, runTransaction } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, query, orderBy, serverTimestamp, runTransaction, getDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
 import { useAuth } from '../../AuthContext';
+import { useSettings } from '../../SettingsContext';
 import { showAlert, showConfirm } from '../../lib/alerts';
 import { CheckCircle, XCircle } from 'lucide-react';
 
 export default function AdminInvoice() {
   const { appUser } = useAuth();
+  const { settings } = useSettings();
   const [invoices, setInvoices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -105,10 +107,33 @@ export default function AdminInvoice() {
           status: 'paid',
           updatedAt: serverTimestamp()
         });
+        
+        // Notifications are sent outside transaction
       });
 
       setInvoices(invoices.map(inv => inv.id === invoiceId ? { ...inv, status: 'paid' } : inv));
       showAlert('Berhasil', 'Pembayaran berhasil dikonfirmasi dan kuota ditambahkan ke pengguna.', 'success');
+      
+      // Send Fonnte WhatsApp Notification
+      const userRefQuery = await getDoc(doc(db, 'users', invoice.userId));
+      if (userRefQuery.exists()) {
+        const uData = userRefQuery.data();
+        if (settings?.fonnteToken && uData.phone) {
+          import('../../lib/fonnte').then(({ sendFonnteMessage }) => {
+            let message = `Halo ${uData.name || 'User'},\n\nPembayaran untuk pesanan layanan *${invoice.serviceName}* dengan nomor Invoice *${invoiceId}* telah berhasil dikonfirmasi.\n\nLayanan Anda sudah aktif dan kuota telah ditambahkan ke akun Anda.\n\nTerima kasih,\nAdmin Guestly`;
+            
+            if (settings.fonnteTemplates?.orderPaid) {
+              message = settings.fonnteTemplates.orderPaid
+                .replace(/{userName}/g, uData.name || 'User')
+                .replace(/{serviceName}/g, invoice.serviceName)
+                .replace(/{invoiceId}/g, invoiceId)
+                .replace(/{amount}/g, `Rp ${(invoice.amount || 0).toLocaleString('id-ID')}`);
+            }
+            
+            sendFonnteMessage(settings.fonnteToken!, uData.phone, message);
+          });
+        }
+      }
     } catch (error) {
       console.error(error);
       showAlert('Gagal', 'Gagal mengonfirmasi pembayaran', 'error');
@@ -116,6 +141,7 @@ export default function AdminInvoice() {
   };
 
   const handleCancelPayment = async (invoiceId: string) => {
+    const invoice = invoices.find(inv => inv.id === invoiceId);
     const confirmed = await showConfirm('Apakah Anda yakin ingin membatalkan/menolak invoice ini?');
     if (!confirmed) return;
 
@@ -126,6 +152,28 @@ export default function AdminInvoice() {
       });
       setInvoices(invoices.map(inv => inv.id === invoiceId ? { ...inv, status: 'cancelled' } : inv));
       showAlert('Berhasil', 'Invoice berhasil dibatalkan', 'success');
+      
+      if (invoice?.userId) {
+        const userRefQuery = await getDoc(doc(db, 'users', invoice.userId));
+        if (userRefQuery.exists()) {
+          const uData = userRefQuery.data();
+          if (settings?.fonnteToken && uData.phone) {
+            import('../../lib/fonnte').then(({ sendFonnteMessage }) => {
+              let message = `Halo ${uData.name || 'User'},\n\nMohon maaf, pesanan layanan *${invoice?.serviceName}* dengan nomor Invoice *${invoiceId}* telah dibatalkan.\n\nJika ada pertanyaan silakan hubungi kami.\n\nTerima kasih,\nAdmin Guestly`;
+              
+              if (settings.fonnteTemplates?.orderCancelled) {
+                message = settings.fonnteTemplates.orderCancelled
+                  .replace(/{userName}/g, uData.name || 'User')
+                  .replace(/{serviceName}/g, invoice?.serviceName || '')
+                  .replace(/{invoiceId}/g, invoiceId)
+                  .replace(/{amount}/g, `Rp ${(invoice?.amount || 0).toLocaleString('id-ID')}`);
+              }
+              
+              sendFonnteMessage(settings.fonnteToken!, uData.phone, message);
+            });
+          }
+        }
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `invoices/${invoiceId}`);
       showAlert('Gagal', 'Gagal membatalkan invoice', 'error');

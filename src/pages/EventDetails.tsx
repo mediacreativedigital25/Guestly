@@ -77,6 +77,11 @@ export default function EventDetails() {
   const handleAddGuest = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (appUser?.role !== 'superadmin' && appUser?.guestQuota !== undefined && guests.length >= appUser.guestQuota) {
+      showAlert('Kuota Habis', `Anda telah mencapai batas maksimal kuota tamu (${appUser.guestQuota} tamu). Silakan beli atau upgrade layanan Anda.`, 'warning');
+      return;
+    }
+
     const confirmed = await showConfirm("Apakah Anda yakin ingin menambahkan tamu ini?");
     if (!confirmed) return;
     
@@ -255,7 +260,8 @@ export default function EventDetails() {
         digitalInviteLink = `${event.digitalInviteLink}${separator}to=${encodeURIComponent(guest.name)}`;
     }
 
-    const text = `Halo *${guest.name}* 👋🏻\n\nDengan penuh rasa hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara spesial kami:\n\n✨ *${event?.title}* ✨\n\nUntuk konfirmasi kehadiran saat acara berlangsung, silakan tunjukkan QR Code berikut:\n🔳 ${qrLink}\n\nDetail lengkap acara dapat dilihat melalui undangan digital berikut:\n💌 ${digitalInviteLink}\n\nMerupakan suatu kebahagiaan bagi kami apabila Bapak/Ibu/Saudara/i berkenan hadir serta memberikan doa dan restu kepada kami.\n\nAtas perhatian dan kehadirannya, kami ucapkan terima kasih 🙏🏻\n\nHormat kami,\n*${clientName || event?.title}*`;
+    const senderName = event?.coupleName || clientName || event?.title || 'Kami';
+    const text = `Halo *${guest.name}* 👋🏻\n\nDengan penuh rasa hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara spesial kami:\n\n✨ *${event?.title}* ✨\n\nUntuk konfirmasi kehadiran saat acara berlangsung, silakan tunjukkan QR Code berikut:\n🔳 ${qrLink}\n\nDetail lengkap acara dapat dilihat melalui undangan digital berikut:\n💌 ${digitalInviteLink}\n\nMerupakan suatu kebahagiaan bagi kami apabila Bapak/Ibu/Saudara/i berkenan hadir serta memberikan doa dan restu kepada kami.\n\nAtas perhatian dan kehadirannya, kami ucapkan terima kasih 🙏🏻\n\nHormat kami,\n*${senderName}*`;
 
     const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
     window.open(waUrl, '_blank');
@@ -312,6 +318,11 @@ export default function EventDetails() {
         const newGuests: Guest[] = [];
 
         for (const row of data as any[]) {
+           if (appUser?.role !== 'superadmin' && appUser?.guestQuota !== undefined && (guests.length + addedCount) >= appUser.guestQuota) {
+             showAlert('Peringatan', `Impor dihentikan karena mencapai batas maksimal kuota tamu (${appUser.guestQuota} tamu). Silakan upgrade layanan.`, 'warning');
+             break;
+           }
+
            let guestName = row["Nama Tamu"] || row.Nama;
            if (guestName) {
               const cleanedName = String(guestName).trim();
@@ -795,27 +806,58 @@ export default function EventDetails() {
       </Modal>
 
       <Modal isOpen={isEmbedModalOpen} onClose={() => setIsEmbedModalOpen(false)} title="Integrasi Undangan Digital (Elementor dll)">
-        <div className="space-y-4">
-          <p className="text-sm text-gray-500">
-            Anda dapat menempelkan kode iframe berikut pada widget HTML di Elementor (atau pembuat website lainnya) untuk menampilkan form RSVP beserta daftar ucapan tamu secara langsung pada halaman undangan digital.
-          </p>
-          <div className="bg-gray-100 p-4 rounded-md relative text-sm font-mono text-gray-800 break-all select-all">
-            {`<iframe src="${window.location.origin}/public/rsvp/${eventId}?embed=true" width="100%" height="800px" frameborder="0" scrolling="yes" style="border: none; max-width: 100%; border-radius: 12px; overflow: hidden;"></iframe>`}
+        <div className="space-y-6">
+          
+          <div className="space-y-4">
+            <h3 className="text-md font-bold text-gray-900 border-b pb-2">1. Embed Form RSVP & Ucapan</h3>
+            <p className="text-sm text-gray-500">
+              Anda dapat menempelkan kode iframe berikut pada widget HTML di Elementor untuk menampilkan form RSVP beserta daftar ucapan tamu.
+            </p>
+            <div className="bg-gray-100 p-4 rounded-md relative text-sm font-mono text-gray-800 break-all select-all">
+              {`<iframe src="${window.location.origin}/public/rsvp/${eventId}?embed=true" width="100%" height="800px" frameborder="0" scrolling="yes" style="border: none; max-width: 100%; border-radius: 12px; overflow: hidden;"></iframe>`}
+            </div>
+            <p className="text-sm text-gray-500 mt-2">
+              Sesuaikan <code className="bg-gray-100 px-1 py-0.5 rounded">height="800px"</code> sesuai dengan kebutuhan desain halaman website Anda.
+            </p>
+            <div className="flex justify-end pt-2">
+              <button
+                 onClick={() => {
+                   navigator.clipboard.writeText(`<iframe src="${window.location.origin}/public/rsvp/${eventId}?embed=true" width="100%" height="800px" frameborder="0" scrolling="yes" style="border: none; max-width: 100%; border-radius: 12px; overflow: hidden;"></iframe>`);
+                   showAlert('Berhasil', 'Kode iframe RSVP disalin ke clipboard!', 'success');
+                 }}
+                 className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors text-sm"
+              >
+                <Copy className="w-4 h-4" /> Salin Kode iframe
+              </button>
+            </div>
           </div>
-          <p className="text-sm text-gray-500 mt-2">
-            Sesuaikan <code className="bg-gray-100 px-1 py-0.5 rounded">height="800px"</code> sesuai dengan kebutuhan desain halaman website Anda.
-          </p>
-          <div className="flex justify-end pt-4">
-            <button
-               onClick={() => {
-                 navigator.clipboard.writeText(`<iframe src="${window.location.origin}/public/rsvp/${eventId}?embed=true" width="100%" height="800px" frameborder="0" scrolling="yes" style="border: none; max-width: 100%; border-radius: 12px; overflow: hidden;"></iframe>`);
-                 showAlert('Berhasil', 'Kode iframe disalin ke clipboard!', 'success');
-               }}
-               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors"
-            >
-              <Copy className="w-5 h-5" /> Salin Kode iframe
-            </button>
+
+          <div className="space-y-4 pt-4 border-t border-gray-100">
+            <h3 className="text-md font-bold text-gray-900 border-b pb-2">2. Embed Dinamis Barcode / QR (Elementor)</h3>
+            <p className="text-sm text-gray-500">
+              Untuk memunculkan Barcode (QR Code) setiap tamu secara dinamis di Elementor, Anda bisa memasukkan script iframe berikut pada widget HTML. Pastikan Anda mengatur parameter URL undangan dengan dinamis tag elementor, misalnya menggunakan Data URL param <code className="bg-gray-100 px-1 py-0.5 rounded">ticket</code> dan <code className="bg-gray-100 px-1 py-0.5 rounded">to</code> (sebagai nama tamu).
+            </p>
+            <div className="bg-gray-100 p-4 rounded-md relative text-sm font-mono text-gray-800 break-all select-all">
+              {`<iframe src="${window.location.origin}/public/qr?ticket=[QueryParam:ticket]&to=[QueryParam:to]" width="100%" height="320px" frameborder="0" scrolling="no" style="border: none; overflow: hidden; background: transparent;"></iframe>`}
+            </div>
+            <div className="bg-blue-50 p-3 rounded-md border border-blue-100">
+              <p className="text-xs text-blue-800">
+                <strong>Tips Elementor:</strong> Ganti bagian <code className="font-mono bg-blue-100 px-1 rounded">[QueryParam:ticket]</code> & <code className="font-mono bg-blue-100 px-1 rounded">[QueryParam:to]</code> dengan Dynamic Tag (Request Parameter &gt; Get) yang Anda gunakan saat membagikan link ke tamu. Contoh URL undangan Anda: <code className="font-mono bg-blue-100 px-1 rounded">domain.com/?to=Budi&ticket=NSAV0FV1</code>.
+              </p>
+            </div>
+            <div className="flex justify-end pt-2">
+              <button
+                 onClick={() => {
+                   navigator.clipboard.writeText(`<iframe src="${window.location.origin}/public/qr?ticket=[ticket]&to=[to]" width="100%" height="320px" frameborder="0" scrolling="no" style="border: none; overflow: hidden; background: transparent;"></iframe>`);
+                   showAlert('Berhasil', 'Kode iframe QR disalin ke clipboard!', 'success');
+                 }}
+                 className="flex items-center gap-2 px-4 py-2 text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-md hover:bg-indigo-100 hover:border-indigo-200 font-medium transition-colors text-sm"
+              >
+                <Copy className="w-4 h-4" /> Salin Template QR
+              </button>
+            </div>
           </div>
+
         </div>
       </Modal>
 

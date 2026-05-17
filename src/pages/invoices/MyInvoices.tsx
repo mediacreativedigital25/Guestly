@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, Timestamp, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
 import { useAuth } from '../../AuthContext';
 import { useSettings } from '../../SettingsContext';
 import { Modal } from '../../components/Modal';
+import { showAlert, showConfirm } from '../../lib/alerts';
 
 export default function MyInvoices() {
-  const { currentUser } = useAuth();
+  const { appUser, currentUser } = useAuth();
   const { settings } = useSettings();
   const [invoices, setInvoices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,6 +44,40 @@ export default function MyInvoices() {
   const handlePayNow = (invoice: any) => {
     setSelectedInvoice(invoice);
     setIsPaymentModalOpen(true);
+  };
+
+  const handleCancelInvoice = async (invoiceId: string, serviceName: string) => {
+    const confirmed = await showConfirm('Apakah Anda yakin ingin membatalkan pesanan ini?');
+    if (!confirmed) return;
+
+    try {
+      await updateDoc(doc(db, 'invoices', invoiceId), {
+        status: 'cancelled',
+        updatedAt: serverTimestamp()
+      });
+      setInvoices(invoices.map(inv => inv.id === invoiceId ? { ...inv, status: 'cancelled' } : inv));
+      showAlert('Berhasil', 'Pesanan berhasil dibatalkan', 'success');
+
+      if (settings?.fonnteToken && appUser?.phone) {
+        import('../../lib/fonnte').then(({ sendFonnteMessage }) => {
+          let message = `Halo ${appUser.name || 'User'},\n\nPesanan Anda untuk layanan *${serviceName}* dengan nomor Invoice *${invoiceId}* telah Anda batalkan.\n\nJika ada pertanyaan silakan hubungi kami.\n\nTerima kasih,\nAdmin Guestly`;
+          
+          if (settings.fonnteTemplates?.orderCancelled) {
+            // we don't have exact amount here easily, so we just pass what we have
+            message = settings.fonnteTemplates.orderCancelled
+              .replace(/{userName}/g, appUser.name || 'User')
+              .replace(/{serviceName}/g, serviceName)
+              .replace(/{invoiceId}/g, invoiceId)
+              .replace(/{amount}/g, '');
+          }
+
+          sendFonnteMessage(settings.fonnteToken!, appUser.phone, message);
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `invoices/${invoiceId}`);
+      showAlert('Gagal', 'Gagal membatalkan pesanan', 'error');
+    }
   };
 
   if (loading) {
@@ -97,14 +132,22 @@ export default function MyInvoices() {
                         {inv.status === 'paid' ? 'Lunas' : inv.status === 'cancelled' ? 'Dibatalkan' : 'Menunggu Pembayaran'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm space-x-2">
                       {inv.status === 'pending' && (
-                        <button
-                          onClick={() => handlePayNow(inv)}
-                          className="text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
-                        >
-                          Bayar Sekarang
-                        </button>
+                        <>
+                          <button
+                            onClick={() => handlePayNow(inv)}
+                            className="text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors inline-block"
+                          >
+                            Bayar Sekarang
+                          </button>
+                          <button
+                            onClick={() => handleCancelInvoice(inv.id, inv.serviceName)}
+                            className="text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors inline-block"
+                          >
+                            Batalkan
+                          </button>
+                        </>
                       )}
                     </td>
                   </tr>
