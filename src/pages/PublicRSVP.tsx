@@ -6,7 +6,17 @@ import { EventRecord, Guest } from '../types';
 import { CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { parseFirestoreDate } from '../lib/utils';
 
-const THEMES = {
+const THEMES: Record<string, {
+  bgApp: string;
+  bgHeader: string;
+  btnPrimary: string;
+  btnSecondary: string;
+  ringColor: string;
+  spinner: string;
+  avatarBg: string;
+  font: string;
+  cardOverride?: string;
+}> = {
   default: {
     bgApp: 'bg-gray-50',
     bgHeader: 'bg-indigo-600',
@@ -62,6 +72,7 @@ export default function PublicRSVP() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [rsvpStatus, setRsvpStatus] = useState('attending');
+  const [sessionInput, setSessionInput] = useState('');
   const [wishes, setWishes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
@@ -117,6 +128,7 @@ export default function PublicRSVP() {
       
       if (phone.trim()) payload.phone = phone.trim();
       if (wishes.trim()) payload.wishes = wishes.trim();
+      if (sessionInput) payload.session = sessionInput;
 
       const guestRef = await addDoc(collection(db, 'events', eventId!, 'guests'), payload);
       
@@ -134,6 +146,7 @@ export default function PublicRSVP() {
       setName('');
       setPhone('');
       setWishes('');
+      setSessionInput('');
       setRsvpStatus('attending');
       
     } catch (error: any) {
@@ -239,6 +252,22 @@ export default function PublicRSVP() {
                       <p className={`text-[10px] mt-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Hanya untuk keperluan notifikasi acara.</p>
                     </div>
                   </div>
+
+                  {eventData?.sessions && eventData.sessions.length > 0 && (
+                    <div className="space-y-1">
+                      <label className={`block text-[11px] font-semibold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Sesi Acara</label>
+                      <select 
+                        value={sessionInput} 
+                        onChange={e => setSessionInput(e.target.value)} 
+                        className={`w-full border ${isDark ? 'border-neutral-700 bg-neutral-800 text-white' : 'border-gray-300 bg-white text-gray-900'} ${isEmbed ? 'rounded-lg px-3 py-2 text-sm' : 'rounded-xl px-4 py-3'} transition-colors ${theme.ringColor}`}
+                      >
+                        <option value="">-- Pilih Sesi --</option>
+                        {eventData.sessions.map((ses, idx) => (
+                          <option key={idx} value={ses}>{ses}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   <div className="space-y-1">
                     <label className={`block text-[11px] font-semibold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Konfirmasi Kehadiran <span className="text-red-500">*</span></label>

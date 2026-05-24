@@ -27,6 +27,7 @@ export default function EventDetails() {
   const [newGuestAddress, setNewGuestAddress] = useState('');
   const [newGuestPhone, setNewGuestPhone] = useState('');
   const [newGuestCategory, setNewGuestCategory] = useState('');
+  const [newGuestSession, setNewGuestSession] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'guest-list' | 'rsvp'>('guest-list');
   const [isEmbedModalOpen, setIsEmbedModalOpen] = useState(false);
@@ -106,6 +107,7 @@ export default function EventDetails() {
       if (newGuestAddress) payload.address = newGuestAddress;
       if (newGuestPhone) payload.phone = newGuestPhone;
       if (newGuestCategory) payload.category = newGuestCategory;
+      if (newGuestSession) payload.session = newGuestSession;
       
       const guestRef = await addDoc(collection(db, 'events', eventId!, 'guests'), payload);
       setGuests([...guests, { id: guestRef.id, ...payload } as unknown as Guest]);
@@ -113,6 +115,7 @@ export default function EventDetails() {
       setNewGuestAddress('');
       setNewGuestPhone('');
       setNewGuestCategory('');
+      setNewGuestSession('');
       setIsAddingGuest(false);
       showAlert('Berhasil', "Tamu berhasil ditambahkan!", "success");
     } catch (error) {
@@ -198,7 +201,7 @@ export default function EventDetails() {
     const doc = new jsPDF();
     doc.text(`Daftar Tamu - ${event?.title || 'Event'}`, 14, 15);
     
-    const tableColumn = ["No", "Nama", "Alamat", "No. Hp", "Kategori", "Status", "Waktu Kehadiran"];
+    const tableColumn = ["No", "Nama", "Alamat", "No. Hp", "Kategori", "Sesi", "Status", "Waktu Kehadiran"];
     const tableRows: any[] = [];
 
     filteredGuests.forEach((guest, index) => {
@@ -208,6 +211,7 @@ export default function EventDetails() {
         guest.address || '-',
         guest.phone || '-',
         guest.category || '-',
+        guest.session || '-',
         guest.attended ? 'Hadir' : 'Belum Hadir',
         guest.attendedAt && parseFirestoreDate(guest.attendedAt) ? parseFirestoreDate(guest.attendedAt)!.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '-'
       ];
@@ -245,7 +249,7 @@ export default function EventDetails() {
     let inviteUrl = `${baseUrl}/rsvp/${eventId}/${guest.ticketCode}`;
     
     if (event?.digitalInviteLink) {
-        inviteUrl = `${event.digitalInviteLink}${event.digitalInviteLink.includes('?') ? '&' : '?'}ticket=${guest.ticketCode}`;
+        inviteUrl = `${event.digitalInviteLink}${event.digitalInviteLink.includes('?') ? '&' : '?'}to=${encodeURIComponent(guest.name)}&ticket=${guest.ticketCode}`;
     }
     return inviteUrl;
   };
@@ -257,7 +261,7 @@ export default function EventDetails() {
     let digitalInviteLink = event?.digitalInviteLink || qrLink;
     if (event?.digitalInviteLink) {
         const separator = event.digitalInviteLink.includes('?') ? '&' : '?';
-        digitalInviteLink = `${event.digitalInviteLink}${separator}to=${encodeURIComponent(guest.name)}`;
+        digitalInviteLink = `${event.digitalInviteLink}${separator}to=${encodeURIComponent(guest.name)}&ticket=${guest.ticketCode}`;
     }
 
     const senderName = event?.coupleName || clientName || event?.title || 'Kami';
@@ -273,6 +277,7 @@ export default function EventDetails() {
       "Alamat": guest.address || '-',
       "No. Hp": guest.phone || '-',
       "Kategori": guest.category || '-',
+      "Sesi": guest.session || '-',
       "Status (Hadir / Belum Hadir)": guest.attended ? 'Hadir' : 'Belum Hadir',
       "Waktu Kehadiran": guest.attendedAt && parseFirestoreDate(guest.attendedAt) ? parseFirestoreDate(guest.attendedAt)!.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '-'
     }));
@@ -288,7 +293,8 @@ export default function EventDetails() {
       "Nama Tamu": '',
       "Alamat": '',
       "No. Hp": '',
-      "Kategori": ''
+      "Kategori": '',
+      "Sesi": ''
     }];
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
@@ -343,6 +349,7 @@ export default function EventDetails() {
                 rsvpStatus: 'pending',
                 attended: false,
                 category: row.Kategori ? String(row.Kategori) : '',
+                session: row.Sesi ? String(row.Sesi) : '',
                 email: row.Email ? String(row.Email) : '',
                 phone: phone ? String(phone) : '',
                 address: row.Alamat ? String(row.Alamat) : '',
@@ -462,6 +469,12 @@ export default function EventDetails() {
                   </p>
                </div>
                <div>
+                  <h3 className="text-sm font-medium text-gray-500">Masa Aktif</h3>
+                  <p className="mt-1 text-base text-gray-900">
+                    {event.activeUntil ? format(new Date(event.activeUntil), 'dd MMMM yyyy') : '-'}
+                  </p>
+               </div>
+               <div>
                   <h3 className="text-sm font-medium text-gray-500">Lokasi</h3>
                   <p className="mt-1 text-base text-gray-900">{event.location || '-'}</p>
                </div>
@@ -471,6 +484,18 @@ export default function EventDetails() {
                     {event.guestCategories && event.guestCategories.length > 0 ? (
                       event.guestCategories.map(cat => (
                         <span key={cat} className="inline-flex px-2 py-1 bg-indigo-50 text-indigo-700 text-xs font-medium rounded-md">{cat}</span>
+                      ))
+                    ) : (
+                      <span className="text-gray-900">-</span>
+                    )}
+                  </div>
+               </div>
+               <div>
+                  <h3 className="text-sm font-medium text-gray-500">Sesi Acara Disediakan</h3>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {event.sessions && event.sessions.length > 0 ? (
+                      event.sessions.map(ses => (
+                        <span key={ses} className="inline-flex px-2 py-1 bg-green-50 text-green-700 text-xs font-medium rounded-md">{ses}</span>
                       ))
                     ) : (
                       <span className="text-gray-900">-</span>
@@ -613,6 +638,21 @@ export default function EventDetails() {
                         </select>
                       </div>
                     )}
+                    {event?.sessions && event.sessions.length > 0 && (
+                      <div className="md:col-span-2 lg:col-span-3">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Sesi Acara</label>
+                        <select 
+                          value={newGuestSession} 
+                          onChange={e => setNewGuestSession(e.target.value)} 
+                          className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                          <option value="">-- Pilih Sesi --</option>
+                          {event.sessions.map(ses => (
+                            <option key={ses} value={ses}>{ses}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                  </div>
                  <div className="flex justify-end">
                    <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium text-sm transition-colors">
@@ -641,6 +681,7 @@ export default function EventDetails() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Alamat</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No. Hp</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kategori</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sesi</th>
                     {activeTab === 'rsvp' ? (
                       <>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status RSVP</th>
@@ -667,6 +708,11 @@ export default function EventDetails() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {guest.category ? (
                           <span className="inline-flex px-2 py-1 bg-indigo-50 text-indigo-700 text-xs font-medium rounded-md">{guest.category}</span>
+                        ) : '-'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {guest.session ? (
+                          <span className="inline-flex px-2 py-1 bg-green-50 text-green-700 text-xs font-medium rounded-md">{guest.session}</span>
                         ) : '-'}
                       </td>
                       {activeTab === 'rsvp' ? (

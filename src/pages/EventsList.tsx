@@ -26,10 +26,14 @@ export default function EventsList() {
   const [newEventLocation, setNewEventLocation] = useState('');
   const [newEventDigitalInviteLink, setNewEventDigitalInviteLink] = useState('');
   const [newEventFrame, setNewEventFrame] = useState('');
+  const [newEventThumbnail, setNewEventThumbnail] = useState('');
   const [newEventTheme, setNewEventTheme] = useState('default');
   const [newEventClientId, setNewEventClientId] = useState('');
+  const [newEventActiveUntil, setNewEventActiveUntil] = useState('');
   const [guestCategories, setGuestCategories] = useState<string[]>(['VIP', 'Keluarga', 'Reguler']);
   const [newCategory, setNewCategory] = useState('');
+  const [sessions, setSessions] = useState<string[]>(['Akad Nikah', 'Resepsi']);
+  const [newSession, setNewSession] = useState('');
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
 
   const resetForm = () => {
@@ -40,10 +44,14 @@ export default function EventsList() {
     setNewEventLocation('');
     setNewEventDigitalInviteLink('');
     setNewEventFrame('');
+    setNewEventThumbnail('');
     setNewEventTheme('default');
     setNewEventClientId('');
+    setNewEventActiveUntil('');
     setGuestCategories(['VIP', 'Keluarga', 'Reguler']);
     setNewCategory('');
+    setSessions(['Akad Nikah', 'Resepsi']);
+    setNewSession('');
     setEditingEventId(null);
     setActiveTab('info');
   };
@@ -100,10 +108,14 @@ export default function EventsList() {
     setNewEventLocation(event.location || '');
     setNewEventDigitalInviteLink(event.digitalInviteLink || '');
     setNewEventFrame(event.frameOverlayUrl || '');
+    setNewEventThumbnail(event.thumbnailUrl || '');
     setNewEventTheme(event.rsvpTheme || 'default');
     setNewEventClientId(event.clientId || '');
+    setNewEventActiveUntil(event.activeUntil || '');
     setGuestCategories(event.guestCategories || []);
     setNewCategory('');
+    setSessions(event.sessions || []);
+    setNewSession('');
     setActiveTab('info');
     setIsCreating(true);
   }; // Used the same modal
@@ -192,14 +204,23 @@ export default function EventsList() {
       if (newEventDigitalInviteLink) payload.digitalInviteLink = newEventDigitalInviteLink;
       else if (editingEventId) payload.digitalInviteLink = deleteField();
       
+      if (newEventActiveUntil) payload.activeUntil = newEventActiveUntil;
+      else if (editingEventId) payload.activeUntil = deleteField();
+      
       if (newEventFrame) payload.frameOverlayUrl = newEventFrame;
       else if (editingEventId) payload.frameOverlayUrl = deleteField();
+      
+      if (newEventThumbnail) payload.thumbnailUrl = newEventThumbnail;
+      else if (editingEventId) payload.thumbnailUrl = deleteField();
       
       if (newEventTheme) payload.rsvpTheme = newEventTheme;
       else if (editingEventId) payload.rsvpTheme = deleteField();
 
       if (guestCategories && guestCategories.length > 0) payload.guestCategories = guestCategories;
       else if (editingEventId) payload.guestCategories = deleteField();
+
+      if (sessions && sessions.length > 0) payload.sessions = sessions;
+      else if (editingEventId) payload.sessions = deleteField();
 
       if (editingEventId) {
         await updateDoc(doc(db, 'events', editingEventId), payload);
@@ -249,6 +270,17 @@ export default function EventsList() {
 
   const handleRemoveCategory = (category: string) => {
     setGuestCategories(guestCategories.filter(c => c !== category));
+  };
+
+  const handleAddSession = () => {
+    if (newSession.trim() && !sessions.includes(newSession.trim())) {
+      setSessions([...sessions, newSession.trim()]);
+      setNewSession('');
+    }
+  };
+
+  const handleRemoveSession = (session: string) => {
+    setSessions(sessions.filter(s => s !== session));
   };
 
   const [eventToDelete, setEventToDelete] = useState<string | null>(null);
@@ -305,7 +337,7 @@ export default function EventsList() {
               onClick={() => setActiveTab('categories')}
               className={`${activeTab === 'categories' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors`}
             >
-              Kategori Tamu
+              Kategori & Sesi
             </button>
             <button
               onClick={() => setActiveTab('theme')}
@@ -355,6 +387,58 @@ export default function EventsList() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Link Undangan Digital</label>
                 <input value={newEventDigitalInviteLink} onChange={e => setNewEventDigitalInviteLink(e.target.value)} type="url" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: https://undangan.com/john-jane" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Gambar Thumbnail</label>
+                <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg hover:bg-gray-50 transition-colors cursor-pointer relative" onClick={() => document.getElementById('thumbnail-upload')?.click()}>
+                  <input 
+                    id="thumbnail-upload"
+                    type="file" 
+                    accept="image/*"
+                    className="hidden" 
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                         const reader = new FileReader();
+                         reader.onloadend = () => {
+                           const img = new Image();
+                           img.onload = () => {
+                             const canvas = document.createElement('canvas');
+                             let newWidth = img.width;
+                             let newHeight = img.height;
+                             const maxWidth = 800;
+                             if (img.width > maxWidth) {
+                               const scaleSize = maxWidth / img.width;
+                               newWidth = maxWidth;
+                               newHeight = img.height * scaleSize;
+                             }
+                             canvas.width = newWidth;
+                             canvas.height = newHeight;
+                             const ctx = canvas.getContext('2d');
+                             ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+                             const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+                             setNewEventThumbnail(dataUrl);
+                           };
+                           img.src = reader.result as string;
+                         };
+                         reader.readAsDataURL(file);
+                      }
+                    }} 
+                  />
+                  <div className="space-y-1 text-center">
+                    {newEventThumbnail ? (
+                       <div className="mx-auto w-32 h-16 bg-cover bg-center rounded" style={{ backgroundImage: `url(${newEventThumbnail})` }} />
+                    ) : (
+                       <ImageIcon className="mx-auto h-12 w-12 text-gray-400" />
+                    )}
+                    <div className="text-sm text-gray-600 mt-2">
+                      <span className="font-medium text-indigo-600 hover:text-indigo-500">
+                        Klik untuk upload gambar
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500">Maks. 500KB (akan digunakan saat share WA)</p>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -444,6 +528,41 @@ export default function EventsList() {
                   </ul>
                 )}
               </div>
+
+              <div className="pt-6 border-t border-gray-100 mt-6">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tambah Sesi Acara</label>
+                <div className="flex gap-2">
+                  <input 
+                    value={newSession} 
+                    onChange={e => setNewSession(e.target.value)} 
+                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleAddSession())}
+                    type="text" 
+                    className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" 
+                    placeholder="Contoh: Akad Nikah, Resepsi, Ngunduh Mantu..." 
+                  />
+                  <button onClick={handleAddSession} type="button" className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 font-medium">
+                    Tambah
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Daftar Sesi Acara:</h4>
+                {sessions.length === 0 ? (
+                  <p className="text-sm text-gray-500 italic">Belum ada sesi ditambahkan.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {sessions.map(session => (
+                      <li key={session} className="flex justify-between items-center bg-gray-50 px-3 py-2 rounded-md border border-gray-100">
+                        <span className="text-sm font-medium text-gray-800">{session}</span>
+                        <button onClick={() => handleRemoveSession(session)} className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -504,6 +623,7 @@ export default function EventsList() {
                   <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Tanggal Dibuat</th>
                   <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Nama Acara</th>
                   <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Tanggal Acara</th>
+                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Masa Aktif</th>
                   <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Aksi</th>
                   <th className="px-6 py-3 text-center text-sm font-medium text-gray-500 tracking-wider">Scanner</th>
                 </tr>
@@ -521,6 +641,9 @@ export default function EventsList() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {format(new Date(event.date), 'dd MMM yyyy')}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {event.activeUntil ? format(new Date(event.activeUntil), 'dd MMM yyyy') : '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex space-x-3">

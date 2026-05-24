@@ -14,6 +14,7 @@ export default function RSVP() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [wishesInput, setWishesInput] = useState('');
+  const [sessionInput, setSessionInput] = useState('');
 
   useEffect(() => {
     const fetchRSVP = async () => {
@@ -22,11 +23,26 @@ export default function RSVP() {
         const q = query(guestsRef, where('ticketCode', '==', ticketCode));
         const snapshot = await getDocs(q);
         
+        let currentSession = '';
         if (!snapshot.empty) {
            const guestDoc = snapshot.docs[0];
            const guestData = { id: guestDoc.id, ...guestDoc.data() } as Guest;
            setGuest(guestData);
            if (guestData.wishes) setWishesInput(guestData.wishes);
+           if (guestData.session) {
+             setSessionInput(guestData.session);
+             currentSession = guestData.session;
+           }
+        }
+
+        const { getDoc } = await import('firebase/firestore');
+        const eventSnap = await getDoc(doc(db, 'events', eventId!));
+        if (eventSnap.exists()) {
+           const eventData = eventSnap.data() as EventRecord;
+           setEventData(eventData);
+           if (eventData.sessions && eventData.sessions.length > 0 && !currentSession) {
+             setSessionInput(eventData.sessions[0]);
+           }
         }
       } catch (error) {
         console.error(error);
@@ -44,9 +60,10 @@ export default function RSVP() {
       await updateDoc(doc(db, 'events', eventId!, 'guests', guest.id), {
         rsvpStatus: status,
         wishes: wishesInput,
+        session: sessionInput,
         updatedAt: serverTimestamp()
       });
-      setGuest({ ...guest, rsvpStatus: status, wishes: wishesInput });
+      setGuest({ ...guest, rsvpStatus: status, wishes: wishesInput, session: sessionInput });
     } catch (error) {
        console.error("RSVP update failed. ", error);
     } finally {
@@ -85,6 +102,21 @@ export default function RSVP() {
           </div>
 
           <div className="space-y-4">
+            {eventData?.sessions && eventData.sessions.length > 0 && (
+               <div className="text-left mb-4">
+                 <label className="block text-sm font-medium text-gray-700 mb-2">Konfirmasi Kehadiran pada Sesi</label>
+                 <select 
+                   value={sessionInput}
+                   onChange={(e) => setSessionInput(e.target.value)}
+                   className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-indigo-500 focus:border-indigo-500"
+                 >
+                   <option value="">-- Pilih Sesi --</option>
+                   {eventData.sessions.map((ses) => (
+                     <option key={ses} value={ses}>{ses}</option>
+                   ))}
+                 </select>
+               </div>
+            )}
             <div className="text-left mb-6">
               <label className="block text-sm font-medium text-gray-700 mb-2">Pesan & Doa (Opsional)</label>
               <textarea

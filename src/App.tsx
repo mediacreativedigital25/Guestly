@@ -25,6 +25,7 @@ import UserProfile from './pages/UserProfile';
 import AdminServices from './pages/admin/AdminServices';
 import AdminInvoice from './pages/admin/AdminInvoice';
 import AdminSettings from './pages/admin/AdminSettings';
+import AdminCalendar from './pages/admin/AdminCalendar';
 import ServicesCatalog from './pages/services/ServicesCatalog';
 import MyServices from './pages/services/MyServices';
 import ServiceCheckout from './pages/services/ServiceCheckout';
@@ -60,6 +61,7 @@ export default function App() {
             <Route path="admin/services" element={<AdminServices />} />
             <Route path="admin/invoice" element={<AdminInvoice />} />
             <Route path="admin/settings" element={<AdminSettings />} />
+            <Route path="admin/calendar" element={<AdminCalendar />} />
           </Route>
           {/* Public Route */}
           <Route path="/rsvp/:eventId/:ticketCode" element={<RSVP />} />

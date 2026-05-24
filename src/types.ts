@@ -50,7 +50,9 @@ export interface EventRecord {
   location?: string;
   digitalInviteLink?: string;
   frameOverlayUrl?: string;
+  thumbnailUrl?: string;
   guestCategories?: string[];
+  sessions?: string[];
   primaryColor?: string;
   fontFamily?: string;
   rsvpTheme?: string;
@@ -70,6 +72,7 @@ export interface Guest {
   phone?: string;
   address?: string;
   category?: string;
+  session?: string;
   ticketCode: string;
   rsvpStatus: 'pending' | 'attending' | 'declined';
   wishes?: string;

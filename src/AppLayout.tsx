@@ -169,7 +169,6 @@ export default function AppLayout() {
     { name: 'Clients', path: '/clients', icon: Users, role: ['superadmin', 'partner'] },
     { name: 'Events', path: '/events', icon: CalendarDays },
     { name: 'White Label', path: '/settings', icon: Settings, role: ['superadmin', 'partner'] },
-    { name: 'Changelog', path: '/changelog', icon: FileText },
   ];
 
   return (
@@ -385,6 +384,18 @@ export default function AppLayout() {
                         Admin Setting
                       </div>
                     </Link>
+                    <Link
+                      to="/admin/calendar"
+                      className={cn(
+                        "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                        location.pathname === '/admin/calendar' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <CalendarDays className="h-4 w-4" />
+                        Kalender Acara
+                      </div>
+                    </Link>
                  </div>
                )}
              </div>
@@ -393,6 +404,17 @@ export default function AppLayout() {
 
         </nav>
         <div className="p-4 border-t border-gray-200">
+          <Link
+            to="/changelog"
+            onClick={() => setIsMobileMenuOpen(false)}
+            className={cn(
+              "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium mb-1 transition-colors",
+              location.pathname === '/changelog' ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+            )}
+          >
+            <FileText className="h-5 w-5" />
+            Changelog
+          </Link>
           <Link
             to="/profile"
             className={cn(
