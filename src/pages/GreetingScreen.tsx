@@ -90,7 +90,18 @@ export default function GreetingScreen() {
   }
 
   if (!eventData) {
-    return <div className="min-h-screen bg-black text-white flex items-center justify-center">Memuat...</div>;
+    return (
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center space-y-4">
+        <img 
+          src={settings?.faviconUrl || settings?.logoUrl || "/favicon.ico"} 
+          alt="Guestly Logo" 
+          className="w-16 h-16 object-contain animate-pulse"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div>
+        <p className="text-gray-400 font-medium">Memuat Event...</p>
+      </div>
+    );
   }
 
   return (

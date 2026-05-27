@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../AuthContext';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Building2, UploadCloud, Link as LinkIcon, Phone, Image as ImageIcon, ExternalLink, AlertCircle } from 'lucide-react';
 
@@ -43,7 +43,7 @@ export default function WhiteLabelSettings() {
         businessName,
         phone,
         logoUrl,
-        updatedAt: new Date()
+        updatedAt: serverTimestamp()
       });
       
       // Update appUser context manually if needed

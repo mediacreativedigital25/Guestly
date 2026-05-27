@@ -66,7 +66,23 @@ export default function AppLayout() {
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center min-h-screen">Memuat...</div>;
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="flex flex-col items-center justify-center space-y-4">
+          <img 
+            src={settings?.faviconUrl || settings?.logoUrl || "/favicon.ico"} 
+            alt="Guestly Logo" 
+            className="w-16 h-16 object-contain animate-pulse"
+            onError={(e) => {
+              // Hide image if favicon doesn't exist to prevent broken image icon
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+          <p className="text-gray-500 font-medium">Memuat...</p>
+        </div>
+      </div>
+    );
   }
 
   if (!currentUser || !appUser) {

@@ -21,6 +21,15 @@ export default function UsersList() {
   const [newUserClientId, setNewUserClientId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  
+  // Edit state
+  const [isEditingUser, setIsEditingUser] = useState(false);
+  const [editingUserId, setEditingUserId] = useState('');
+  const [editUserName, setEditUserName] = useState('');
+  const [editUserPhone, setEditUserPhone] = useState('');
+  const [editUserPassword, setEditUserPassword] = useState('');
+  const [editUserBusinessName, setEditUserBusinessName] = useState('');
+  const [editUserRole, setEditUserRole] = useState<Role>('client');
 
   const { appUser } = useAuth();
   const { settings } = useSettings();
@@ -68,12 +77,56 @@ export default function UsersList() {
     }
     
     try {
-      await updateDoc(doc(db, 'users', userId), { role: newRole });
+      await updateDoc(doc(db, 'users', userId), { role: newRole, updatedAt: serverTimestamp() });
       setUsers(users.map(u => u.id === userId ? { ...u, role: newRole as any } : u));
       showAlert('Berhasil', 'Role berhasil diperbarui!', 'success');
     } catch (error) {
       console.error('Error updating role:', error);
       showAlert('Gagal', 'Gagal memperbarui role.', 'error');
+    }
+  };
+
+  const handleOpenEdit = (user: User) => {
+    setEditingUserId(user.id!);
+    setEditUserName(user.name || '');
+    setEditUserPhone(user.phone || '');
+    setEditUserBusinessName(user.businessName || '');
+    setEditUserRole(user.role);
+    setEditUserPassword('');
+    setIsEditingUser(true);
+  };
+
+  const handleEditUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    setError('');
+
+    try {
+      const updateData: Partial<User> = {
+        name: editUserName,
+        phone: editUserPhone,
+        updatedAt: serverTimestamp()
+      };
+
+      if (editUserRole === 'partner') {
+        updateData.businessName = editUserBusinessName;
+      }
+
+      await updateDoc(doc(db, 'users', editingUserId), updateData);
+      
+      setUsers(users.map(u => u.id === editingUserId ? { ...u, ...updateData } : u));
+      setIsEditingUser(false);
+      
+      if (editUserPassword) {
+         showAlert('Sebagian Berhasil', 'Data berhasil diperbarui. Catatan: Password otentikasi Firebase memerlukan Admin SDK untuk diubah sehingga belum tersinkronisasi.', 'info');
+      } else {
+         showAlert('Berhasil', 'Data pengguna berhasil diperbarui!', 'success');
+      }
+    } catch (err: any) {
+      console.error('Error editing user:', err);
+      setError(err.message || 'Gagal memperbarui user');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -222,6 +275,51 @@ export default function UsersList() {
         </form>
       </Modal>
 
+      <Modal isOpen={isEditingUser} onClose={() => setIsEditingUser(false)} title="Edit User">
+        <form onSubmit={handleEditUser} className="space-y-4">
+          {error && <div className="bg-red-50 text-red-600 p-3 rounded text-sm">{error}</div>}
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Nama</label>
+            <input required value={editUserName} onChange={e => setEditUserName(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="John Doe" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">No. WhatsApp / Telepon</label>
+            <input required value={editUserPhone} onChange={e => setEditUserPhone(e.target.value)} type="tel" className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="08123456789" />
+          </div>
+          
+          {editUserRole === 'partner' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Nama Usaha</label>
+              <input value={editUserBusinessName} onChange={e => setEditUserBusinessName(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="Nama Usaha (Opsional)" />
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Password Baru (Opsional)</label>
+            <input minLength={6} value={editUserPassword} onChange={e => setEditUserPassword(e.target.value)} type="password" className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="Biarkan kosong jika tidak ingin mengubah password" />
+            <p className="text-xs text-gray-500 mt-1">Mengubah password memerlukan integrasi Admin SDK dan konfigurasi server di environment ini.</p>
+          </div>
+
+          <div className="flex justify-end pt-4 mt-6 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={() => setIsEditingUser(false)}
+              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium mr-3"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium disabled:opacity-50 flex items-center justify-center min-w-[100px]"
+            >
+              {isSubmitting ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div> : 'Simpan'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
       {loading ? (
         <div className="flex justify-center p-8 bg-white rounded-lg shadow-sm border border-gray-100">
            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
@@ -268,14 +366,22 @@ export default function UsersList() {
                       <div>Client: {user.clientId || '-'}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      {user.id !== appUser.id && (
+                      <div className="flex items-center gap-2">
+                        {user.id !== appUser.id && (
+                          <button
+                            onClick={() => handleDelete(user.id!)}
+                            className="text-red-600 hover:text-red-900 flex items-center gap-1 bg-red-50 px-3 py-1.5 rounded-md hover:bg-red-100 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" /> Hapus
+                          </button>
+                        )}
                         <button
-                          onClick={() => handleDelete(user.id!)}
-                          className="text-red-600 hover:text-red-900 flex items-center gap-1 bg-red-50 px-3 py-1.5 rounded-md hover:bg-red-100 transition-colors"
+                          onClick={() => handleOpenEdit(user)}
+                          className="text-indigo-600 hover:text-indigo-900 flex items-center gap-1 bg-indigo-50 px-3 py-1.5 rounded-md hover:bg-indigo-100 transition-colors"
                         >
-                          <Trash2 className="w-4 h-4" /> Hapus
+                          <Edit className="w-4 h-4" /> Edit
                         </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../AuthContext';
 import { updatePassword } from 'firebase/auth';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { User, Lock, Save } from 'lucide-react';
 import { showAlert } from '../lib/alerts';
@@ -23,7 +23,8 @@ export default function UserProfile() {
     try {
       await updateDoc(doc(db, 'users', currentUser.uid), {
         name,
-        phone
+        phone,
+        updatedAt: serverTimestamp()
       });
       showAlert('Berhasil', 'Profil berhasil diperbarui.', 'success');
     } catch (error) {
@@ -118,6 +119,7 @@ export default function UserProfile() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">No. WhatsApp / HP</label>
                 <input
                   type="text"
+                  required
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white"

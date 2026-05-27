@@ -6,6 +6,31 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { parseFirestoreDate } from '../lib/utils';
 import { CheckCircle, AlertCircle, Camera, Keyboard, ScanLine } from 'lucide-react';
 
+const playBeep = () => {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioContextClass) {
+      const audioCtx = new AudioContextClass();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+
+      oscillator.type = 'sine';
+      oscillator.frequency.value = 1000;
+      
+      gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+
+      oscillator.start(audioCtx.currentTime);
+      oscillator.stop(audioCtx.currentTime + 0.1);
+    }
+  } catch (e) {
+    console.error("Audio output not supported", e);
+  }
+};
+
 export default function Scanner() {
   const { eventId } = useParams();
   const [scanResult, setScanResult] = useState<{status: 'success'|'error', message: string} | null>(null);
@@ -55,6 +80,7 @@ export default function Scanner() {
             attendedAt: serverTimestamp(),
             updatedAt: serverTimestamp()
           });
+          playBeep();
           setScanResult({ status: 'success', message: `${guestDoc.data().name} berhasil check-in!`});
         }
       }

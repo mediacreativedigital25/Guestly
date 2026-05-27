@@ -1,6 +1,16 @@
 export default function Changelog() {
   const versions = [
     {
+      version: 'v1.0.4',
+      date: '24 Mei 2026',
+      changes: [
+        'Menambahkan pilihan "Sesi Acara" pada Form RSVP Publik apabila event memiliki sesi',
+        'Pembaruan integrasi agar data sesi tamu tersimpan saat melakukan RSVP',
+        'Memperbaiki error koneksi server-side pada aplikasi',
+        'Memperbaiki aturan keamanan Firestore terkait timestamp'
+      ]
+    },
+    {
       version: 'v1.0.3',
       date: '15 Mei 2026',
       changes: [
