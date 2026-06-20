@@ -5,6 +5,7 @@ import { db } from '../lib/firebase';
 import { EventRecord, Guest } from '../types';
 import { parseFirestoreDate } from '../lib/utils';
 import { useSettings } from '../SettingsContext';
+import { ScanLine } from 'lucide-react';
 
 export default function GreetingScreen() {
   const { eventId } = useParams();
@@ -104,6 +105,32 @@ export default function GreetingScreen() {
     );
   }
 
+const renderFormattedTitle = (title: string, isMain: boolean = false) => {
+    const weddingMatch = title.match(/^(the wedding of\s+)(.*)$/i);
+    if (weddingMatch) {
+      if (isMain) {
+         return (
+          <span className="flex flex-col items-center gap-2 sm:gap-4 leading-none">
+            <span className="text-lg sm:text-2xl md:text-3xl font-light font-['Poppins'] opacity-90 pb-2" style={{ fontFamily: '"Poppins", sans-serif' }}>
+              The Wedding Of
+            </span>
+            <span className="leading-tight font-['Great_Vibes'] font-normal pb-4 text-[0.8em] sm:text-[1em]" style={{ fontFamily: '"Great Vibes", cursive' }}>{weddingMatch[2].replace(/ dan /gi, ' & ')}</span>
+          </span>
+         );
+      } else {
+         return (
+           <span className="flex flex-col items-center gap-1">
+             <span className="text-sm sm:text-base font-light font-['Poppins'] opacity-90" style={{ fontFamily: '"Poppins", sans-serif' }}>
+               The Wedding Of
+             </span>
+             <span className="leading-tight font-['Great_Vibes'] font-normal text-[0.9em] sm:text-[1.1em]" style={{ fontFamily: '"Great Vibes", cursive' }}>{weddingMatch[2].replace(/ dan /gi, ' & ')}</span>
+           </span>
+         );
+      }
+    }
+    return title;
+  };
+
   return (
     <div className="min-h-screen w-full bg-black flex items-center justify-center relative overflow-hidden font-sans">
       {/* Background Frame / Overlay */}
@@ -113,16 +140,19 @@ export default function GreetingScreen() {
            style={{ backgroundImage: `url(${eventData.frameOverlayUrl})` }}
          />
       ) : (
-         <div className="absolute inset-0 z-0 bg-gradient-to-br from-indigo-900 via-slate-900 to-black" />
+         <div 
+           className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
+           style={{ backgroundImage: `url(/bg-default.png)` }}
+         />
       )}
       
       {/* Subtle overlay to ensure text remains readable */}
       <div className="absolute inset-0 z-0 bg-black/30 backdrop-blur-[2px]" />
 
       {/* Main Content Container */}
-      <div className="z-10 w-full px-6 py-12 flex flex-col items-center justify-center transition-all duration-1000">
+      <div className="z-10 w-full px-6 py-12 flex flex-col items-center justify-center transition-all duration-1000 min-h-screen">
          {settings?.logoUrl && !showGreeting && (
-           <img src={settings.logoUrl} alt="Logo" className="absolute top-8 h-auto max-h-24 w-auto max-w-[280px] object-contain opacity-50" />
+           <img src={settings.logoUrl} alt="Vendor Logo" className="absolute top-12 h-auto max-h-20 w-auto max-w-[240px] object-contain opacity-80" />
          )}
 
          {showGreeting && latestGuest ? (
@@ -145,21 +175,43 @@ export default function GreetingScreen() {
              <div className="h-1 w-16 sm:w-24 bg-white/50 rounded-full my-4 sm:my-6" />
 
              <p className="text-xl sm:text-2xl md:text-3xl text-gray-100 font-medium tracking-wide drop-shadow-md text-center max-w-full break-words">
-               Di Acara {eventData.title}
+               Di Acara {renderFormattedTitle(eventData.title, false)}
              </p>
            </div>
          ) : (
-           <div className="flex flex-col items-center justify-center space-y-4 sm:space-y-6 animate-in fade-in duration-1000 w-full px-4">
+           <div className="flex flex-col items-center justify-center space-y-8 sm:space-y-12 animate-in fade-in duration-1000 w-full px-4 mt-8">
              <h1 
-               className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl text-white/70 font-bold tracking-tight drop-shadow-xl text-center max-w-full break-words leading-tight"
+               className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl text-white/90 font-bold tracking-tight drop-shadow-xl text-center max-w-full break-words leading-tight"
                style={{ fontFamily: eventData.fontFamily || 'inherit' }}
              >
-               {eventData.title}
+               {renderFormattedTitle(eventData.title, true)}
              </h1>
-             <p className="text-lg sm:text-xl md:text-2xl text-white/50 tracking-[0.2em] sm:tracking-[0.3em] uppercase drop-shadow-md text-center">
-               Menunggu Tamu...
-             </p>
+             
+             <div className="flex flex-col items-center space-y-8">
+                <p className="text-sm sm:text-lg text-white/70 tracking-[0.3em] sm:tracking-[0.5em] uppercase font-light text-center border-b border-white/20 pb-4 px-8">
+                  Menunggu Tamu...
+                </p>
+                
+                <div className="flex items-center gap-4 bg-white/10 backdrop-blur-md px-6 py-4 rounded-2xl border border-white/10 shadow-xl">
+                  <div className="bg-white/20 p-3 rounded-xl border border-white/20">
+                    <ScanLine className="w-8 h-8 text-white/90" />
+                  </div>
+                  <div className="flex flex-col">
+                     <span className="text-white/70 text-sm font-light">Scan QR untuk</span>
+                     <span className="text-white font-semibold text-lg">Check-In</span>
+                  </div>
+                </div>
+             </div>
            </div>
+         )}
+         
+         {!showGreeting && (
+             <div className="absolute bottom-8 flex flex-col items-center gap-1 opacity-70 hover:opacity-100 transition-opacity">
+               <span className="text-[10px] font-light tracking-[0.2em] text-white/60 uppercase">Powered by</span>
+               <div className="flex items-center gap-2">
+                 <span className="text-xl font-bold tracking-tight text-white/90 font-serif">Guestly</span>
+               </div>
+             </div>
          )}
       </div>
     </div>

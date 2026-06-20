@@ -1,6 +1,23 @@
 export default function Changelog() {
   const versions = [
     {
+      version: 'v1.0.6',
+      date: '20 Juni 2026',
+      changes: [
+        'Memperbarui tampilan Greeting Screen dengan logo vendor partner dan watermark "Powered by Guestly"',
+        'Penyempurnaan tipografi pada Greeting Screen menggunakan font Poppins dan Great Vibes'
+      ]
+    },
+    {
+      version: 'v1.0.5',
+      date: '27 Mei 2026',
+      changes: [
+        'Menambahkan logo pada layar pemuatan (loading screen)',
+        'Sinkronisasi otomatis pembaruan data profil atau nama lengkap pengguna pada dashboard dan profil',
+        'Menambahkan efek suara notifikasi (beep) ketika pemindaian barcode tiket berhasil'
+      ]
+    },
+    {
       version: 'v1.0.4',
       date: '24 Mei 2026',
       changes: [

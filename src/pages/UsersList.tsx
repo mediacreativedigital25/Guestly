@@ -163,7 +163,32 @@ export default function UsersList() {
       if (settings?.fonnteToken && newUserPhone) {
         import('../lib/fonnte').then(({ sendFonnteMessage }) => {
           const loginUrl = window.location.origin;
-          const message = `NOTIFIKASI AKUN GUESTLY\n\n🔐 Informasi Akun Guestly\n\nHalo kak ${newUserName} 👋\nBerikut informasi akun Guestly kakak:\n\n📧 Email : ${newUserEmail}\n🔑 Password : ${newUserPassword}\n🌐 Login : ${loginUrl}\n\nMohon simpan informasi akun dengan baik 😊\n\n📞 Jika memiliki kendala atau membutuhkan bantuan, jangan ragu menghubungi 085158636606`;
+          const message = `🔐 *Informasi Akun Guestly*
+
+Halo Kak *${newUserName}*,
+
+Terima kasih telah bergabung dengan Guestly. Berikut informasi akun yang dapat digunakan untuk mengakses layanan Guestly:
+
+📧 *Email* : ${newUserEmail}
+🔑 *Password* : ${newUserPassword}
+🌐 *Login* : ${loginUrl}
+
+Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada pihak lain untuk menjaga keamanan akun.
+
+Jika mengalami kendala atau memerlukan bantuan, silakan hubungi tim support kami:
+
+📞 0851-5863-6606
+
+─────────────────
+*Guestly*
+Smart Digital Guestbook & Event Management
+
+🌐 guestly.yulovi.com
+📧 support@guestly.yulovi.com
+💬 Layanan Bantuan: 0851-5863-6606
+
+Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
+─────────────────`;
           sendFonnteMessage(settings.fonnteToken!, newUserPhone, message);
         });
       }

@@ -1,8 +1,13 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-great-vibes: "Great Vibes", cursive;
+  --font-darling: "Darling", cursive;
+  --font-poppins: "Poppins", sans-serif;
   
   /* Brand Theme Overrides */
   --color-indigo-50: #f5eff5; /* Soft background */
@@ -37,4 +42,12 @@
   button {
     @apply text-[14px] leading-[1.5];
   }
+}
+
+@font-face {
+  font-family: 'Darling';
+  src: url('/fonts/Darling.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
 }
