@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
-import { collection, query, getDocs, where, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, deleteField, runTransaction } from 'firebase/firestore';
+import { collection, query, getDocs, where, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, deleteField, runTransaction, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { EventRecord, Client } from '../types';
 import { parseFirestoreDate } from '../lib/utils';
@@ -80,13 +80,13 @@ export default function EventsList() {
 
     if (!isActive) {
        showAlert('Akses Ditolak', 'Masa aktif akun Anda telah habis. Silakan beli layanan terlebih dahulu.', 'warning');
-       navigate('/services/catalog');
+       navigate('/auth/login/services/catalog');
        return;
     }
     
     if (!hasQuota) {
        showAlert('Akses Ditolak', 'Anda tidak memiliki kuota acara. Silakan beli layanan terlebih dahulu.', 'warning');
-       navigate('/services/catalog');
+       navigate('/auth/login/services/catalog');
        return;
     }
 
@@ -123,6 +123,9 @@ export default function EventsList() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    let unsubscribeEvents: () => void;
+    let unsubscribeClients: () => void;
+
     const fetchEventsAndClients = async () => {
       try {
         const eventsRef = collection(db, 'events');
@@ -144,33 +147,37 @@ export default function EventsList() {
           // No need to fetch all clients for a client user, just their own record if needed, but we don't necessarily need the list for the dropdown since they can't create events.
         }
 
-        
-        let clientSnapshot;
+        unsubscribeEvents = onSnapshot(q, (snapshot) => {
+          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventRecord));
+          setEvents(data);
+          setLoading(false);
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, 'events');
+          setLoading(false);
+        });
+
         if (appUser?.role === 'client') {
-           // Skip fetching clients list for clients to avoid permission errors
-           const snapshot = await getDocs(q);
-           const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventRecord));
-           setEvents(data);
            setClients([]);
         } else {
-           const [snapshot, snapClients] = await Promise.all([
-             getDocs(q),
-             getDocs(cQuery)
-           ]);
-           const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventRecord));
-           const clientsData = snapClients.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
-           
-           setEvents(data);
-           setClients(clientsData);
+           unsubscribeClients = onSnapshot(cQuery, (snapClients) => {
+             const clientsData = snapClients.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
+             setClients(clientsData);
+           }, (error) => {
+             console.error("Error fetching clients for events list:", error);
+           });
         }
       } catch (error) {
         handleFirestoreError(error, OperationType.GET, 'events');
-      } finally {
         setLoading(false);
       }
     };
 
     if (appUser) fetchEventsAndClients();
+
+    return () => {
+      if (unsubscribeEvents) unsubscribeEvents();
+      if (unsubscribeClients) unsubscribeClients();
+    };
   }, [appUser]);
 
   const handleSaveEvent = async () => {
@@ -253,7 +260,7 @@ export default function EventsList() {
         }
         
         showAlert('Berhasil', 'Acara berhasil dibuat!', 'success');
-        navigate(`/events/${newDocId}`);
+        navigate(`/auth/login/events/${newDocId}`);
       }
     } catch (error) {
       showAlert('Gagal', 'Failed to save event. Pastikan Anda memiliki pengaturan yang valid.', 'error');
@@ -647,7 +654,7 @@ export default function EventsList() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex space-x-3">
-                         <Link to={`/events/${event.id}`} className="text-indigo-600 hover:text-indigo-900 flex items-center justify-center p-1 rounded-full hover:bg-indigo-50 transition-colors" title="Detail Acara">
+                         <Link to={`/auth/login/events/${event.id}`} className="text-indigo-600 hover:text-indigo-900 flex items-center justify-center p-1 rounded-full hover:bg-indigo-50 transition-colors" title="Detail Acara">
                            <Eye className="w-4 h-4" />
                          </Link>
                          {appUser?.role !== 'client' && (
@@ -672,7 +679,7 @@ export default function EventsList() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
                        <Link 
-                         to={`/events/${event.id}/scan`} 
+                         to={`/auth/login/events/${event.id}/scan`} 
                          className="inline-flex items-center gap-1 px-3 py-1 bg-green-50 text-green-700 hover:bg-green-100 rounded-full transition-colors"
                        >
                          <ScanLine className="w-4 h-4" /> Scan

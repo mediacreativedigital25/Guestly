@@ -281,7 +281,7 @@ export default function AdminCalendar() {
                  
                  <div className="flex justify-end pt-4 border-t border-gray-100">
                      <Link 
-                         to={`/events/${selectedEvent.id}`} 
+                         to={`/auth/login/events/${selectedEvent.id}`} 
                          className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700 transition-colors"
                      >
                          Buka Halaman Acara

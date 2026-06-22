@@ -22,6 +22,34 @@ interface GlobalSettings {
     accountName?: string;
     instructions?: string;
   };
+  salespage?: {
+    heroTitle?: string;
+    heroHighlight?: string;
+    heroSubtitle?: string;
+    heroImage?: string;
+    
+    stat1Value?: string; stat1Label?: string;
+    stat2Value?: string; stat2Label?: string;
+    stat3Value?: string; stat3Label?: string;
+    stat4Value?: string; stat4Label?: string;
+
+    problemTitle?: string;
+    problemItems?: string;
+    problemImage?: string;
+
+    solutionTitle?: string;
+    solutionDesc?: string;
+
+    stepsTitle?: string;
+    s1Title?: string; s1Desc?: string;
+    s2Title?: string; s2Desc?: string;
+    s3Title?: string; s3Desc?: string;
+    s4Title?: string; s4Desc?: string;
+
+    ctaTitle?: string;
+    ctaDesc?: string;
+    ctaImage?: string;
+  };
 }
 
 interface SettingsContextType {

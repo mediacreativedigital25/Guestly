@@ -88,7 +88,7 @@ service cloud.firestore {
     }
 
     function isValidEvent(data) {
-      return data.size() >= 7 && data.size() <= 18 &&
+      return data.size() >= 7 && data.size() <= 22 &&
         data.keys().hasAll(['partnerId', 'clientId', 'title', 'date', 'status', 'createdAt', 'updatedAt']) &&
         data.partnerId is string && data.partnerId.size() <= 128 &&
         data.clientId is string && data.clientId.size() <= 128 &&
@@ -106,6 +106,9 @@ service cloud.firestore {
         (!('primaryColor' in data) || data.primaryColor == null || (data.primaryColor is string && data.primaryColor.size() <= 20)) &&
         (!('fontFamily' in data) || data.fontFamily == null || (data.fontFamily is string && data.fontFamily.size() <= 100)) &&
         (!('rsvpTheme' in data) || data.rsvpTheme == null || (data.rsvpTheme is string && data.rsvpTheme.size() <= 50)) &&
+        (!('waBlastCount' in data) || data.waBlastCount == null || data.waBlastCount is number) &&
+        (!('waTemplateId' in data) || data.waTemplateId == null || (data.waTemplateId is string && data.waTemplateId.size() <= 128)) &&
+        (!('thumbnailUrl' in data) || data.thumbnailUrl == null || (data.thumbnailUrl is string && data.thumbnailUrl.size() <= 2048)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -245,7 +248,7 @@ service cloud.firestore {
     }
 
     match /services/{serviceId} {
-      allow get, list: if isSignedIn();
+      allow get, list: if true;
       allow create: if isSuperAdmin() && isValidService(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isSuperAdmin() && isValidId(serviceId) && isValidService(incoming()) && incoming().updatedAt == request.time;
       allow delete: if isSuperAdmin() && isValidId(serviceId);
@@ -253,7 +256,13 @@ service cloud.firestore {
 
     match /settings/{docId} {
       allow get, list: if true;
-      allow create, update, delete: if isSuperAdmin();
+      allow create, update, delete: if isSuperAdmin() || docId == 'publicStats';
+    }
+
+    match /testimonials/{testiId} {
+      allow get, list: if true;
+      allow create: if true;
+      allow update, delete: if isSuperAdmin();
     }
 
     match /invoices/{invoiceId} {
@@ -266,6 +275,13 @@ service cloud.firestore {
           (isSignedIn() && incoming().userId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentMethod', 'updatedAt']))
         );
       allow delete: if isSuperAdmin() && isValidId(invoiceId);
+    }
+
+    match /wa_templates/{templateId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSuperAdmin() && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isSuperAdmin() && incoming().updatedAt == request.time;
+      allow delete: if isSuperAdmin();
     }
 
     match /counters/{counterId} {

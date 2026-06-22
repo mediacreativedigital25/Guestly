@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, orderBy, Timestamp, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, Timestamp, doc, updateDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
 import { useAuth } from '../../AuthContext';
 import { useSettings } from '../../SettingsContext';
 import { Modal } from '../../components/Modal';
 import { showAlert, showConfirm } from '../../lib/alerts';
+import { Copy, Check, MessageCircle } from 'lucide-react';
 
 export default function MyInvoices() {
   const { appUser, currentUser } = useAuth();
@@ -13,32 +14,50 @@ export default function MyInvoices() {
   const [loading, setLoading] = useState(true);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   useEffect(() => {
-    const fetchInvoices = async () => {
+    let unsubscribe: (() => void) | null = null;
+    
+    const fetchInvoices = () => {
       if (!currentUser) return;
       try {
+        setLoading(true);
         const q = query(
           collection(db, 'invoices'),
           where('userId', '==', currentUser.uid)
         );
-        const querySnapshot = await getDocs(q);
-        const fetchedInvoices: any[] = [];
-        querySnapshot.forEach((doc) => {
-          fetchedInvoices.push({ id: doc.id, ...doc.data() });
+        unsubscribe = onSnapshot(q, (querySnapshot) => {
+          const fetchedInvoices: any[] = [];
+          querySnapshot.forEach((doc) => {
+            fetchedInvoices.push({ id: doc.id, ...doc.data() });
+          });
+          
+          // Sort manually by createdAt descended
+          fetchedInvoices.sort((a, b) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
+          setInvoices(fetchedInvoices);
+          setLoading(false);
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, 'invoices');
+          setLoading(false);
         });
-        
-        // Sort manually by createdAt descended
-        fetchedInvoices.sort((a, b) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
-        setInvoices(fetchedInvoices);
       } catch (error) {
-        handleFirestoreError(error, OperationType.GET, 'invoices');
-      } finally {
+        handleFirestoreError(error, OperationType.GET, 'setup_invoices_listener');
         setLoading(false);
       }
     };
 
     fetchInvoices();
+    
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [currentUser]);
 
   const handlePayNow = (invoice: any) => {
@@ -58,7 +77,7 @@ export default function MyInvoices() {
       setInvoices(invoices.map(inv => inv.id === invoiceId ? { ...inv, status: 'cancelled' } : inv));
       showAlert('Berhasil', 'Pesanan berhasil dibatalkan', 'success');
 
-      if (settings?.fonnteToken && appUser?.phone) {
+      if (appUser?.phone) {
         import('../../lib/fonnte').then(({ sendFonnteMessage }) => {
           let message = `Halo ${appUser.name || 'User'},\n\nPesanan Anda untuk layanan *${serviceName}* dengan nomor Invoice *${invoiceId}* telah Anda batalkan.\n\nJika ada pertanyaan silakan hubungi kami.\n\nTerima kasih,\nAdmin Guestly`;
           
@@ -71,7 +90,7 @@ export default function MyInvoices() {
               .replace(/{amount}/g, '');
           }
 
-          sendFonnteMessage(settings.fonnteToken!, appUser.phone, message);
+          sendFonnteMessage(null, appUser.phone, message);
         });
       }
     } catch (error) {
@@ -185,8 +204,17 @@ export default function MyInvoices() {
                   <p>Silakan transfer ke rekening berikut:</p>
                   <div className="font-mono bg-white p-3 border border-gray-200 rounded">
                     <div>Bank: <span className="font-bold text-gray-900">{settings?.manualPayment?.bankName || 'BCA'}</span></div>
-                    <div>No Rek: <span className="font-bold text-gray-900">{settings?.manualPayment?.accountNumber || '1234567890'}</span></div>
-                    <div>A.N: <span className="font-bold text-gray-900">{settings?.manualPayment?.accountName || 'PT Guestly'}</span></div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span>No Rek: <span className="font-bold text-gray-900">{settings?.manualPayment?.accountNumber || '1234567890'}</span></span>
+                      <button 
+                        onClick={() => handleCopy(settings?.manualPayment?.accountNumber || '1234567890')}
+                        className="p-1.5 hover:bg-gray-100 rounded text-gray-500 transition-colors" 
+                        title="Copy Rekening"
+                      >
+                        {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <div className="mt-1">A.N: <span className="font-bold text-gray-900">{settings?.manualPayment?.accountName || 'PT Guestly'}</span></div>
                   </div>
                   <p className="text-xs text-gray-500 pt-2">
                     {settings?.manualPayment?.instructions || 'Setelah melakukan transfer, silakan konfirmasi ke admin.'}
@@ -195,10 +223,20 @@ export default function MyInvoices() {
               )}
             </div>
             
-            <div className="flex justify-end pt-4">
+            <div className="flex justify-end pt-4 gap-2 flex-wrap sm:flex-nowrap">
+              {settings?.activePaymentMethod !== 'tripay' && (
+                <a
+                  href={`https://wa.me/6285158636606?text=${encodeURIComponent(`Halo Admin, saya ingin konfirmasi pembayaran untuk Invoice ${selectedInvoice?.id} atas layanan ${selectedInvoice?.serviceName}. Berikut saya lampirkan bukti transfernya.`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 w-full sm:w-auto"
+                >
+                  <MessageCircle className="w-4 h-4" /> Kirim Bukti via WhatsApp
+                </a>
+              )}
               <button
                 onClick={() => setIsPaymentModalOpen(false)}
-                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors"
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors w-full sm:w-auto text-center"
               >
                 Tutup
               </button>

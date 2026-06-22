@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
-import { collection, query, getDocs, where } from 'firebase/firestore';
+import { collection, query, getDocs, where, onSnapshot, setDoc, doc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { EventRecord, Guest } from '../types';
 import Calendar from 'react-calendar';
@@ -42,7 +42,12 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchMetrics = async () => {
+    let unsubscribeEvents: (() => void) | null = null;
+    let unsubscribeGuestsList: (() => void)[] = [];
+    let unsubscribeUsers: (() => void) | null = null;
+    let unsubscribeClients: (() => void) | null = null;
+
+    const setupListeners = async () => {
       try {
         setLoading(true);
         
@@ -62,74 +67,126 @@ export default function Dashboard() {
         }
 
         if (appUser?.role === 'superadmin') {
-          const usersRef = collection(db, 'users');
-          const usersSnapshot = await getDocs(usersRef);
-          let partners = 0;
-          usersSnapshot.forEach(u => {
-            if (u.data().role === 'partner') partners++;
-          });
-          
-          const clientsRef = collection(db, 'clients');
-          const clientsSnapshot = await getDocs(clientsRef);
-          
-          setSuperMetrics({
-            totalUsers: usersSnapshot.size,
-            totalPartners: partners,
-            totalClients: clientsSnapshot.size
-          });
-        }
-
-        const eventsSnapshot = await getDocs(q);
-        const eventsList: EventRecord[] = [];
-        let drafts = 0;
-        let published = 0;
-        
-        eventsSnapshot.forEach(doc => {
-          const data = doc.data() as EventRecord;
-          eventsList.push({ ...data, id: doc.id });
-          if (data.status === 'draft') drafts++;
-          if (data.status === 'published' || data.status === 'completed') published++;
-        });
-
-        let expected = 0;
-        let attended = 0;
-
-        // Fetch guests for each event
-        for (const event of eventsList) {
-          // If we only want to connect data when event is published:
-          if (event.status === 'published' || event.status === 'completed') {
-            const guestsRef = collection(db, 'events', event.id!, 'guests');
-            const guestsSnapshot = await getDocs(guestsRef);
-            expected += guestsSnapshot.size;
-            
-            guestsSnapshot.forEach(guestDoc => {
-              if (guestDoc.data().attended === true) {
-                attended++;
-              }
+          unsubscribeUsers = onSnapshot(collection(db, 'users'), (usersSnapshot) => {
+            let partners = 0;
+            usersSnapshot.forEach(u => {
+              if (u.data().role === 'partner') partners++;
             });
-          }
+            setSuperMetrics(prev => ({ ...prev, totalUsers: usersSnapshot.size, totalPartners: partners }));
+          });
+          
+          unsubscribeClients = onSnapshot(collection(db, 'clients'), (clientsSnapshot) => {
+            setSuperMetrics(prev => ({ ...prev, totalClients: clientsSnapshot.size }));
+          });
         }
 
-        setEvents(eventsList);
-        setMetrics({
-          totalEvents: eventsList.length,
-          draftEvents: drafts,
-          publishedEvents: published,
-          expectedGuests: expected,
-          attendedGuests: attended
+        unsubscribeEvents = onSnapshot(q, (eventsSnapshot) => {
+          const eventsList: EventRecord[] = [];
+          let drafts = 0;
+          let published = 0;
+          
+          eventsSnapshot.forEach(doc => {
+            const data = doc.data() as EventRecord;
+            eventsList.push({ ...data, id: doc.id });
+            if (data.status === 'draft') drafts++;
+            if (data.status === 'published' || data.status === 'completed') published++;
+          });
+
+          setEvents(eventsList);
+          
+          // Clean up old guest listeners
+          unsubscribeGuestsList.forEach(unsub => unsub());
+          unsubscribeGuestsList = [];
+
+          const publishedEvents = eventsList.filter(e => e.status === 'published' || e.status === 'completed');
+          
+          if (publishedEvents.length === 0) {
+            setMetrics({
+              totalEvents: eventsList.length,
+              draftEvents: drafts,
+              publishedEvents: published,
+              expectedGuests: 0,
+              attendedGuests: 0
+            });
+            setLoading(false);
+            return;
+          }
+
+          const guestCounts: Record<string, { expected: number, attended: number }> = {};
+          
+          publishedEvents.forEach(event => {
+            guestCounts[event.id!] = { expected: 0, attended: 0 };
+            
+            const guestsRef = collection(db, 'events', event.id!, 'guests');
+            const unsub = onSnapshot(guestsRef, (guestsSnapshot) => {
+              let e = guestsSnapshot.size;
+              let a = 0;
+              guestsSnapshot.forEach(guestDoc => {
+                if (guestDoc.data().attended === true) {
+                  a++;
+                }
+              });
+              
+              guestCounts[event.id!] = { expected: e, attended: a };
+              
+              let currentExpected = 0;
+              let currentAttended = 0;
+              Object.values(guestCounts).forEach(counts => {
+                currentExpected += counts.expected;
+                currentAttended += counts.attended;
+              });
+              
+              setMetrics({
+                totalEvents: eventsList.length,
+                draftEvents: drafts,
+                publishedEvents: published,
+                expectedGuests: currentExpected,
+                attendedGuests: currentAttended
+              });
+              setLoading(false);
+            }, (error) => {
+                console.error("Error fetching guests for dashboard:", error);
+            });
+            
+            unsubscribeGuestsList.push(unsub);
+          });
+        }, (error) => {
+            handleFirestoreError(error, OperationType.GET, 'dashboard-metrics');
+            setLoading(false);
         });
 
       } catch (error) {
         handleFirestoreError(error, OperationType.GET, 'dashboard-metrics');
-      } finally {
         setLoading(false);
       }
     };
 
     if (appUser) {
-      fetchMetrics();
+      setupListeners();
     }
+
+    return () => {
+      if (unsubscribeEvents) unsubscribeEvents();
+      if (unsubscribeUsers) unsubscribeUsers();
+      if (unsubscribeClients) unsubscribeClients();
+      unsubscribeGuestsList.forEach(unsub => unsub());
+    };
   }, [appUser]);
+
+  // Sync public stats for SalesPage
+  useEffect(() => {
+    if (appUser?.role === 'superadmin' && (metrics.totalEvents > 0 || metrics.expectedGuests > 0)) {
+      try {
+        setDoc(doc(db, 'settings', 'publicStats'), {
+          totalEvents: metrics.totalEvents,
+          totalGuests: metrics.expectedGuests,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (err) {
+        console.warn("Could not sync public stats:", err);
+      }
+    }
+  }, [appUser?.role, metrics.totalEvents, metrics.expectedGuests]);
 
   const tileContent = ({ date, view }: { date: Date, view: string }) => {
     if (view === 'month') {

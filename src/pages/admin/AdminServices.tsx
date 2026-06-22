@@ -22,6 +22,7 @@ export default function AdminServices() {
   const [eventQuota, setEventQuota] = useState<number>(0);
   const [clientQuota, setClientQuota] = useState<number>(0);
   const [guestQuota, setGuestQuota] = useState<number>(0);
+  const [waBlastQuota, setWaBlastQuota] = useState<number>(0);
   const [price, setPrice] = useState<number>(0);
   const [normalPrice, setNormalPrice] = useState<number>(0);
   const [isActive, setIsActive] = useState(true);
@@ -53,6 +54,7 @@ export default function AdminServices() {
     setEventQuota(0);
     setClientQuota(0);
     setGuestQuota(0);
+    setWaBlastQuota(0);
     setPrice(0);
     setNormalPrice(0);
     setIsActive(true);
@@ -73,6 +75,7 @@ export default function AdminServices() {
     setEventQuota(service.eventQuota || 0);
     setClientQuota(service.clientQuota || 0);
     setGuestQuota(service.guestQuota || 0);
+    setWaBlastQuota(service.waBlastQuota || 0);
     setPrice(service.price);
     setNormalPrice(service.normalPrice || 0);
     setIsActive(service.isActive);
@@ -103,6 +106,7 @@ export default function AdminServices() {
         eventQuota: Number(eventQuota),
         clientQuota: Number(clientQuota),
         guestQuota: Number(guestQuota),
+        waBlastQuota: Number(waBlastQuota),
         price: Number(price),
         normalPrice: Number(normalPrice),
         isActive,
@@ -147,12 +151,91 @@ export default function AdminServices() {
           <h1 className="text-2xl font-bold text-gray-900">Layanan Guestly</h1>
           <p className="mt-1 text-sm text-gray-500">Kelola master paket dan fitur yang tersedia di Guestly</p>
         </div>
-        <button 
-          onClick={openCreateModal}
-          className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition"
-        >
-          <Plus className="w-4 h-4" /> Tambah Layanan
-        </button>
+         <div className="flex flex-wrap items-center gap-3">
+          <button 
+             onClick={async () => {
+                const confirmed = await showConfirm("Buat otomatis paket Add-on WA Blast (Lite, Standard, Premium)?");
+                if(confirmed) {
+                   setIsSaving(true);
+                   try {
+                     const timeNow = serverTimestamp();
+                     const templates = [
+                       {
+                         name: "WA Blast Lite",
+                         description: "Maks 150 Tamu • 1x Pengiriman • Template Standar",
+                         type: "addon",
+                         targetRole: "all",
+                         activePeriodDays: 0,
+                         eventQuota: 0,
+                         clientQuota: 0,
+                         guestQuota: 0,
+                         waBlastQuota: 150,
+                         price: 19000,
+                         normalPrice: 29000,
+                         isActive: true,
+                         createdAt: timeNow,
+                         updatedAt: timeNow
+                       },
+                       {
+                         name: "WA Blast Standard",
+                         description: "Maks 500 Tamu • 2x Pengiriman • Template Custom",
+                         type: "addon",
+                         targetRole: "all",
+                         activePeriodDays: 0,
+                         eventQuota: 0,
+                         clientQuota: 0,
+                         guestQuota: 0,
+                         waBlastQuota: 1000,
+                         price: 49000,
+                         normalPrice: 69000,
+                         isActive: true,
+                         createdAt: timeNow,
+                         updatedAt: timeNow
+                       },
+                       {
+                         name: "WA Blast Premium",
+                         description: "Maks 1.000 Tamu • 3x Pengiriman • Template Custom • Reminder H-3 & H-1",
+                         type: "addon",
+                         targetRole: "all",
+                         activePeriodDays: 0,
+                         eventQuota: 0,
+                         clientQuota: 0,
+                         guestQuota: 0,
+                         waBlastQuota: 3000,
+                         price: 99000,
+                         normalPrice: 149000,
+                         isActive: true,
+                         createdAt: timeNow,
+                         updatedAt: timeNow
+                       }
+                     ];
+                     
+                     let newServices: any[] = [];
+                     for (const payload of templates) {
+                        const docRef = await addDoc(collection(db, 'services'), payload);
+                        newServices.push({ id: docRef.id, ...payload, createdAt: new Date() });
+                     }
+                     
+                     setServices([...services, ...newServices]);
+                     showAlert("Berhasil", "Add-on WA Blast berhasil dibuat!", "success");
+                   } catch(err) {
+                     showAlert("Gagal", "Terjadi kesalahan saat memuat.", "error");
+                   } finally {
+                     setIsSaving(false);
+                   }
+                }
+             }}
+             className="flex items-center gap-2 bg-white text-indigo-600 border border-indigo-600 px-4 py-2 rounded-md hover:bg-indigo-50 transition text-sm font-medium"
+          >
+             Buat Template WA Blast Otomatis
+          </button>
+          <button 
+            onClick={openCreateModal}
+            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition font-medium text-sm"
+          >
+            <Plus className="w-4 h-4" /> Tambah Layanan Manual
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
@@ -378,6 +461,17 @@ export default function AdminServices() {
                       className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-center bg-white"
                    />
                    <p className="text-[10px] text-gray-400 mt-1.5 leading-tight">Total kontak/tamu yang bisa diundang.</p>
+                </div>
+                <div>
+                   <label className="block text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wider">Kuota WA Blast</label>
+                   <input 
+                      type="number" 
+                      value={waBlastQuota}
+                      onChange={(e) => setWaBlastQuota(Number(e.target.value))}
+                      min="0"
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-center bg-white"
+                   />
+                   <p className="text-[10px] text-gray-400 mt-1.5 leading-tight">Total kuota pengiriman WA Blast otomatis.</p>
                 </div>
               </div>
             </div>

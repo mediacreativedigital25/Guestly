@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, updateDoc, query, orderBy, serverTimestamp, runTransaction, getDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, query, orderBy, serverTimestamp, runTransaction, getDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
 import { useAuth } from '../../AuthContext';
 import { useSettings } from '../../SettingsContext';
@@ -13,49 +13,60 @@ export default function AdminInvoice() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let unsubscribeUsers: (() => void) | null = null;
+    let unsubscribeInvoices: (() => void) | null = null;
+
     if (appUser?.role === 'superadmin') {
-      fetchInvoices();
+      const setupListeners = async () => {
+        setLoading(true);
+        let usersMap: Record<string, string> = {};
+        
+        try {
+          unsubscribeUsers = onSnapshot(collection(db, 'users'), (usersSnap) => {
+            usersSnap.forEach(d => {
+              const u = d.data();
+              if (u.name) usersMap[u.uid || d.id] = u.name;
+            });
+            // Not immediately updating invoices here, but the map is ready
+          });
+
+          const q = query(collection(db, 'invoices'));
+          unsubscribeInvoices = onSnapshot(q, (querySnapshot) => {
+            const fetchedInvoices: any[] = [];
+            querySnapshot.forEach((doc) => {
+              const data = doc.data();
+              fetchedInvoices.push({ 
+                id: doc.id, 
+                ...data,
+                userName: data.userName || usersMap[data.userId] || null
+              });
+            });
+            
+            // Sort manually by createdAt descended
+            fetchedInvoices.sort((a, b) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
+            setInvoices(fetchedInvoices);
+            setLoading(false);
+          }, (error) => {
+            handleFirestoreError(error, OperationType.GET, 'invoices');
+            showAlert('Error', 'Gagal memuat invoice', 'error');
+            setLoading(false);
+          });
+        } catch (error) {
+           handleFirestoreError(error, OperationType.GET, 'admin_invoices_setup');
+           setLoading(false);
+        }
+      };
+
+      setupListeners();
     } else {
       setLoading(false);
     }
+
+    return () => {
+      if (unsubscribeUsers) unsubscribeUsers();
+      if (unsubscribeInvoices) unsubscribeInvoices();
+    };
   }, [appUser]);
-
-  const fetchInvoices = async () => {
-    try {
-      // Fetch users first to map names
-      let usersMap: Record<string, string> = {};
-      try {
-        const usersSnap = await getDocs(collection(db, 'users'));
-        usersSnap.forEach(d => {
-          const u = d.data();
-          if (u.name) usersMap[u.uid || d.id] = u.name;
-        });
-      } catch (err) {
-        console.warn('Could not fetch users for name mapping', err);
-      }
-
-      const q = query(collection(db, 'invoices'));
-      const querySnapshot = await getDocs(q);
-      const fetchedInvoices: any[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        fetchedInvoices.push({ 
-          id: doc.id, 
-          ...data,
-          userName: data.userName || usersMap[data.userId] || null
-        });
-      });
-      
-      // Sort manually by createdAt descended
-      fetchedInvoices.sort((a, b) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
-      setInvoices(fetchedInvoices);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.GET, 'invoices');
-      showAlert('Error', 'Gagal memuat invoice', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleConfirmPayment = async (invoiceId: string) => {
     const invoice = invoices.find(inv => inv.id === invoiceId);
@@ -86,6 +97,7 @@ export default function AdminInvoice() {
         const currentEventQuota = userData.eventQuota || 0;
         const currentClientQuota = userData.clientQuota || 0;
         const currentGuestQuota = userData.guestQuota || 0;
+        const currentWaBlastQuota = userData.waBlastQuota || 0;
         
         let newActiveUntil = userData.activeUntil;
         if (serviceData.activePeriodDays) {
@@ -99,6 +111,7 @@ export default function AdminInvoice() {
           eventQuota: currentEventQuota + (serviceData.eventQuota || 0),
           clientQuota: currentClientQuota + (serviceData.clientQuota || 0),
           guestQuota: currentGuestQuota + (serviceData.guestQuota || 0),
+          waBlastQuota: currentWaBlastQuota + (serviceData.waBlastQuota || 0),
           ...(newActiveUntil ? { activeUntil: newActiveUntil } : {}),
           updatedAt: serverTimestamp()
         });
@@ -118,7 +131,7 @@ export default function AdminInvoice() {
       const userRefQuery = await getDoc(doc(db, 'users', invoice.userId));
       if (userRefQuery.exists()) {
         const uData = userRefQuery.data();
-        if (settings?.fonnteToken && uData.phone) {
+        if (uData.phone) {
           import('../../lib/fonnte').then(({ sendFonnteMessage }) => {
             let message = `Halo ${uData.name || 'User'},\n\nPembayaran untuk pesanan layanan *${invoice.serviceName}* dengan nomor Invoice *${invoiceId}* telah berhasil dikonfirmasi.\n\nLayanan Anda sudah aktif dan kuota telah ditambahkan ke akun Anda.\n\nTerima kasih,\nAdmin Guestly`;
             
@@ -130,7 +143,7 @@ export default function AdminInvoice() {
                 .replace(/{amount}/g, `Rp ${(invoice.amount || 0).toLocaleString('id-ID')}`);
             }
             
-            sendFonnteMessage(settings.fonnteToken!, uData.phone, message);
+            sendFonnteMessage(null, uData.phone, message);
           });
         }
       }
@@ -157,7 +170,7 @@ export default function AdminInvoice() {
         const userRefQuery = await getDoc(doc(db, 'users', invoice.userId));
         if (userRefQuery.exists()) {
           const uData = userRefQuery.data();
-          if (settings?.fonnteToken && uData.phone) {
+          if (uData.phone) {
             import('../../lib/fonnte').then(({ sendFonnteMessage }) => {
               let message = `Halo ${uData.name || 'User'},\n\nMohon maaf, pesanan layanan *${invoice?.serviceName}* dengan nomor Invoice *${invoiceId}* telah dibatalkan.\n\nJika ada pertanyaan silakan hubungi kami.\n\nTerima kasih,\nAdmin Guestly`;
               
@@ -169,7 +182,7 @@ export default function AdminInvoice() {
                   .replace(/{amount}/g, `Rp ${(invoice?.amount || 0).toLocaleString('id-ID')}`);
               }
               
-              sendFonnteMessage(settings.fonnteToken!, uData.phone, message);
+              sendFonnteMessage(null, uData.phone, message);
             });
           }
         }

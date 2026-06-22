@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, query, doc, deleteDoc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, query, doc, deleteDoc, updateDoc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db, createAuthUserSilently } from '../lib/firebase';
 import { User, Role } from '../types';
 import { Shield, Trash2, Edit, Plus } from 'lucide-react';
@@ -35,21 +35,31 @@ export default function UsersList() {
   const { settings } = useSettings();
 
   useEffect(() => {
+    let unsubscribeUsers: () => void;
+
     const fetchUsers = async () => {
       if (appUser?.role !== 'superadmin') return;
 
       try {
         const q = query(collection(db, 'users'));
-        const snapshot = await getDocs(q);
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
-        setUsers(data);
+        unsubscribeUsers = onSnapshot(q, (snapshot) => {
+          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
+          setUsers(data);
+          setLoading(false);
+        }, (error) => {
+          console.error('Error fetching users:', error);
+          setLoading(false);
+        });
       } catch (error) {
-        console.error('Error fetching users:', error);
-      } finally {
+        console.error('Error setup listeners users:', error);
         setLoading(false);
       }
     };
     fetchUsers();
+
+    return () => {
+      if (unsubscribeUsers) unsubscribeUsers();
+    };
   }, [appUser]);
 
   const handleDelete = async (userId: string) => {
@@ -160,9 +170,9 @@ export default function UsersList() {
       setUsers([...users, { id: uid, ...newUserDoc }]);
       
       // 3. Send WhatsApp Notification
-      if (settings?.fonnteToken && newUserPhone) {
+      if (newUserPhone) {
         import('../lib/fonnte').then(({ sendFonnteMessage }) => {
-          const loginUrl = window.location.origin;
+          const loginUrl = `${window.location.origin}/auth/login`;
           const message = `🔐 *Informasi Akun Guestly*
 
 Halo Kak *${newUserName}*,
@@ -189,7 +199,7 @@ Smart Digital Guestbook & Event Management
 
 Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
 ─────────────────`;
-          sendFonnteMessage(settings.fonnteToken!, newUserPhone, message);
+          sendFonnteMessage(null, newUserPhone, message);
         });
       }
 

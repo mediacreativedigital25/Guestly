@@ -13,6 +13,7 @@ export interface User {
   eventQuota?: number;
   clientQuota?: number;
   guestQuota?: number;
+  waBlastQuota?: number;
   activeUntil?: any;
   createdAt: any;
   updatedAt: any;
@@ -60,6 +61,16 @@ export interface EventRecord {
   activeUntil?: string;
   eventQuota?: number;
   guestQuota?: number;
+  waTemplateId?: string;
+  waBlastCount?: number;
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface WATemplate {
+  id?: string;
+  name: string;
+  content: string; // The message template
   createdAt: any;
   updatedAt: any;
 }
@@ -92,6 +103,7 @@ export interface GuestlyService {
   eventQuota?: number;
   clientQuota?: number;
   guestQuota?: number;
+  waBlastQuota?: number;
   price: number;
   normalPrice?: number;
   isActive: boolean;
@@ -105,4 +117,14 @@ export interface ChangelogEntry {
   date: string;
   changes: string[];
   createdAt: any;
+}
+
+export interface Testimonial {
+  id?: string;
+  name: string;
+  role: string;
+  content: string;
+  rating: number;
+  createdAt: any;
+  status: 'pending' | 'approved';
 }

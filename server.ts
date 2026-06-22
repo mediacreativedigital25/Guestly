@@ -3,7 +3,7 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { initializeFirestore, doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import dotenv from "dotenv";
 import firebaseConfig from "./firebase-applet-config.json";
 import cron from "node-cron";
@@ -12,7 +12,7 @@ dotenv.config();
 
 // Initialize Firebase for server
 const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp);
+const db = initializeFirestore(firebaseApp, { experimentalForceLongPolling: true }, firebaseConfig.firestoreDatabaseId);
 
 async function sendWhatsAppNotification(target: string, message: string) {
   const token = process.env.FONNTE_TOKEN;
@@ -44,6 +44,11 @@ function startCronJob() {
   // Run daily at 08:00 AM
   cron.schedule('0 8 * * *', async () => {
     try {
+      const token = process.env.FONNTE_TOKEN;
+      if (!token) {
+        console.log('FONNTE_TOKEN is not set. Skipping daily event notification check.');
+        return;
+      }
       console.log('Running daily event notification check...');
       // Get date string 3 days from now in YYYY-MM-DD
       const targetDate = new Date();
@@ -140,6 +145,99 @@ async function startServer() {
     }
   });
 
+  app.set("trust proxy", true);
+  app.use(express.json({ limit: "50mb" })); // Add body parsing
+
+  // Proxy endpoint for sending WhatsApp messages via Fonnte securely (token hidden from client)
+  app.post('/api/send-whatsapp', async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ success: false, error: 'Unauthorized: Missing or invalid token' });
+      }
+      
+      const idToken = authHeader.split('Bearer ')[1];
+      
+      // Verify token via Firebase REST API
+      const verifyUrl = `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`;
+      const verifyResponse = await fetch(verifyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken })
+      });
+      
+      if (!verifyResponse.ok) {
+        return res.status(403).json({ success: false, error: 'Unauthorized: Invalid token' });
+      }
+
+      const { target, message, url } = req.body;
+      const token = process.env.FONNTE_TOKEN;
+      
+      if (!token) {
+        return res.status(500).json({ success: false, error: 'FONNTE_TOKEN environment variable is not configured.' });
+      }
+
+      const body = new URLSearchParams({
+        "target": target,
+        "message": message,
+        "countryCode": "62"
+      });
+      if (url) {
+        body.append("url", url);
+      }
+
+      const response = await fetch("https://api.fonnte.com/send", {
+        method: "POST",
+        headers: {
+          "Authorization": token
+        },
+        body: body
+      });
+      
+      const result = await response.json();
+      
+      if (result.status) {
+        return res.json({ success: true, result });
+      } else {
+        return res.status(400).json({ success: false, error: result.reason || 'Fonnte API error' });
+      }
+    } catch (error: any) {
+      console.error('Error proxying wa message:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Endpoint to serve base64 images to clients like WhatsApp crawlers
+  app.get(['/api/thumbnail/:eventId', '/api/thumbnail/:eventId/:filename'], async (req, res) => {
+    try {
+      const eventId = req.params.eventId;
+      if (!eventId) {
+        res.status(400).end();
+        return;
+      }
+      
+      const docRef = doc(db, 'events', eventId);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const eventData = docSnap.data();
+        const base64 = eventData.thumbnailUrl || eventData.frameOverlayUrl;
+        if (base64 && typeof base64 === 'string' && base64.startsWith('data:image/')) {
+          const matches = base64.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+          if (matches && matches.length === 3) {
+            const imageBuffer = Buffer.from(matches[2], 'base64');
+            res.set('Content-Type', matches[1]);
+            res.send(imageBuffer);
+            return;
+          }
+        }
+      }
+      res.status(404).end();
+    } catch (e) {
+      console.error("Error serving thumbnail:", e);
+      res.status(500).end();
+    }
+  });
+
   // Add a route to inject dynamic metadata for RSVP page
   app.get(['/public/rsvp/:eventId', '/rsvp/:eventId/:ticketCode'], async (req, res, next) => {
     try {
@@ -166,7 +264,15 @@ async function startServer() {
         // Prepare meta tags
         const title = eventData.title || 'Undangan Acara';
         const desc = eventData.description || 'Anda diundang ke acara kami!';
-        const thumb = eventData.thumbnailUrl || eventData.frameOverlayUrl || 'https://via.placeholder.com/1200x630?text=Undangan';
+        
+        let thumb = eventData.thumbnailUrl || eventData.frameOverlayUrl || 'https://via.placeholder.com/1200x630?text=Undangan';
+        
+        // WhatsApp requires absolute HTTP URLs for og:image, not base64 data URIs
+        if (thumb.startsWith('data:image/')) {
+          const protocol = req.protocol || 'https';
+          const host = req.get('host') || 'localhost:3000';
+          thumb = `${protocol}://${host}/api/thumbnail/${eventId}`;
+        }
 
         const metaTags = `
           <title>${title}</title>

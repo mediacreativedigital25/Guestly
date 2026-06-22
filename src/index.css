@@ -44,6 +44,12 @@
   }
 }
 
+@layer utilities {
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @font-face {
   font-family: 'Darling';
   src: url('/fonts/Darling.ttf') format('truetype');

@@ -4,6 +4,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useSettings } from '../../SettingsContext';
 import { showAlert, showConfirm } from '../../lib/alerts';
+import AdminSalespageSettings from './AdminSalespageSettings';
 
 export default function AdminSettings() {
   const [activeTab, setActiveTab] = useState('branding');
@@ -11,12 +12,10 @@ export default function AdminSettings() {
 
   const [logoUrl, setLogoUrl] = useState(settings?.logoUrl || '');
   const [faviconUrl, setFaviconUrl] = useState(settings?.faviconUrl || '');
-  const [fonnteToken, setFonnteToken] = useState(settings?.fonnteToken || '');
   const [templateOrderCreated, setTemplateOrderCreated] = useState(settings?.fonnteTemplates?.orderCreated || '');
   const [templateOrderPaid, setTemplateOrderPaid] = useState(settings?.fonnteTemplates?.orderPaid || '');
   const [templateOrderCancelled, setTemplateOrderCancelled] = useState(settings?.fonnteTemplates?.orderCancelled || '');
   const [activePaymentMethod, setActivePaymentMethod] = useState(settings?.activePaymentMethod || 'manual');
-  const [serverKey, setServerKey] = useState(settings?.paymentGateway?.serverKey || '');
   const [clientKey, setClientKey] = useState(settings?.paymentGateway?.clientKey || '');
   
   const [bankName, setBankName] = useState(settings?.manualPayment?.bankName || '');
@@ -24,25 +23,35 @@ export default function AdminSettings() {
   const [accountName, setAccountName] = useState(settings?.manualPayment?.accountName || '');
   const [instructions, setInstructions] = useState(settings?.manualPayment?.instructions || '');
 
+  // Salespage settings
+  const [salespageData, setSalespageData] = useState<any>({});
+
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (settings) {
       setLogoUrl(settings.logoUrl || '');
       setFaviconUrl(settings.faviconUrl || '');
-      setFonnteToken(settings.fonnteToken || '');
       setTemplateOrderCreated(settings.fonnteTemplates?.orderCreated || '');
       setTemplateOrderPaid(settings.fonnteTemplates?.orderPaid || '');
       setTemplateOrderCancelled(settings.fonnteTemplates?.orderCancelled || '');
       setActivePaymentMethod(settings.activePaymentMethod || 'manual');
-      setServerKey(settings.paymentGateway?.serverKey || '');
       setClientKey(settings.paymentGateway?.clientKey || '');
       setBankName(settings.manualPayment?.bankName || '');
       setAccountNumber(settings.manualPayment?.accountNumber || '');
       setAccountName(settings.manualPayment?.accountName || '');
       setInstructions(settings.manualPayment?.instructions || '');
+      
+      // Load salespage settings
+      if (settings.salespage) {
+        setSalespageData(settings.salespage);
+      }
     }
   }, [settings]);
+
+  const updateSP = (key: string, value: any) => {
+    setSalespageData((prev: any) => ({ ...prev, [key]: value }));
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'favicon') => {
     const file = e.target.files?.[0];
@@ -84,7 +93,6 @@ export default function AdminSettings() {
       } else if (tab === 'fonnte') {
         await setDoc(globalSettingsRef, { 
           ...currentData, 
-          fonnteToken,
           fonnteTemplates: {
             orderCreated: templateOrderCreated,
             orderPaid: templateOrderPaid,
@@ -96,10 +104,16 @@ export default function AdminSettings() {
         await setDoc(globalSettingsRef, { 
           ...currentData, 
           activePaymentMethod,
-          paymentGateway: { serverKey, clientKey },
+          paymentGateway: { clientKey },
           manualPayment: { bankName, accountNumber, accountName, instructions }
         }, { merge: true });
         showAlert('Berhasil', 'Metode Pembayaran berhasil disimpan!', 'success');
+      } else if (tab === 'salespage') {
+        await setDoc(globalSettingsRef, {
+          ...currentData,
+          salespage: salespageData
+        }, { merge: true });
+        showAlert('Berhasil', 'Halaman Salespage berhasil disimpan!', 'success');
       }
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -134,6 +148,12 @@ export default function AdminSettings() {
             className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${activeTab === 'payment_methods' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
           >
             Metode Pembayaran
+          </button>
+          <button
+            onClick={() => setActiveTab('salespage')}
+            className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${activeTab === 'salespage' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            Halaman Salespage
           </button>
         </div>
 
@@ -200,14 +220,14 @@ export default function AdminSettings() {
                 <h2 className="text-lg font-medium text-gray-900 flex items-center gap-2 mb-1">
                   <MessageSquare className="w-5 h-5 text-indigo-500" /> Integrasi WhatsApp Fonnte (Beta)
                 </h2>
-                <p className="text-sm text-gray-500 mb-4">Pengaturan token untuk API Fonnte pengiriman pesan WhatsApp.</p>
+                <p className="text-sm text-gray-500 mb-4">Template pengiriman pesan WhatsApp.</p>
                 <div className="space-y-4 max-w-3xl">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">API Token</label>
-                    <input type="password" value={fonnteToken} onChange={e => setFonnteToken(e.target.value)} placeholder="Masukkan Token Fonnte" className="w-full border border-gray-300 rounded-md px-3 py-2 flex-1 focus:ring-indigo-500 focus:border-indigo-500 bg-white" />
+                  <div className="bg-blue-50 border border-blue-200 text-blue-800 rounded-md p-4 mb-4">
+                    <p className="text-sm font-medium">Informasi Keamanan</p>
+                    <p className="text-sm mt-1">Demi keamanan maksimum, API Token Fonnte tidak lagi disimpan di database. Silakan atur token Anda melalui Environment Variable <code>FONNTE_TOKEN</code> di sisi server (\`.env\`).</p>
                   </div>
                   
-                  <div className="pt-4 mt-4 border-t border-gray-200">
+                  <div className="pt-4 border-t border-gray-200">
                     <h3 className="text-md font-semibold text-gray-900 mb-3">Template Pesan WhatsApp</h3>
                     <p className="text-xs text-gray-500 mb-4">Anda dapat menggunakan variabel berikut dalam template: <br/><code>{"{userName}"}</code>, <code>{"{serviceName}"}</code>, <code>{"{invoiceId}"}</code>, <code>{"{amount}"}</code></p>
                     
@@ -319,12 +339,12 @@ export default function AdminSettings() {
                       Integrasi Tripay sedang dalam pengembangan (Beta). Untuk sekarang, pembayaran otomatis mungkin belum sepenuhnya berfungsi.
                     </div>
                     <div className="space-y-4 max-w-3xl">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Tripay Private Key</label>
-                        <input type="password" value={serverKey} onChange={e => setServerKey(e.target.value)} placeholder="Masukkan Private Key" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white" />
+                      <div className="bg-blue-50 border border-blue-200 text-blue-800 rounded-md p-4 mb-4">
+                        <p className="text-sm font-medium">Informasi Keamanan</p>
+                        <p className="text-sm mt-1">Demi keamanan maksimum, API Token Tripay (Private Key) tidak lagi disimpan di database. Silakan atur token Anda melalui Environment Variable <code>TRIPAY_PRIVATE_KEY</code> di sisi server (\`.env\`).</p>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Tripay API Key</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Tripay API Key (Public)</label>
                         <input type="text" value={clientKey} onChange={e => setClientKey(e.target.value)} placeholder="Masukkan API Key" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white" />
                       </div>
                     </div>
@@ -334,6 +354,26 @@ export default function AdminSettings() {
               <div className="pt-4 border-t border-gray-100 flex justify-end">
                 <button type="button" onClick={() => handleSave('payment_methods')} disabled={isSaving} className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors disabled:opacity-50">
                   {isSaving ? 'Menyimpan...' : 'Simpan Pengaturan Pembayaran'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'salespage' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-900">Pengaturan Salespage</h2>
+                <button type="button" onClick={() => handleSave('salespage')} disabled={isSaving} className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors disabled:opacity-50">
+                  {isSaving ? 'Menyimpan...' : 'Simpan Perubahan'}
+                </button>
+              </div>
+              <AdminSalespageSettings 
+                data={salespageData} 
+                updateData={updateSP} 
+              />
+              <div className="pt-4 border-t border-gray-100 flex justify-end">
+                <button type="button" onClick={() => handleSave('salespage')} disabled={isSaving} className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors disabled:opacity-50">
+                  {isSaving ? 'Menyimpan...' : 'Simpan Halaman Salespage'}
                 </button>
               </div>
             </div>

@@ -1,11 +1,11 @@
 import { useParams, Link } from 'react-router-dom';
-import { QrCode, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code } from 'lucide-react';
+import { QrCode, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code, MessageCircle } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'react-qr-code';
 import * as htmlToImage from 'html-to-image';
-import { collection, query, getDocs, addDoc, serverTimestamp, doc, getDoc, deleteDoc, updateDoc, deleteField } from 'firebase/firestore';
+import { collection, query, getDocs, addDoc, serverTimestamp, doc, getDoc, deleteDoc, updateDoc, deleteField, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { Guest, EventRecord } from '../types';
+import { Guest, EventRecord, WATemplate } from '../types';
 import { parseFirestoreDate } from '../lib/utils';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
@@ -14,6 +14,7 @@ import autoTable from 'jspdf-autotable';
 import { Modal } from '../components/Modal';
 import { useAuth } from '../AuthContext';
 import { showAlert, showConfirm } from '../lib/alerts';
+import { useSettings } from '../SettingsContext';
 
 export default function EventDetails() {
   const { eventId } = useParams();
@@ -21,6 +22,7 @@ export default function EventDetails() {
   const [event, setEvent] = useState<EventRecord | null>(null);
   const [clientName, setClientName] = useState<string>('');
   const [guests, setGuests] = useState<Guest[]>([]);
+  const [waTemplates, setWaTemplates] = useState<WATemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddingGuest, setIsAddingGuest] = useState(false);
   const [newGuestName, setNewGuestName] = useState('');
@@ -29,24 +31,37 @@ export default function EventDetails() {
   const [newGuestCategory, setNewGuestCategory] = useState('');
   const [newGuestSession, setNewGuestSession] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [rsvpFilter, setRsvpFilter] = useState('all');
+  const [attendanceFilter, setAttendanceFilter] = useState('all');
   const [activeTab, setActiveTab] = useState<'guest-list' | 'rsvp'>('guest-list');
   const [isEmbedModalOpen, setIsEmbedModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrRef = useRef<HTMLDivElement>(null);
   const [activeQrGuest, setActiveQrGuest] = useState<Guest | null>(null);
+  const { settings } = useSettings();
+  const [isBlasting, setIsBlasting] = useState(false);
+  const [isBlastModalOpen, setIsBlastModalOpen] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+  const [selectedGuestIds, setSelectedGuestIds] = useState<string[]>([]);
+
 
   useEffect(() => {
-    const fetchData = async () => {
+    if (!eventId) return;
+
+    let unsubscribeEvent: () => void;
+    let unsubscribeGuests: () => void;
+
+    const setupListeners = async () => {
       try {
         setLoading(true);
-        // Fetch event details
-        if (eventId) {
-          const eventDoc = await getDoc(doc(db, 'events', eventId));
+
+        // Listen to event details
+        unsubscribeEvent = onSnapshot(doc(db, 'events', eventId), async (eventDoc) => {
           if (eventDoc.exists()) {
             const eventData = { id: eventDoc.id, ...eventDoc.data() } as EventRecord;
             setEvent(eventData);
-            
-            // Fetch client name
+
+            // Fetch client name (one-time fetch is typically okay as client name rarely changes, or listen to it if you prefer. We'll do simple fetch here)
             if (eventData.clientId) {
               try {
                 const clientDoc = await getDoc(doc(db, 'clients', eventData.clientId));
@@ -58,21 +73,51 @@ export default function EventDetails() {
               }
             }
           }
-        }
-        
-        // Fetch guests
-        const guestsRef = collection(db, 'events', eventId!, 'guests');
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, `events/${eventId}`);
+        });
+
+        // Listen to guests
+        const guestsRef = collection(db, 'events', eventId, 'guests');
         const q = query(guestsRef);
-        const snapshot = await getDocs(q);
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
-        setGuests(data);
+        unsubscribeGuests = onSnapshot(q, (snapshot) => {
+          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
+          setGuests(data);
+          setLoading(false); // Only stop loading after guests are initially fetched
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, `events/${eventId}/guests`);
+          setLoading(false);
+        });
+
+        // Fetch WA Templates
+        getDoc(doc(db, 'settings', 'waTemplates')).then(docSnap => {
+           if (docSnap.exists() && docSnap.data().templates) {
+              setWaTemplates(docSnap.data().templates as WATemplate[]);
+           }
+        }).catch((err: any) => {
+           if (err.code !== 'permission-denied') {
+             console.warn('Failed to fetch WA templates from settings', err);
+           }
+        });
+
+        // Load saved template id from localStorage
+        const savedTpl = localStorage.getItem(`waTemplateId_${eventId}`);
+        if (savedTpl) {
+           setSelectedTemplateId(savedTpl);
+        }
+
       } catch (error) {
         handleFirestoreError(error, OperationType.GET, `events/${eventId}`);
-      } finally {
         setLoading(false);
       }
     };
-    if (eventId) fetchData();
+
+    setupListeners();
+
+    return () => {
+      if (unsubscribeEvent) unsubscribeEvent();
+      if (unsubscribeGuests) unsubscribeGuests();
+    };
   }, [eventId]);
 
   const handleAddGuest = async (e: React.FormEvent) => {
@@ -190,12 +235,27 @@ export default function EventDetails() {
     }
   };
 
-  const baseFilteredGuests = activeTab === 'guest-list' ? guests.filter(g => g.rsvpStatus === 'attending') : guests;
+  const baseFilteredGuests = activeTab === 'guest-list' ? guests.filter(g => g.rsvpStatus !== 'declined') : guests;
   
-  const filteredGuests = baseFilteredGuests.filter(guest => 
-    guest.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    (guest.ticketCode && guest.ticketCode.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredGuests = baseFilteredGuests.filter(guest => {
+    const matchesSearch = guest.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          (guest.ticketCode && guest.ticketCode.toLowerCase().includes(searchTerm.toLowerCase()));
+    
+    let matchesStatus = true;
+    if (activeTab === 'rsvp') {
+      if (rsvpFilter !== 'all') {
+        matchesStatus = guest.rsvpStatus === rsvpFilter;
+      }
+    } else {
+      // activeTab === 'guest-list'
+      if (attendanceFilter !== 'all') {
+        const isAttended = attendanceFilter === 'attended';
+        matchesStatus = guest.attended === isAttended;
+      }
+    }
+    
+    return matchesSearch && matchesStatus;
+  });
 
   const handleExportPDF = () => {
     const doc = new jsPDF();
@@ -270,6 +330,133 @@ export default function EventDetails() {
     const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
     window.open(waUrl, '_blank');
   };
+
+  const openBlastModal = () => {
+    const guestsToBlast = selectedGuestIds.length > 0 
+      ? filteredGuests.filter(g => selectedGuestIds.includes(g.id!))
+      : filteredGuests;
+
+    const validGuests = guestsToBlast.filter(g => g.phone && g.phone.length >= 9);
+    if (validGuests.length === 0) {
+      showAlert('Info', 'Tidak ada tamu dengan nomor WhatsApp yang valid untuk diblast.', 'info');
+      return;
+    }
+
+    const currentWaBlastCount = event?.waBlastCount || 0;
+    const freeWaBlastQuota = 50;
+    const userWaBlastQuota = appUser?.waBlastQuota || 0;
+    const availableWaBlastQuota = Math.max(0, freeWaBlastQuota - currentWaBlastCount) + userWaBlastQuota;
+
+    if (appUser?.role !== 'superadmin' && validGuests.length > availableWaBlastQuota) {
+       showAlert(
+         'Kuota Tidak Mencukupi', 
+         `Anda mencoba mengirim ${validGuests.length} pesan, namun sisa kuota WA Blast Anda gabungan dari Free (sisa ${Math.max(0, freeWaBlastQuota - currentWaBlastCount)}) dan Add-on (${userWaBlastQuota}) adalah ${availableWaBlastQuota}. \n\nSilakan beli add-on Kuota WA Blast di menu Layanan (Katalog), atau kurangi jumlah pilihan tamu, atau gunakan tombol pesan WA manual (opsi gratis tanpa batas).`, 
+         'warning'
+       );
+       return;
+    }
+
+    // Default template or last used one
+    if (waTemplates.length > 0 && !selectedTemplateId) {
+       setSelectedTemplateId(localStorage.getItem(`waTemplateId_${eventId}`) || waTemplates[0].id || '');
+    }
+
+    setIsBlastModalOpen(true);
+  };
+
+  const handleBlastWA = async () => {
+    setIsBlastModalOpen(false);
+    
+    const guestsToBlast = selectedGuestIds.length > 0 
+      ? filteredGuests.filter(g => selectedGuestIds.includes(g.id!))
+      : filteredGuests;
+
+    const validGuests = guestsToBlast.filter(g => g.phone && g.phone.length >= 9);
+    
+    const currentWaBlastCount = event?.waBlastCount || 0;
+    const freeWaBlastQuota = 50;
+    const userWaBlastQuota = appUser?.waBlastQuota || 0;
+
+    setIsBlasting(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+      const { sendFonnteMessage } = await import('../lib/fonnte');
+      const template = waTemplates.find(t => t.id === selectedTemplateId) || waTemplates[0];
+
+      // Use a default message if template is missing but should fallback
+      const defaultMessageContent = `Halo *[GUEST_NAME]* 👋🏻\n\nDengan penuh rasa hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara spesial kami:\n\n✨ *[EVENT_TITLE]* ✨\n\nUntuk konfirmasi kehadiran saat acara berlangsung, silakan tunjukkan QR Code berikut:\n🔳 [QR_LINK]\n\nDetail lengkap acara dapat dilihat melalui undangan digital berikut:\n💌 [INVITE_LINK]\n\nMerupakan suatu kebahagiaan bagi kami apabila Bapak/Ibu/Saudara/i berkenan hadir serta memberikan doa dan restu kepada kami.\n\nAtas perhatian dan kehadirannya, kami ucapkan terima kasih 🙏🏻\n\nHormat kami,\n*[SENDER_NAME]*`;
+
+      const templateContent = template?.content || defaultMessageContent;
+
+      for (const guest of validGuests) {
+          const baseUrl = window.location.origin;
+          const qrLink = `${baseUrl}/rsvp/${eventId}/${guest.ticketCode}`;
+          
+          let digitalInviteLink = event?.digitalInviteLink || qrLink;
+          if (event?.digitalInviteLink) {
+              const separator = event.digitalInviteLink.includes('?') ? '&' : '?';
+              digitalInviteLink = `${event.digitalInviteLink}${separator}to=${encodeURIComponent(guest.name)}&ticket=${guest.ticketCode}`;
+          }
+
+          const senderName = event?.coupleName || clientName || event?.title || 'Kami';
+          
+          let message = templateContent
+            .replace(/\[GUEST_NAME\]/g, guest.name)
+            .replace(/\[EVENT_TITLE\]/g, event?.title || '')
+            .replace(/\[QR_LINK\]/g, qrLink)
+            .replace(/\[INVITE_LINK\]/g, digitalInviteLink)
+            .replace(/\[SENDER_NAME\]/g, senderName);
+
+          let imgUrl: string | undefined = undefined;
+          if (event?.thumbnailUrl || event?.frameOverlayUrl) {
+             imgUrl = `${window.location.origin}/api/thumbnail/${eventId}/image.jpg`;
+          }
+
+          const sent = await sendFonnteMessage(null, guest.phone!, message, imgUrl);
+          if (sent) successCount++;
+          else failCount++;
+
+          // delay 3 seconds
+          await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+      
+      // Update Quotas
+      if (successCount > 0 && appUser?.role !== 'superadmin') {
+         const countUsedFromFree = Math.min(successCount, Math.max(0, freeWaBlastQuota - currentWaBlastCount));
+         const countUsedFromUser = successCount - countUsedFromFree;
+         
+         try {
+           await updateDoc(doc(db, 'events', eventId!), { waBlastCount: currentWaBlastCount + successCount, updatedAt: serverTimestamp() });
+         } catch (e) {
+           console.warn("Could not update waBlastCount (Firebase Rules not deployed)", e);
+         }
+         
+         if (countUsedFromUser > 0 && appUser?.id) {
+             try {
+               await updateDoc(doc(db, 'users', appUser.id), { waBlastQuota: Math.max(0, userWaBlastQuota - countUsedFromUser), updatedAt: serverTimestamp() });
+             } catch (e) {
+               console.warn("Could not update waBlastQuota (Firebase Rules not deployed)", e);
+             }
+         }
+      }
+
+      // Save the selected template for the event in localStorage
+      if (selectedTemplateId) {
+         localStorage.setItem(`waTemplateId_${eventId}`, selectedTemplateId);
+      }
+
+      showAlert('Blast Selesai', `Berhasil mengirim: ${successCount}\nGagal mengirim: ${failCount}`, successCount > 0 ? 'success' : 'warning');
+      setSelectedGuestIds([]); // clear selection after blast
+    } catch (error) {
+      console.error(error);
+      showAlert('Gagal', 'Terjadi kesalahan saat memproses blast WhatsApp.', 'error');
+    } finally {
+      setIsBlasting(false);
+    }
+  };
+
   const handleExportExcel = () => {
     const data = filteredGuests.map((guest, index) => ({
       "No": index + 1,
@@ -385,6 +572,22 @@ export default function EventDetails() {
     if(fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) {
+      setSelectedGuestIds(filteredGuests.map(g => g.id));
+    } else {
+      setSelectedGuestIds([]);
+    }
+  };
+
+  const handleSelectGuest = (id: string, checked: boolean) => {
+    if (checked) {
+      setSelectedGuestIds(prev => [...prev, id]);
+    } else {
+      setSelectedGuestIds(prev => prev.filter(guestId => guestId !== id));
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -417,7 +620,7 @@ export default function EventDetails() {
             <span className="sm:hidden">Layar</span>
           </Link>
           <Link
-            to={`/events/${eventId}/scan`}
+            to={`/auth/login/events/${eventId}/scan`}
             className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium text-sm sm:text-base"
           >
             <ScanLine className="w-4 sm:w-5 h-4 sm:h-5" />
@@ -537,6 +740,16 @@ export default function EventDetails() {
         </nav>
       </div>
 
+      {activeTab === 'guest-list' && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-start gap-3">
+          <MessageCircle className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
+          <div>
+            <h4 className="text-sm font-semibold text-blue-800">Kuota WA Blast Otomatis: {Math.max(0, 50 - (event?.waBlastCount || 0)) + (appUser?.waBlastQuota || 0)} Pesan Tersedia</h4>
+            <p className="text-xs text-blue-700 mt-1">Setiap acara mendapatkan <strong>50 kuota gratis</strong> (Terpakai: {Math.min(50, event?.waBlastCount || 0)}/50). Jika habis, sistem akan menggunakan kuota add-on Anda (Sisa: {appUser?.waBlastQuota || 0}). Anda dapat membeli add-on di menu Layanan. Pengiriman WA secara manual tidak mengurangi kuota.</p>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-4 sm:px-6 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-gray-100 bg-gray-50 gap-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
@@ -555,6 +768,28 @@ export default function EventDetails() {
                 className="block w-full pl-10 pr-3 py-2 sm:py-1.5 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
               />
             </div>
+            {activeTab === 'rsvp' ? (
+              <select
+                value={rsvpFilter}
+                onChange={(e) => setRsvpFilter(e.target.value)}
+                className="block w-full sm:w-auto pl-3 pr-8 py-2 sm:py-1.5 border border-gray-300 rounded-md leading-5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
+              >
+                <option value="all">Semua Status</option>
+                <option value="attending">Hadir</option>
+                <option value="declined">Tidak Hadir</option>
+                <option value="pending">Pending</option>
+              </select>
+            ) : (
+              <select
+                value={attendanceFilter}
+                onChange={(e) => setAttendanceFilter(e.target.value)}
+                className="block w-full sm:w-auto pl-3 pr-8 py-2 sm:py-1.5 border border-gray-300 rounded-md leading-5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
+              >
+                <option value="all">Semua Kehadiran</option>
+                <option value="attended">Sudah Scan</option>
+                <option value="not_attended">Belum Hadir</option>
+              </select>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
             <input 
@@ -591,6 +826,18 @@ export default function EventDetails() {
               title="Export Excel"
             >
               <FileSpreadsheet className="w-4 h-4 text-green-600"/> Excel
+            </button>
+            <button 
+              onClick={openBlastModal}
+              disabled={isBlasting}
+              className={`flex-1 sm:flex-none justify-center text-sm font-medium flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-md transition-colors whitespace-nowrap lg:ml-2 ${
+                isBlasting 
+                  ? 'text-green-700 bg-green-100 cursor-not-allowed opacity-70' 
+                  : 'text-green-700 bg-green-50 border border-green-200 hover:bg-green-100 shadow-sm'
+              }`}
+              title="Blast WA"
+            >
+              <MessageCircle className="w-4 h-4 text-green-600"/> {isBlasting ? 'Memproses...' : 'Blast WA'}
             </button>
             <button 
               onClick={() => setIsAddingGuest(!isAddingGuest)}
@@ -673,9 +920,23 @@ export default function EventDetails() {
             </div>
           ) : (
             <div className="overflow-x-auto">
+              {selectedGuestIds.length > 0 && (
+                <div className="bg-indigo-50 px-6 py-3 border-b border-indigo-100 flex items-center justify-between">
+                  <span className="text-sm text-indigo-700 font-medium">{selectedGuestIds.length} tamu terpilih</span>
+                  <button onClick={() => setSelectedGuestIds([])} className="text-sm text-indigo-600 hover:text-indigo-800 underline">Batal Pilih Semua</button>
+                </div>
+              )}
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-white">
                   <tr>
+                    <th className="px-6 py-3 text-left">
+                      <input 
+                        type="checkbox" 
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        checked={selectedGuestIds.length === filteredGuests.length && filteredGuests.length > 0}
+                        onChange={handleSelectAll}
+                      />
+                    </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama Tamu</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Alamat</th>
@@ -698,7 +959,15 @@ export default function EventDetails() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
                   {filteredGuests.map((guest, index) => (
-                    <tr key={guest.id} className="hover:bg-gray-50 transition-colors">
+                    <tr key={guest.id} className={`transition-colors ${selectedGuestIds.includes(guest.id) ? 'bg-indigo-50/30' : 'hover:bg-gray-50'}`}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <input 
+                          type="checkbox" 
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          checked={selectedGuestIds.includes(guest.id)}
+                          onChange={(e) => handleSelectGuest(guest.id, e.target.checked)}
+                        />
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{index + 1}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{guest.name}</div>
@@ -786,6 +1055,57 @@ export default function EventDetails() {
           )}
         </div>
       </div>
+
+      <Modal isOpen={isBlastModalOpen} onClose={() => setIsBlastModalOpen(false)} title="Blast WhatsApp">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+             Anda akan mengirim pesan WhatsApp secara bersamaan ke <strong>
+               {selectedGuestIds.length > 0 
+                  ? filteredGuests.filter(g => selectedGuestIds.includes(g.id!) && g.phone && g.phone.length >= 9).length
+                  : filteredGuests.filter(g => g.phone && g.phone.length >= 9).length}
+             </strong> tamu {selectedGuestIds.length > 0 ? "yang dipilih" : "di daftar ini"}. Proses ini membutuhkan waktu beberapa saat (jeda 3 detik per pesan).
+          </p>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Template Pesan WA</label>
+            <select
+              value={selectedTemplateId}
+              onChange={(e) => setSelectedTemplateId(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+            >
+              {waTemplates.length === 0 && <option value="">Default Pesan Sistem</option>}
+              {waTemplates.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+            {waTemplates.length > 0 && (
+              <p className="text-xs text-gray-500 mt-1">Template yang dipilih akan disimpan di browser untuk acara ini.</p>
+            )}
+            {waTemplates.length === 0 && appUser?.role === 'superadmin' && (
+              <p className="text-xs text-indigo-500 mt-1"><Link to="/admin/wa-templates" className="underline">Buat Template WA</Link> baru di menu admin.</p>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <button 
+              type="button" 
+              onClick={() => setIsBlastModalOpen(false)} 
+              disabled={isBlasting}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+            >
+              Batal
+            </button>
+            <button 
+              type="button" 
+              onClick={handleBlastWA}
+              disabled={isBlasting}
+              className="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 transition-colors disabled:opacity-50"
+            >
+              {isBlasting ? 'Memproses...' : 'Kirim Blast'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal isOpen={!!guestToDelete} onClose={() => setGuestToDelete(null)} title="Konfirmasi Hapus">
         <div className="p-4 bg-red-50 border border-red-100 rounded-lg text-red-800 mb-6">

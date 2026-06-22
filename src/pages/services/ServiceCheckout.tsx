@@ -6,6 +6,7 @@ import { GuestlyService } from '../../types';
 import { useAuth } from '../../AuthContext';
 import { useSettings } from '../../SettingsContext';
 import { showAlert, showConfirm } from '../../lib/alerts';
+import { Copy, Check } from 'lucide-react';
 
 export default function ServiceCheckout() {
   const { serviceId } = useParams<{ serviceId: string }>();
@@ -17,6 +18,13 @@ export default function ServiceCheckout() {
   const [loading, setLoading] = useState(true);
   const [ordering, setOrdering] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('transfer');
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   // Change default payment method if active payment method is 'tripay'
   useEffect(() => {
@@ -39,7 +47,7 @@ export default function ServiceCheckout() {
           setService({ id: docSnap.id, ...docSnap.data() } as GuestlyService);
         } else {
           // Service not found
-          navigate('/services/catalog');
+          navigate('/auth/login/services/catalog');
         }
       } catch (error) {
         handleFirestoreError(error, OperationType.GET, `services/${serviceId}`);
@@ -104,7 +112,7 @@ export default function ServiceCheckout() {
       });
       
       // Send Fonnte WhatsApp Notification
-      if (settings?.fonnteToken && appUser?.phone) {
+      if (appUser?.phone) {
         import('../../lib/fonnte').then(({ sendFonnteMessage }) => {
           let message = `Halo ${appUser.name || 'User'},\n\nPesanan Anda untuk layanan *${service.name}* telah berhasil dibuat.\nNomor Invoice: *${createdInvoiceId}*\nTotal: *Rp ${service.price.toLocaleString('id-ID')}*\nStatus: *Pending*\n\nSilakan selesaikan pembayaran sesuai instruksi pada aplikasi.\n\nTerima kasih,\nAdmin Guestly`;
           
@@ -116,13 +124,13 @@ export default function ServiceCheckout() {
               .replace(/{amount}/g, `Rp ${service.price.toLocaleString('id-ID')}`);
           }
           
-          sendFonnteMessage(settings.fonnteToken!, appUser.phone!, message);
+          sendFonnteMessage(null, appUser.phone!, message);
         });
       }
       
       showAlert('Berhasil', 'Pesanan berhasil dibuat!', 'success');
       // Navigate to my invoices page
-      navigate('/invoices/my');
+      navigate('/auth/login/invoices/my');
     } catch (error) {
       console.error("Order error:", error);
       showAlert('Gagal', 'Gagal membuat pesanan. Silakan periksa koneksi Anda atau hubungi admin.', 'error');
@@ -215,7 +223,20 @@ export default function ServiceCheckout() {
                       <p className="font-semibold text-gray-900 mb-1">Informasi Rekening:</p>
                       <div className="space-y-1">
                         <p><span className="text-gray-500">Bank:</span> {settings.manualPayment.bankName || '-'}</p>
-                        <p><span className="text-gray-500">No. Rekening:</span> <span className="font-mono font-medium">{settings.manualPayment.accountNumber || '-'}</span></p>
+                        <div className="flex items-center gap-2">
+                          <p><span className="text-gray-500">No. Rekening:</span> <span className="font-mono font-medium">{settings.manualPayment.accountNumber || '-'}</span></p>
+                          <button 
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleCopy(settings?.manualPayment?.accountNumber || '');
+                            }}
+                            className="p-1 hover:bg-gray-100 rounded text-gray-500 transition-colors" 
+                            title="Copy Rekening"
+                          >
+                            {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                          </button>
+                        </div>
                         <p><span className="text-gray-500">Atas Nama:</span> {settings.manualPayment.accountName || '-'}</p>
                       </div>
                       {settings.manualPayment.instructions && (

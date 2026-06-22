@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
-import { collection, query, getDocs, where, addDoc, serverTimestamp, doc, setDoc, deleteDoc, updateDoc, runTransaction } from 'firebase/firestore';
+import { collection, query, getDocs, where, addDoc, serverTimestamp, doc, setDoc, deleteDoc, updateDoc, runTransaction, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, createAuthUserSilently } from '../lib/firebase';
 import { Client, User } from '../types';
 import { parseFirestoreDate } from '../lib/utils';
@@ -35,6 +35,9 @@ export default function ClientsList() {
   const [clientEventsCount, setClientEventsCount] = useState<Record<string, number>>({});
 
   useEffect(() => {
+    let unsubscribeClients: () => void;
+    let unsubscribeEvents: () => void;
+
     const fetchData = async () => {
       try {
         const clientsRef = collection(db, 'clients');
@@ -65,30 +68,39 @@ export default function ClientsList() {
           }
         }
 
-        const [clientsSnap, eventsSnap] = await Promise.all([
-           getDocs(qClients),
-           getDocs(qEvents)
-        ]);
-        
-        const data = clientsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
-        setClients(data);
-
-        const eventsCount: Record<string, number> = {};
-        eventsSnap.docs.forEach(d => {
-           const ev = d.data();
-           if (ev.clientId) {
-              eventsCount[ev.clientId] = (eventsCount[ev.clientId] || 0) + 1;
-           }
+        unsubscribeClients = onSnapshot(qClients, (clientsSnap) => {
+          const data = clientsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
+          setClients(data);
+          setLoading(false);
+        }, (error) => {
+           handleFirestoreError(error, OperationType.GET, 'clients');
+           setLoading(false);
         });
-        setClientEventsCount(eventsCount);
+
+        unsubscribeEvents = onSnapshot(qEvents, (eventsSnap) => {
+          const eventsCount: Record<string, number> = {};
+          eventsSnap.docs.forEach(d => {
+             const ev = d.data();
+             if (ev.clientId) {
+                eventsCount[ev.clientId] = (eventsCount[ev.clientId] || 0) + 1;
+             }
+          });
+          setClientEventsCount(eventsCount);
+        }, (error) => {
+           console.error("Error fetching events for client list", error);
+        });
+
       } catch (error) {
         handleFirestoreError(error, OperationType.GET, 'clients');
-      } finally {
         setLoading(false);
       }
     };
-
     if (appUser) fetchData();
+
+    return () => {
+      if (unsubscribeClients) unsubscribeClients();
+      if (unsubscribeEvents) unsubscribeEvents();
+    };
   }, [appUser]);
 
   const handleDeleteClient = async (clientId: string) => {
@@ -240,7 +252,7 @@ export default function ClientsList() {
           onClick={() => {
             if (!isAddingClient && appUser?.role !== 'superadmin' && (!appUser?.clientQuota || appUser.clientQuota <= 0)) {
                showAlert('Akses Ditolak', 'Anda tidak memiliki kuota klien. Silakan beli layanan terlebih dahulu.', 'warning');
-               navigate('/services/catalog');
+               navigate('/auth/login/services/catalog');
                return;
             }
             setIsAddingClient(!isAddingClient)

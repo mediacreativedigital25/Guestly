@@ -19,6 +19,7 @@ import PublicRSVP from './pages/PublicRSVP';
 import Scanner from './pages/Scanner';
 import Changelog from './pages/Changelog';
 import PublicQR from './pages/PublicQR';
+import SalesPage from './pages/SalesPage';
 
 import GreetingScreen from './pages/GreetingScreen';
 import UserProfile from './pages/UserProfile';
@@ -26,6 +27,7 @@ import AdminServices from './pages/admin/AdminServices';
 import AdminInvoice from './pages/admin/AdminInvoice';
 import AdminSettings from './pages/admin/AdminSettings';
 import AdminCalendar from './pages/admin/AdminCalendar';
+import AdminWATemplates from './pages/admin/AdminWATemplates';
 import ServicesCatalog from './pages/services/ServicesCatalog';
 import MyServices from './pages/services/MyServices';
 import ServiceCheckout from './pages/services/ServiceCheckout';
@@ -39,7 +41,8 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter>
           <Routes>
-          <Route path="/" element={<AppLayout />}>
+          <Route path="/" element={<SalesPage />} />
+          <Route path="/auth/login" element={<AppLayout />}>
             <Route index element={<Dashboard />} />
             <Route path="events" element={<EventsList />} />
             <Route path="events/:eventId" element={<EventDetails />} />
@@ -62,6 +65,7 @@ export default function App() {
             <Route path="admin/invoice" element={<AdminInvoice />} />
             <Route path="admin/settings" element={<AdminSettings />} />
             <Route path="admin/calendar" element={<AdminCalendar />} />
+            <Route path="admin/wa-templates" element={<AdminWATemplates />} />
           </Route>
           {/* Public Route */}
           <Route path="/rsvp/:eventId/:ticketCode" element={<RSVP />} />

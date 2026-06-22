@@ -1,11 +1,24 @@
 export default function Changelog() {
   const versions = [
     {
+      version: 'v1.0.7',
+      date: '22 Juni 2026',
+      changes: [
+        'Menambahkan fitur kustomisasi dan manajemen Template WhatsApp Blast pada Admin Panel',
+        'Sistem otomatis menyimpan pilihan Template WA terakhir yang digunakan untuk setiap acara',
+        'Penyempurnaan sistem kuota: Kuota WA Blast kini dipastikan hanya berkurang secara otomatis ketika pesan berhasil terkirim',
+        'Memperbaiki isu perizinan akses database (Firestore rules) saat memperbarui kuota dan menyimpan template'
+      ]
+    },
+    {
       version: 'v1.0.6',
       date: '20 Juni 2026',
       changes: [
         'Memperbarui tampilan Greeting Screen dengan logo vendor partner dan watermark "Powered by Guestly"',
-        'Penyempurnaan tipografi pada Greeting Screen menggunakan font Poppins dan Great Vibes'
+        'Penyempurnaan tipografi pada Greeting Screen menggunakan font Poppins dan Great Vibes',
+        'Memperbaiki tampilan preview thumbnail gambar saat membagikan pesan undangan di WhatsApp',
+        'Penyesuaian daftar tamu: Tamu yang belum melakukan konfirmasi (Pending) akan tetap masuk ke dalam Guest List',
+        'Menambahkan fitur Filter di tab "RSVP & Undangan" dan "Guest List" untuk mempermudah pencarian tamu berdasarkan status RSVP dan Kehadiran'
       ]
     },
     {

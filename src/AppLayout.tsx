@@ -48,9 +48,9 @@ export default function AppLayout() {
         await setDoc(doc(db, 'users', userCredential.user.uid), newUser);
         
         // Send WhatsApp Notification for new registration
-        if (settings?.fonnteToken && phone) {
+        if (phone) {
           import('./lib/fonnte').then(({ sendFonnteMessage }) => {
-            const loginUrl = window.location.origin;
+            const loginUrl = `${window.location.origin}/auth/login`;
             const message = `🔐 *Informasi Akun Guestly*
 
 Halo Kak *${name}*,
@@ -77,7 +77,7 @@ Smart Digital Guestbook & Event Management
 
 Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
 ─────────────────`;
-            sendFonnteMessage(settings.fonnteToken!, phone, message);
+            sendFonnteMessage(null, phone, message);
           });
         }
       } else {
@@ -206,10 +206,10 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
   }
 
   const navItems = [
-    { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-    { name: 'Clients', path: '/clients', icon: Users, role: ['superadmin', 'partner'] },
-    { name: 'Events', path: '/events', icon: CalendarDays },
-    { name: 'White Label', path: '/settings', icon: Settings, role: ['superadmin', 'partner'] },
+    { name: 'Dashboard', path: '/auth/login', icon: LayoutDashboard },
+    { name: 'Clients', path: '/auth/login/clients', icon: Users, role: ['superadmin', 'partner'] },
+    { name: 'Events', path: '/auth/login/events', icon: CalendarDays },
+    { name: 'White Label', path: '/auth/login/settings', icon: Settings, role: ['superadmin', 'partner'] },
   ];
 
   return (
@@ -278,10 +278,10 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
             {isServiceInfoMenuOpen && (
               <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
                  <Link
-                   to="/services/dashboard"
+                   to="/auth/login/services/dashboard"
                    className={cn(
                      "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                     location.pathname === '/services/dashboard' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                     location.pathname === '/auth/login/services/dashboard' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                    )}
                  >
                    <div className="flex items-center gap-2">
@@ -290,10 +290,10 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                    </div>
                  </Link>
                  <Link
-                   to="/services/catalog"
+                   to="/auth/login/services/catalog"
                    className={cn(
                      "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                     location.pathname === '/services/catalog' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                     location.pathname === '/auth/login/services/catalog' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                    )}
                  >
                    <div className="flex items-center gap-2">
@@ -302,10 +302,10 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                    </div>
                  </Link>
                  <Link
-                   to="/invoices/my"
+                   to="/auth/login/invoices/my"
                    className={cn(
                      "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                     location.pathname === '/invoices/my' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                     location.pathname === '/auth/login/invoices/my' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                    )}
                  >
                    <div className="flex items-center gap-2">
@@ -322,10 +322,10 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     appUser.activeUntil
                  )) && (
                    <Link
-                     to="/services/my"
+                     to="/auth/login/services/my"
                      className={cn(
                        "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                       location.pathname === '/services/my' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                       location.pathname === '/auth/login/services/my' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                      )}
                    >
                      <div className="flex items-center gap-2">
@@ -355,19 +355,19 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                {isUserMenuOpen && (
                  <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
                     <Link
-                      to="/users"
+                      to="/auth/login/users"
                       className={cn(
                         "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        location.pathname === '/users' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        location.pathname === '/auth/login/users' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                       )}
                     >
                       User
                     </Link>
                     <Link
-                      to="/roles"
+                      to="/auth/login/roles"
                       className={cn(
                         "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        location.pathname === '/roles' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        location.pathname === '/auth/login/roles' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                       )}
                     >
                       Role / Hak akses Custom
@@ -390,10 +390,10 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                {isAdminPanelMenuOpen && (
                  <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
                     <Link
-                      to="/admin/services"
+                      to="/auth/login/admin/services"
                       className={cn(
                         "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        location.pathname === '/admin/services' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        location.pathname === '/auth/login/admin/services' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                       )}
                     >
                       <div className="flex items-center gap-2">
@@ -402,10 +402,10 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       </div>
                     </Link>
                     <Link
-                      to="/admin/invoice"
+                      to="/auth/login/admin/invoice"
                       className={cn(
                         "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        location.pathname === '/admin/invoice' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        location.pathname === '/auth/login/admin/invoice' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                       )}
                     >
                       <div className="flex items-center gap-2">
@@ -414,10 +414,10 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       </div>
                     </Link>
                     <Link
-                      to="/admin/settings"
+                      to="/auth/login/admin/settings"
                       className={cn(
                         "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        location.pathname === '/admin/settings' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        location.pathname === '/auth/login/admin/settings' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                       )}
                     >
                       <div className="flex items-center gap-2">
@@ -426,15 +426,27 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       </div>
                     </Link>
                     <Link
-                      to="/admin/calendar"
+                      to="/auth/login/admin/calendar"
                       className={cn(
                         "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        location.pathname === '/admin/calendar' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        location.pathname === '/auth/login/admin/calendar' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                       )}
                     >
                       <div className="flex items-center gap-2">
                         <CalendarDays className="h-4 w-4" />
                         Kalender Acara
+                      </div>
+                    </Link>
+                    <Link
+                      to="/auth/login/admin/wa-templates"
+                      className={cn(
+                        "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                        location.pathname === '/auth/login/admin/wa-templates' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4" />
+                        Template WA
                       </div>
                     </Link>
                  </div>
@@ -446,21 +458,21 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
         </nav>
         <div className="p-4 border-t border-gray-200">
           <Link
-            to="/changelog"
+            to="/auth/login/changelog"
             onClick={() => setIsMobileMenuOpen(false)}
             className={cn(
               "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium mb-1 transition-colors",
-              location.pathname === '/changelog' ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+              location.pathname === '/auth/login/changelog' ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
             )}
           >
             <FileText className="h-5 w-5" />
             Changelog
           </Link>
           <Link
-            to="/profile"
+            to="/auth/login/profile"
             className={cn(
               "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium mb-1 transition-colors",
-              location.pathname === '/profile' ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+              location.pathname === '/auth/login/profile' ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
             )}
           >
             <User className="h-5 w-5" />
