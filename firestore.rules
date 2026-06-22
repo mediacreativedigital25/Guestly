@@ -55,7 +55,7 @@ service cloud.firestore {
         (!('partnerId' in data) || data.partnerId == null || (data.partnerId is string && data.partnerId.size() <= 128)) &&
         (!('clientId' in data) || data.clientId == null || (data.clientId is string && data.clientId.size() <= 128)) &&
         (!('businessName' in data) || data.businessName == null || (data.businessName is string && data.businessName.size() <= 150)) &&
-        (!('logoUrl' in data) || data.logoUrl == null || (data.logoUrl is string && data.logoUrl.size() <= 1000)) &&
+        (!('logoUrl' in data) || data.logoUrl == null || (data.logoUrl is string && data.logoUrl.size() <= 2000000)) &&
         (!('phone' in data) || data.phone == null || (data.phone is string && data.phone.size() <= 20)) &&
         (!('eventQuota' in data) || data.eventQuota == null || (data.eventQuota is number && data.eventQuota >= 0)) &&
         (!('clientQuota' in data) || data.clientQuota == null || (data.clientQuota is number && data.clientQuota >= 0)) &&
@@ -69,7 +69,7 @@ service cloud.firestore {
       return data.size() >= 5 && data.size() <= 6 &&
         data.keys().hasAll(['name', 'logoUrl', 'brandColor', 'createdAt', 'updatedAt']) &&
         data.name is string && data.name.size() <= 150 &&
-        data.logoUrl is string && data.logoUrl.size() <= 500 &&
+        data.logoUrl is string && data.logoUrl.size() <= 2000000 &&
         data.brandColor is string && data.brandColor.size() <= 20 &&
         (!('fontFamily' in data) || data.fontFamily == null || (data.fontFamily is string && data.fontFamily.size() <= 100)) &&
         data.createdAt is timestamp &&
@@ -100,7 +100,7 @@ service cloud.firestore {
         (!('location' in data) || data.location == null || (data.location is string && data.location.size() <= 500)) &&
         (!('digitalInviteLink' in data) || data.digitalInviteLink == null || (data.digitalInviteLink is string && data.digitalInviteLink.size() <= 2048)) &&
         (!('time' in data) || data.time == null || (data.time is string && data.time.size() <= 50)) &&
-        (!('frameOverlayUrl' in data) || data.frameOverlayUrl == null || (data.frameOverlayUrl is string && data.frameOverlayUrl.size() <= 2048)) &&
+        (!('frameOverlayUrl' in data) || data.frameOverlayUrl == null || (data.frameOverlayUrl is string && data.frameOverlayUrl.size() <= 2000000)) &&
         (!('guestCategories' in data) || data.guestCategories == null || (data.guestCategories is list && data.guestCategories.size() <= 50)) &&
         (!('sessions' in data) || data.sessions == null || (data.sessions is list && data.sessions.size() <= 50)) &&
         (!('primaryColor' in data) || data.primaryColor == null || (data.primaryColor is string && data.primaryColor.size() <= 20)) &&
@@ -108,7 +108,7 @@ service cloud.firestore {
         (!('rsvpTheme' in data) || data.rsvpTheme == null || (data.rsvpTheme is string && data.rsvpTheme.size() <= 50)) &&
         (!('waBlastCount' in data) || data.waBlastCount == null || data.waBlastCount is number) &&
         (!('waTemplateId' in data) || data.waTemplateId == null || (data.waTemplateId is string && data.waTemplateId.size() <= 128)) &&
-        (!('thumbnailUrl' in data) || data.thumbnailUrl == null || (data.thumbnailUrl is string && data.thumbnailUrl.size() <= 2048)) &&
+        (!('thumbnailUrl' in data) || data.thumbnailUrl == null || (data.thumbnailUrl is string && data.thumbnailUrl.size() <= 2000000)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }

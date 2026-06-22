@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../AuthContext';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Building2, UploadCloud, Link as LinkIcon, Phone, Image as ImageIcon, ExternalLink, AlertCircle } from 'lucide-react';
+import { Building2, UploadCloud, Link as LinkIcon, Phone, Image as ImageIcon, AlertCircle } from 'lucide-react';
 
 export default function WhiteLabelSettings() {
   const { appUser } = useAuth();
@@ -27,15 +27,17 @@ export default function WhiteLabelSettings() {
     e.preventDefault();
     if (!appUser?.id) return;
     
-    setIsSaving(true);
-    setMessage({ text: '', type: '' });
-    
-    // Check if the base64 string is too large (over ~800KB)
-    if (logoUrl.startsWith('data:image') && logoUrl.length > 800000) {
-      setMessage({ text: 'Ukuran gambar terlalu besar. Silakan kompres terlebih dahulu.', type: 'error' });
-      setIsSaving(false);
+    // Validate logoUrl length to prevent Firebase permission errors
+    if (logoUrl && logoUrl.length > 500) {
+      setMessage({ 
+        text: 'URL Logo terlalu panjang. Mohon gunakan link gambar biasa (bukan base64/upload langsung). Anda bisa menggunakan imgbb.com lalu meng-copy linknya ke sini.', 
+        type: 'error' 
+      });
       return;
     }
+
+    setIsSaving(true);
+    setMessage({ text: '', type: '' });
     
     try {
       const userRef = doc(db, 'users', appUser.id);
@@ -58,28 +60,6 @@ export default function WhiteLabelSettings() {
     } finally {
       setIsSaving(false);
     }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > 800 * 1024) { // 800KB limit
-      setMessage({ 
-        text: 'Ukuran file melebihi 800KB. Silakan kompres gambar Anda menggunakan tools kompresor.', 
-        type: 'error' 
-      });
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      if (event.target?.result) {
-        setLogoUrl(event.target.result as string);
-        setMessage({ text: '', type: '' });
-      }
-    };
-    reader.readAsDataURL(file);
   };
 
   if (appUser?.role !== 'partner' && appUser?.role !== 'superadmin') {
@@ -154,43 +134,33 @@ export default function WhiteLabelSettings() {
                 
                 <div className="space-y-4">
                   <div className="flex items-center gap-4">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      ref={fileInputRef}
-                      className="hidden"
-                      onChange={handleFileChange}
-                    />
                     <button
                       type="button"
-                      onClick={() => fileInputRef.current?.click()}
+                      onClick={() => {
+                         const url = prompt("Masukkan Link Logo URL:", logoUrl || "https://example.com/logo.png");
+                         if (url !== null) {
+                           setLogoUrl(url);
+                         }
+                      }}
                       className="px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 flex items-center gap-2"
                     >
-                      <UploadCloud className="w-4 h-4" /> Pilih Gambar Logo
+                      <LinkIcon className="w-4 h-4" /> Masukkan Link Logo
                     </button>
-                    <span className="text-sm text-gray-500">Maks. 800KB</span>
                   </div>
                   
                   <div className="flex items-start bg-blue-50 p-3 rounded-md border border-blue-100">
                     <AlertCircle className="w-5 h-5 text-blue-500 mr-2 flex-shrink-0 mt-0.5" />
                     <div>
                       <p className="text-sm text-blue-800">
-                        Jika gambar oversize (lebih dari 800KB), kompres terlebih dahulu di:
+                        Penyimpanan logo saat ini hanya mendukung format Link URL. Upload logo langsung dinonaktifkan.
                       </p>
-                      <a 
-                        href="https://imgtools.zyvora.my.id/" 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 mt-1 text-sm font-medium text-indigo-600 hover:text-indigo-800 bg-white px-2 py-1 rounded border border-indigo-200"
-                      >
-                        <ExternalLink className="w-3 h-3" /> imgtools.zyvora.my.id
-                      </a>
+                      <p className="text-xs text-blue-700 mt-1">Anda dapat menggunakan layanan seperti imgbb.com untuk mengupload dan mendapatkan link gambar.</p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2 py-2">
                     <div className="h-px flex-1 bg-gray-300"></div>
-                    <span className="text-xs text-gray-500 font-medium uppercase">Atau URL Gambar</span>
+                    <span className="text-xs text-gray-500 font-medium uppercase">URL Gambar</span>
                     <div className="h-px flex-1 bg-gray-300"></div>
                   </div>
 
