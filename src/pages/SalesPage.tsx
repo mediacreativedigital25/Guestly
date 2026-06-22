@@ -17,14 +17,15 @@ export default function SalesPage() {
   const navigate = useNavigate();
   const { settings } = useSettings();
   const [services, setServices] = useState<GuestlyService[]>([]);
-  const sliderRef = useRef<HTMLDivElement>(null);
+  const featuresSliderRef = useRef<HTMLDivElement>(null);
+  const pricingSliderRef = useRef<HTMLDivElement>(null);
 
   const [loadingServices, setLoadingServices] = useState(true);
 
-  const scrollSlider = (direction: 'left' | 'right') => {
-    if (sliderRef.current) {
+  const scrollSlider = (direction: 'left' | 'right', ref: React.RefObject<HTMLDivElement>) => {
+    if (ref.current) {
       const scrollAmount = 320; // card width + gap
-      sliderRef.current.scrollBy({ left: direction === 'left' ? -scrollAmount : scrollAmount, behavior: 'smooth' });
+      ref.current.scrollBy({ left: direction === 'left' ? -scrollAmount : scrollAmount, behavior: 'smooth' });
     }
   };
 
@@ -551,12 +552,21 @@ export default function SalesPage() {
             <div className="lg:w-1/3 z-10">
               <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 mb-4 font-serif">{settings?.salespage?.featuresCarouselTitle || 'Kelola Acara dengan Mudah'}</h2>
               <p className="text-gray-600 text-lg mb-8 leading-relaxed">{settings?.salespage?.featuresCarouselDesc || 'Semua data tersaji rapi dalam dashboard yang intuitif dan mudah digunakan.'}</p>
-              <button onClick={() => navigate('/auth/login')} className="px-6 py-2.5 text-[14px] bg-[#F46279] text-white font-medium rounded-full shadow-lg shadow-rose-200 hover:bg-[#e04f66] transition-all">
-                Lihat Demo
-              </button>
+              <div className="flex items-center gap-4">
+                <button onClick={() => navigate('/auth/login')} className="px-6 py-2.5 text-[14px] bg-[#F46279] text-white font-medium rounded-full shadow-lg shadow-rose-200 hover:bg-[#e04f66] transition-all">
+                  Lihat Demo
+                </button>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => scrollSlider('left', featuresSliderRef)} className="w-10 h-10 rounded-full flex items-center justify-center border border-gray-200 text-gray-400 hover:text-[#F46279] hover:border-[#F46279] transition-all bg-white hover:bg-rose-50 shadow-sm">
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <button onClick={() => scrollSlider('right', featuresSliderRef)} className="w-10 h-10 rounded-full flex items-center justify-center border border-gray-200 text-gray-400 hover:text-[#F46279] hover:border-[#F46279] transition-all bg-white hover:bg-rose-50 shadow-sm">
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="w-full lg:w-2/3 flex gap-4 overflow-x-auto pb-8 snap-x relative lg:-mr-32 pt-8 hide-scrollbar">
-               <div className="h-full absolute left-0 top-0 w-16 bg-gradient-to-r from-white to-transparent z-10 pointer-events-none"></div>
+            <div ref={featuresSliderRef} className="w-full lg:w-2/3 flex gap-4 overflow-x-auto pb-8 snap-x relative lg:-mr-32 pt-8 hide-scrollbar scroll-smooth">
                {(settings?.salespage?.featuresCarouselData && settings.salespage.featuresCarouselData.length > 0 ? settings.salespage.featuresCarouselData : [
                  { title: 'Dashboard Utama', img: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80', link: '' },
                  { title: 'Data Tamu', img: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80', link: '' },
@@ -583,7 +593,6 @@ export default function SalesPage() {
                    </div>
                  );
                })}
-               <div className="h-full absolute right-0 top-0 w-16 bg-gradient-to-l from-white to-transparent z-10 pointer-events-none"></div>
             </div>
           </div>
         </div>
@@ -897,12 +906,12 @@ export default function SalesPage() {
               
               {/* Desktop Slider Controls */}
               <div className="hidden lg:flex gap-3 absolute right-0">
-                <button onClick={() => scrollSlider('left')} className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-gray-600 hover:text-[#F46279] shadow-sm border border-rose-100 hover:border-[#F46279] transition-colors"><ChevronLeft size={24} /></button>
-                <button onClick={() => scrollSlider('right')} className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-gray-600 hover:text-[#F46279] shadow-sm border border-rose-100 hover:border-[#F46279] transition-colors"><ChevronRight size={24} /></button>
+                <button onClick={() => scrollSlider('left', pricingSliderRef)} className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-gray-600 hover:text-[#F46279] shadow-sm border border-rose-100 hover:border-[#F46279] transition-colors"><ChevronLeft size={24} /></button>
+                <button onClick={() => scrollSlider('right', pricingSliderRef)} className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-gray-600 hover:text-[#F46279] shadow-sm border border-rose-100 hover:border-[#F46279] transition-colors"><ChevronRight size={24} /></button>
               </div>
             </div>
 
-            <div ref={sliderRef} className="flex overflow-x-auto gap-4 xl:gap-6 pb-12 pt-8 -mt-4 snap-x snap-mandatory relative z-10 hide-scrollbar -mx-6 px-6 sm:-mx-10 sm:px-10 lg:-mx-12 lg:px-12 scroll-smooth" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+            <div ref={pricingSliderRef} className="flex overflow-x-auto gap-4 xl:gap-6 pb-12 pt-8 -mt-4 snap-x snap-mandatory relative z-10 hide-scrollbar -mx-6 px-6 sm:-mx-10 sm:px-10 lg:-mx-12 lg:px-12 scroll-smooth" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
               {loadingServices ? (
                 <div className="w-full text-center py-12 text-gray-500">Memuat paket harga...</div>
               ) : services.length === 0 ? (
@@ -971,8 +980,8 @@ export default function SalesPage() {
             
             {/* Mobile Slider Controls */}
             <div className="flex lg:hidden justify-center gap-4 mt-2">
-                <button onClick={() => scrollSlider('left')} className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-gray-600 hover:text-[#F46279] shadow-sm border border-rose-100 transition-colors"><ChevronLeft size={20} /></button>
-                <button onClick={() => scrollSlider('right')} className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-gray-600 hover:text-[#F46279] shadow-sm border border-rose-100 transition-colors"><ChevronRight size={20} /></button>
+                <button onClick={() => scrollSlider('left', pricingSliderRef)} className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-gray-600 hover:text-[#F46279] shadow-sm border border-rose-100 transition-colors"><ChevronLeft size={20} /></button>
+                <button onClick={() => scrollSlider('right', pricingSliderRef)} className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-gray-600 hover:text-[#F46279] shadow-sm border border-rose-100 transition-colors"><ChevronRight size={20} /></button>
             </div>
 
             <p className="text-gray-500 text-[14px] lg:text-[15px] text-center mt-6 lg:mt-8">Semua paket dapat di-upgrade kapan saja.</p>

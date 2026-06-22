@@ -1,6 +1,34 @@
 export default function Changelog() {
   const versions = [
     {
+      version: 'V1.1.5',
+      date: '22 Juni 2026',
+      changes: [
+        'Menambahkan widget Countdown Timer (hitung mundur) di halaman undangan RSVP tamu dan RSVP Publik.',
+      ]
+    },
+    {
+      version: 'V1.1.4',
+      date: '22 Juni 2026',
+      changes: [
+        'Memperbarui halaman Undangan RSVP Publik menjadi tema elegan bernuansa floral (pink pastel) sesuai referensi desain pernikahan.',
+      ]
+    },
+    {
+      version: 'V1.1.3',
+      date: '22 Juni 2026',
+      changes: [
+        'Memperbaiki navigasi geser (slider) pada halaman sales yang tidak berfungsi (tidak bisa scroll pada gambar/dashboard maupun section harga) dan menghapus duplikasi referensi.',
+      ]
+    },
+    {
+      version: 'V1.1.2',
+      date: '22 Juni 2026',
+      changes: [
+        'Memperbaiki isu "url must start with http(s)" pada fitur WA Blast ketika menggunakan gambar thumbnail undangan berformat bawaan/base64.'
+      ]
+    },
+    {
       version: 'V1.1.1',
       date: '22 Juni 2026',
       changes: [

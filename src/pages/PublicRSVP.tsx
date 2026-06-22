@@ -77,6 +77,44 @@ export default function PublicRSVP() {
   const [submitting, setSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [errorObj, setErrorObj] = useState<string | null>(null);
+  const [timeLeft, setTimeLeft] = useState<{ days: number, hours: number, minutes: number, seconds: number } | null>(null);
+
+  useEffect(() => {
+    if (!eventData?.date) return;
+
+    const calculateTimeLeft = () => {
+      let targetDateStr = `${eventData.date}T00:00:00`;
+      
+      if (eventData.time) {
+        const timeMatch = eventData.time.match(/(\d{2}:\d{2})/);
+        if (timeMatch) {
+            targetDateStr = `${eventData.date}T${timeMatch[1]}:00`;
+        }
+      }
+
+      // Fallback if parsing fails, just use the date
+      const targetTime = new Date(targetDateStr).getTime();
+      const difference = (isNaN(targetTime) ? new Date(eventData.date).getTime() : targetTime) - new Date().getTime();
+
+      if (difference > 0) {
+        return {
+          days: Math.floor(difference / (1000 * 60 * 60 * 24)),
+          hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
+          minutes: Math.floor((difference / 1000 / 60) % 60),
+          seconds: Math.floor((difference / 1000) % 60)
+        };
+      }
+      return { days: 0, hours: 0, minutes: 0, seconds: 0 };
+    };
+
+    setTimeLeft(calculateTimeLeft());
+
+    const timer = setInterval(() => {
+      setTimeLeft(calculateTimeLeft());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [eventData?.date, eventData?.time]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -194,6 +232,25 @@ export default function PublicRSVP() {
                  <h1 className="text-3xl sm:text-4xl font-bold text-white mb-2 leading-tight">
                    {eventData.title}
                  </h1>
+                 {timeLeft && (timeLeft.days > 0 || timeLeft.hours > 0 || timeLeft.minutes > 0 || timeLeft.seconds > 0) && (
+                    <div className="mt-6 flex justify-center gap-2 sm:gap-4">
+                      {[
+                        { label: 'Hari', value: timeLeft.days },
+                        { label: 'Jam', value: timeLeft.hours },
+                        { label: 'Menit', value: timeLeft.minutes },
+                        { label: 'Detik', value: timeLeft.seconds }
+                      ].map((item, index) => (
+                        <div key={index} className="flex flex-col items-center">
+                          <div className="w-12 h-12 sm:w-16 sm:h-16 bg-white/20 rounded-xl sm:rounded-2xl backdrop-blur-sm border border-white/30 flex items-center justify-center mb-1.5 shadow-lg">
+                            <span className="text-xl sm:text-2xl font-bold text-white">
+                              {item.value.toString().padStart(2, '0')}
+                            </span>
+                          </div>
+                          <span className="text-[9px] sm:text-[11px] text-white/90 font-medium tracking-wider uppercase">{item.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                 )}
                </div>
                {/* Decorative circles */}
                <div className="absolute top-0 left-0 -mt-8 -ml-8 w-32 h-32 bg-white opacity-10 rounded-full blur-2xl"></div>
