@@ -7,6 +7,7 @@ import { EventRecord, Guest } from '../types';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import { format, isSameDay } from 'date-fns';
+import { parseFirestoreDate } from '../lib/utils';
 
 export default function Dashboard() {
   const { appUser } = useAuth();
@@ -192,13 +193,21 @@ export default function Dashboard() {
 
   const tileContent = ({ date, view }: { date: Date, view: string }) => {
     if (view === 'month') {
-      const hasEvent = events.some(event => isSameDay(new Date(event.date), date) && event.status !== 'completed');
+      const hasEvent = events.some(event => {
+          const d = parseFirestoreDate(event.date);
+          if (!d || isNaN(d.getTime())) return false;
+          return isSameDay(d, date) && event.status !== 'completed';
+      });
       return hasEvent ? <div className="w-1.5 h-1.5 bg-indigo-600 rounded-full mx-auto mt-1"></div> : null;
     }
     return null;
   };
   
-  const selectedDateEvents = events.filter(event => isSameDay(new Date(event.date), selectedDate) && event.status !== 'completed');
+  const selectedDateEvents = events.filter(event => {
+      const d = parseFirestoreDate(event.date);
+      if (!d || isNaN(d.getTime())) return false;
+      return isSameDay(d, selectedDate) && event.status !== 'completed';
+  });
 
   return (
     <div className="space-y-6">
@@ -329,7 +338,8 @@ export default function Dashboard() {
                     <div className="space-y-4">
                       {selectedDateEvents.map(event => {
                         // Check if Event is H-3
-                        const diffTime = new Date(event.date).getTime() - new Date().getTime();
+                        const parsedDate = parseFirestoreDate(event.date);
+                        const diffTime = parsedDate ? parsedDate.getTime() - new Date().getTime() : 0;
                         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
                         const isWarning = diffDays > 0 && diffDays <= 3;
                         

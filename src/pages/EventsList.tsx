@@ -396,56 +396,33 @@ export default function EventsList() {
                 <input value={newEventDigitalInviteLink} onChange={e => setNewEventDigitalInviteLink(e.target.value)} type="url" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: https://undangan.com/john-jane" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Gambar Thumbnail</label>
-                <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg hover:bg-gray-50 transition-colors cursor-pointer relative" onClick={() => document.getElementById('thumbnail-upload')?.click()}>
-                  <input 
-                    id="thumbnail-upload"
-                    type="file" 
-                    accept="image/*"
-                    className="hidden" 
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                         const reader = new FileReader();
-                         reader.onloadend = () => {
-                           const img = new Image();
-                           img.onload = () => {
-                             const canvas = document.createElement('canvas');
-                             let newWidth = img.width;
-                             let newHeight = img.height;
-                             const maxWidth = 800;
-                             if (img.width > maxWidth) {
-                               const scaleSize = maxWidth / img.width;
-                               newWidth = maxWidth;
-                               newHeight = img.height * scaleSize;
-                             }
-                             canvas.width = newWidth;
-                             canvas.height = newHeight;
-                             const ctx = canvas.getContext('2d');
-                             ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-                             const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-                             setNewEventThumbnail(dataUrl);
-                           };
-                           img.src = reader.result as string;
-                         };
-                         reader.readAsDataURL(file);
-                      }
-                    }} 
+                <label className="block text-sm font-medium text-gray-700 mb-1">Link Thumbnail WA (Opsional)</label>
+                <div className="mt-1 flex rounded-md shadow-sm">
+                  <input
+                    type="url"
+                    value={newEventThumbnail}
+                    onChange={e => setNewEventThumbnail(e.target.value)}
+                    className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-l-md border border-gray-300 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="Kosongkan untuk default, atau masukkan link gambar"
                   />
-                  <div className="space-y-1 text-center">
-                    {newEventThumbnail ? (
-                       <div className="mx-auto w-32 h-16 bg-cover bg-center rounded" style={{ backgroundImage: `url(${newEventThumbnail})` }} />
-                    ) : (
-                       <ImageIcon className="mx-auto h-12 w-12 text-gray-400" />
-                    )}
-                    <div className="text-sm text-gray-600 mt-2">
-                      <span className="font-medium text-indigo-600 hover:text-indigo-500">
-                        Klik untuk upload gambar
-                      </span>
-                    </div>
-                    <p className="text-xs text-gray-500">Maks. 500KB (akan digunakan saat share WA)</p>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setNewEventThumbnail('')}
+                    className="inline-flex items-center px-3 py-2 border border-l-0 border-gray-300 rounded-r-md bg-gray-50 text-gray-500 hover:bg-gray-100 text-sm font-medium"
+                  >
+                    Reset Default
+                  </button>
                 </div>
+                {newEventThumbnail && (
+                   <div className="mt-2 text-xs text-indigo-600 truncate">
+                      Menggunakan link kustom
+                   </div>
+                )}
+                {!newEventThumbnail && (
+                   <div className="mt-2 text-xs text-gray-500 italic">
+                      Menggunakan thumbnail default sistem
+                   </div>
+                )}
               </div>
             </div>
           )}
@@ -473,27 +450,27 @@ export default function EventsList() {
                 Gunakan format <strong>PNG transparan</strong> dengan resolusi <strong>1920x1080</strong> untuk hasil terbaik pada layar sapa (overlay).
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Upload Frame</label>
-                <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => {
-                  const url = prompt("Masukkan URL Frame (Sebagai simulasi upload untuk saat ini):", "https://queinvite.yulovi.com/wp-content/uploads/2026/06/BG-layar-sapa.webp");
-                  if (url) setNewEventFrame(url);
-                }}>
-                  <div className="space-y-1 text-center">
-                    {newEventFrame ? (
-                       <ImageIcon className="mx-auto h-12 w-12 text-indigo-500" />
-                    ) : (
-                       <ImageIcon className="mx-auto h-12 w-12 text-gray-400" />
-                    )}
-                    <div className="text-sm text-gray-600">
-                      <span className="font-medium text-indigo-600 hover:text-indigo-500">
-                        Klik untuk upload
-                      </span>
-                    </div>
-                    <p className="text-xs text-gray-500">PNG transparan</p>
-                  </div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Link Frame Overlay (Opsional)</label>
+                <div className="mt-1 flex rounded-md shadow-sm">
+                  <input
+                    type="url"
+                    value={newEventFrame}
+                    onChange={e => setNewEventFrame(e.target.value)}
+                    className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-l-md border border-gray-300 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="Contoh: https://contoh.com/frame.png"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setNewEventFrame('')}
+                    className="inline-flex items-center px-3 py-2 border border-l-0 border-gray-300 rounded-r-md bg-gray-50 text-gray-500 hover:bg-gray-100 text-sm font-medium"
+                  >
+                    Hapus
+                  </button>
                 </div>
                 {newEventFrame && (
-                  <p className="mt-2 text-xs text-green-600">Terlampir: {newEventFrame}</p>
+                   <div className="mt-2 text-xs text-green-600 truncate">
+                      Frame diset
+                   </div>
                 )}
               </div>
             </div>
@@ -647,10 +624,10 @@ export default function EventsList() {
                       <div className="text-sm text-gray-500 capitalize">{event.status}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {format(new Date(event.date), 'dd MMM yyyy')}
+                      {parseFirestoreDate(event.date) ? format(parseFirestoreDate(event.date)!, 'dd MMM yyyy') : '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {event.activeUntil ? format(new Date(event.activeUntil), 'dd MMM yyyy') : '-'}
+                      {parseFirestoreDate(event.activeUntil) ? format(parseFirestoreDate(event.activeUntil)!, 'dd MMM yyyy') : '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex space-x-3">

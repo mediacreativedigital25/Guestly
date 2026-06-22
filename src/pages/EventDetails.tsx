@@ -677,13 +677,13 @@ export default function EventDetails() {
                <div>
                   <h3 className="text-sm font-medium text-gray-500">Waktu Pelaksanaan</h3>
                   <p className="mt-1 text-base text-gray-900">
-                    {format(new Date(event.date), 'dd MMMM yyyy')} {event.time && `• ${event.time}`}
+                    {parseFirestoreDate(event.date) ? format(parseFirestoreDate(event.date)!, 'dd MMMM yyyy') : '-'} {event.time && `• ${event.time}`}
                   </p>
                </div>
                <div>
                   <h3 className="text-sm font-medium text-gray-500">Masa Aktif</h3>
                   <p className="mt-1 text-base text-gray-900">
-                    {event.activeUntil ? format(new Date(event.activeUntil), 'dd MMMM yyyy') : '-'}
+                    {parseFirestoreDate(event.activeUntil) ? format(parseFirestoreDate(event.activeUntil)!, 'dd MMMM yyyy') : '-'}
                   </p>
                </div>
                <div>

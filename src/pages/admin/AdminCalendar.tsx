@@ -3,6 +3,7 @@ import { useAuth } from '../../AuthContext';
 import { collection, query, getDocs, where } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
 import { EventRecord } from '../../types';
+import { parseFirestoreDate } from '../../lib/utils';
 import { 
   format, 
   addMonths, 
@@ -76,7 +77,8 @@ export default function AdminCalendar() {
     return events.filter(e => {
         if (!e.date) return false;
         try {
-            const eventDate = new Date(e.date);
+            const eventDate = parseFirestoreDate(e.date);
+            if (!eventDate || isNaN(eventDate.getTime())) return false;
             return isSameDay(eventDate, day);
         } catch {
             return false;
@@ -102,8 +104,14 @@ export default function AdminCalendar() {
 
   const upcomingEvents = events.filter(e => {
       if (!e.date) return false;
-      return new Date(e.date) >= new Date(new Date().setHours(0,0,0,0));
-  }).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      const eventDate = parseFirestoreDate(e.date);
+      if (!eventDate || isNaN(eventDate.getTime())) return false;
+      return eventDate >= new Date(new Date().setHours(0,0,0,0));
+  }).sort((a,b) => {
+      const dateA = parseFirestoreDate(a.date);
+      const dateB = parseFirestoreDate(b.date);
+      return (dateA?.getTime() || 0) - (dateB?.getTime() || 0);
+  });
 
   return (
     <div className="space-y-6">
@@ -225,7 +233,7 @@ export default function AdminCalendar() {
                      upcomingEvents.slice(0, 5).map(event => (
                          <div key={event.id} className="group p-3 border border-gray-100 rounded-lg hover:border-indigo-200 hover:bg-indigo-50/50 transition-colors cursor-pointer" onClick={() => setSelectedEvent(event)}>
                              <div className="text-xs font-semibold text-indigo-600 mb-1">
-                                 {format(new Date(event.date), 'dd MMM yyyy', { locale: id })}
+                                 {parseFirestoreDate(event.date) ? format(parseFirestoreDate(event.date)!, 'dd MMM yyyy', { locale: id }) : '-'}
                              </div>
                              <div className="font-medium text-gray-900 text-sm line-clamp-1 group-hover:text-indigo-700">
                                  {event.title}
@@ -262,7 +270,7 @@ export default function AdminCalendar() {
                      <div className="border border-gray-100 p-3 rounded-lg bg-gray-50">
                          <div className="text-xs text-gray-500 font-medium mb-1">Tanggal</div>
                          <div className="text-sm font-semibold text-gray-900">
-                             {format(new Date(selectedEvent.date), 'EEEE, dd MMMM yyyy', { locale: id })}
+                             {parseFirestoreDate(selectedEvent.date) ? format(parseFirestoreDate(selectedEvent.date)!, 'EEEE, dd MMMM yyyy', { locale: id }) : '-'}
                          </div>
                      </div>
                      <div className="border border-gray-100 p-3 rounded-lg bg-gray-50">
