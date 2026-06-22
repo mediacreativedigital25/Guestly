@@ -288,10 +288,16 @@ async function startServer() {
         `;
 
         // Inject meta tags into the head
-        html = html.replace('<!-- INJECT_META_TAGS -->', metaTags);
-        // Also just replace </head> if the comment isn't there
-        if (!html.includes(metaTags)) {
-          html = html.replace('</head>', `${metaTags}</head>`);
+        const startComment = '<!-- INJECT_META_TAGS -->';
+        const endComment = '<!-- END_INJECT_META_TAGS -->';
+        
+        const startIndex = html.indexOf(startComment);
+        const endIndex = html.indexOf(endComment);
+        
+        if (startIndex !== -1 && endIndex !== -1) {
+           html = html.substring(0, startIndex) + metaTags + html.substring(endIndex + endComment.length);
+        } else if (!html.includes(metaTags)) {
+           html = html.replace('</head>', `${metaTags}</head>`);
         }
 
         if (process.env.NODE_ENV !== "production") {

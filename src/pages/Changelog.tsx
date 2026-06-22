@@ -1,6 +1,13 @@
 export default function Changelog() {
   const versions = [
     {
+      version: 'V1.1.6',
+      date: '22 Juni 2026',
+      changes: [
+        'Memperbaiki Thumbnail WA Share yang salah mengambil gambar. Memperbarui Server Side Metadata Injection agar WhatsApp membaca gambar thumbnail yang benar.',
+      ]
+    },
+    {
       version: 'V1.1.5',
       date: '22 Juni 2026',
       changes: [
