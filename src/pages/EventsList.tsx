@@ -475,7 +475,7 @@ export default function EventsList() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Upload Frame</label>
                 <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => {
-                  const url = prompt("Masukkan URL Frame (Sebagai simulasi upload untuk saat ini):", "https://example.com/frame.png");
+                  const url = prompt("Masukkan URL Frame (Sebagai simulasi upload untuk saat ini):", "https://queinvite.yulovi.com/wp-content/uploads/2026/06/BG-layar-sapa.webp");
                   if (url) setNewEventFrame(url);
                 }}>
                   <div className="space-y-1 text-center">

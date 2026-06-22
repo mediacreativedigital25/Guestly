@@ -410,7 +410,11 @@ export default function EventDetails() {
             .replace(/\[INVITE_LINK\]/g, digitalInviteLink)
             .replace(/\[SENDER_NAME\]/g, senderName);
 
-          let imgUrl: string | undefined = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qrLink)}`;
+          let imgUrl: string | undefined = event?.thumbnailUrl || 'https://queinvite.yulovi.com/wp-content/uploads/2026/06/Tumbnail.webp';
+          
+          if (imgUrl.startsWith('data:image/')) {
+              imgUrl = `${window.location.origin}/api/thumbnail/${eventId}`;
+          }
 
           const result = await sendFonnteMessage(null, guest.phone!, message, imgUrl);
           if (result.success) {

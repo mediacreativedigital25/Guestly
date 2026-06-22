@@ -265,7 +265,7 @@ async function startServer() {
         const title = eventData.title || (eventData.coupleName ? `The Wedding Of ${eventData.coupleName}` : 'Undangan Acara');
         const desc = eventData.description || 'Undangan Digital & Layar Sapa RSVP. Mohon tunjukkan QR Code di dalam link ini saat tiba di lokasi acara.';
         
-        let thumb = eventData.thumbnailUrl || eventData.frameOverlayUrl || 'https://via.placeholder.com/1200x630?text=Undangan';
+        let thumb = eventData.thumbnailUrl || eventData.frameOverlayUrl || 'https://queinvite.yulovi.com/wp-content/uploads/2026/06/Tumbnail.webp';
         
         // WhatsApp requires absolute HTTP(S) URLs for og:image, not base64 data URIs
         if (thumb.startsWith('data:image/')) {
