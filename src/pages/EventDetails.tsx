@@ -411,8 +411,10 @@ export default function EventDetails() {
             .replace(/\[SENDER_NAME\]/g, senderName);
 
           let imgUrl: string | undefined = undefined;
-          if (event?.thumbnailUrl || event?.frameOverlayUrl) {
-             imgUrl = `${window.location.origin}/api/thumbnail/${eventId}/image.jpg`;
+          if (event?.thumbnailUrl) {
+             imgUrl = event.thumbnailUrl;
+          } else if (event?.frameOverlayUrl) {
+             imgUrl = event.frameOverlayUrl;
           }
 
           const result = await sendFonnteMessage(null, guest.phone!, message, imgUrl);

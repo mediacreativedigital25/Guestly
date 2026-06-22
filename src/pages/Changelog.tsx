@@ -1,14 +1,22 @@
 export default function Changelog() {
   const versions = [
     {
-      version: 'v1.0.10',
+      version: 'V1.1.1',
+      date: '22 Juni 2026',
+      changes: [
+        'Memperbaiki Thumbnail Otomatis pada pesan WA Blast jika aplikasi di-hosting statis (Cloudflare Pages / Vercel). Sekarang thumbnail undangan akan muncul kembali.',
+        'Menambahkan parameter Open Graph Meta Tag untuk standard link previews.'
+      ]
+    },
+    {
+      version: 'V1.1.0',
       date: '22 Juni 2026',
       changes: [
         'Memperbaiki fallback deteksi WA Blast ketika aplikasi dihosting di platform spesifik seperti Cloudflare Pages (Error 405 Method Not Allowed) akan langsung dialihkan ke eksekusi direct client-side dengan VITE_FONNTE_TOKEN.'
       ]
     },
     {
-      version: 'v1.0.9',
+      version: 'V1.0.9',
       date: '22 Juni 2026',
       changes: [
         'Memperbaiki URL rute Checkout Layanan yang sempat menyebabkan layar putih (blank) ketika diklik.',
@@ -16,7 +24,7 @@ export default function Changelog() {
       ]
     },
     {
-      version: 'v1.0.8',
+      version: 'V1.0.8',
       date: '22 Juni 2026',
       changes: [
         'Memperbaiki isu WA Blast yang gagal terkirim (Error: Gagal mengirim) ketika aplikasi sudah dipublish atau dihosting, dengan sistem deteksi jika hosting tersebut tidak mendukung Express backend.',
@@ -25,7 +33,7 @@ export default function Changelog() {
       ]
     },
     {
-      version: 'v1.0.7',
+      version: 'V1.0.7',
       date: '22 Juni 2026',
       changes: [
         'Menambahkan fitur kustomisasi dan manajemen Template WhatsApp Blast pada Admin Panel',
@@ -35,7 +43,7 @@ export default function Changelog() {
       ]
     },
     {
-      version: 'v1.0.6',
+      version: 'V1.0.6',
       date: '20 Juni 2026',
       changes: [
         'Memperbarui tampilan Greeting Screen dengan logo vendor partner dan watermark "Powered by Guestly"',
@@ -46,7 +54,7 @@ export default function Changelog() {
       ]
     },
     {
-      version: 'v1.0.5',
+      version: 'V1.0.5',
       date: '27 Mei 2026',
       changes: [
         'Menambahkan logo pada layar pemuatan (loading screen)',
@@ -55,7 +63,7 @@ export default function Changelog() {
       ]
     },
     {
-      version: 'v1.0.4',
+      version: 'V1.0.4',
       date: '24 Mei 2026',
       changes: [
         'Menambahkan pilihan "Sesi Acara" pada Form RSVP Publik apabila event memiliki sesi',
@@ -65,7 +73,7 @@ export default function Changelog() {
       ]
     },
     {
-      version: 'v1.0.3',
+      version: 'V1.0.3',
       date: '15 Mei 2026',
       changes: [
         'Memperbarui template pesan WhatsApp Broadcast dengan menampilkan Nama Client secara otomatis',
@@ -73,7 +81,7 @@ export default function Changelog() {
       ]
     },
     {
-      version: 'v1.0.2',
+      version: 'V1.0.2',
       date: '11 Mei 2026',
       changes: [
         'Menghapus Menu Partner Setting dan menggabungkannya ke menu White Label',
@@ -83,7 +91,7 @@ export default function Changelog() {
       ]
     },
     {
-      version: 'v1.0.1',
+      version: 'V1.0.1',
       date: '7 Mei 2026',
       changes: [
         'Rilis perdana Guestly',

@@ -37,10 +37,12 @@ export async function sendFonnteMessage(token: string | null | undefined, target
              "message": message,
              "countryCode": "62"
            });
-           // We intentionally do not append `url` here because if `/api/send-whatsapp` is 404, 
-           // `/api/thumbnail/:eventId` will also be 404 (since the Express server is not running).
-           // Sending an invalid media URL to Fonnte will cause the ENTIRE message to fail (status: false).
-           // By skipping the media url here, at least the text message is delivered successfully.
+           
+           // Jika aplikasi dihosting statis (Cloudflare Pages), thumbnail URL adalah direct cloud storage URL.
+           // Kita sertakan ke Fonnte agar pesan dikirim sebagai Media dengan Gambar.
+           if (url && !url.includes('/api/thumbnail')) {
+             body.append("url", url);
+           }
            const directResponse = await fetch("https://api.fonnte.com/send", {
              method: "POST",
              headers: {
