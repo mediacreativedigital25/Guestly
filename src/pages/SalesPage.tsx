@@ -555,8 +555,8 @@ export default function SalesPage() {
                 Lihat Demo
               </button>
             </div>
-            <div className="lg:w-2/3 flex gap-4 overflow-x-auto pb-8 snap-x relative lg:-mr-32 pt-8">
-               <div className="h-full absolute left-0 top-0 w-16 bg-gradient-to-r from-white to-transparent z-10"></div>
+            <div className="w-full lg:w-2/3 flex gap-4 overflow-x-auto pb-8 snap-x relative lg:-mr-32 pt-8 hide-scrollbar">
+               <div className="h-full absolute left-0 top-0 w-16 bg-gradient-to-r from-white to-transparent z-10 pointer-events-none"></div>
                {(settings?.salespage?.featuresCarouselData && settings.salespage.featuresCarouselData.length > 0 ? settings.salespage.featuresCarouselData : [
                  { title: 'Dashboard Utama', img: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80', link: '' },
                  { title: 'Data Tamu', img: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80', link: '' },
@@ -583,7 +583,7 @@ export default function SalesPage() {
                    </div>
                  );
                })}
-               <div className="h-full absolute right-0 top-0 w-16 bg-gradient-to-l from-white to-transparent z-10"></div>
+               <div className="h-full absolute right-0 top-0 w-16 bg-gradient-to-l from-white to-transparent z-10 pointer-events-none"></div>
             </div>
           </div>
         </div>
@@ -958,7 +958,7 @@ export default function SalesPage() {
                         </ul>
                       </div>
                       <button 
-                        onClick={() => navigate(`/services/checkout/${service.id}`)}
+                        onClick={() => navigate(`/auth/login/services/checkout/${service.id}`)}
                         className="w-full mt-auto py-2 lg:py-2.5 rounded-xl text-white bg-[#F46279] hover:bg-[#e04f66] text-sm font-semibold transition-colors shadow-sm shadow-rose-200"
                       >
                         {service.price === 0 ? 'Mulai Gratis' : 'Pilih Paket'}

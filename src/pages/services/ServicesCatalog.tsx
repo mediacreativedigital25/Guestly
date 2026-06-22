@@ -102,7 +102,7 @@ export default function ServicesCatalog() {
                    </ul>
 
                    <button 
-                     onClick={() => navigate(`/services/checkout/${service.id}`)}
+                     onClick={() => navigate(`/auth/login/services/checkout/${service.id}`)}
                      className="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-lg hover:bg-indigo-700 transition"
                    >
                      Pilih Layanan

@@ -1,9 +1,9 @@
 import { auth } from './firebase';
 
-export async function sendFonnteMessage(token: string | null | undefined, target: string, message: string, url?: string) {
+export async function sendFonnteMessage(token: string | null | undefined, target: string, message: string, url?: string): Promise<{ success: boolean; error?: string }> {
   if (!target) {
     console.warn("Target phone number is missing, cannot send message.");
-    return false;
+    return { success: false, error: "Nomor HP tujuan kosong" };
   }
 
   try {
@@ -28,16 +28,56 @@ export async function sendFonnteMessage(token: string | null | undefined, target
       }),
     });
 
-    const data = await response.json();
+    if (response.status === 404) {
+      console.warn("Express backend API /api/send-whatsapp not found (404). Falling back to direct front-end fetch if VITE_FONNTE_TOKEN is set. Pastikan Anda tidak menghosting secara statis saja atau tambahkan VITE_FONNTE_TOKEN dilingkungan.");
+      if (import.meta.env.VITE_FONNTE_TOKEN) {
+         try {
+           const body = new URLSearchParams({
+             "target": target,
+             "message": message,
+             "countryCode": "62"
+           });
+           // We intentionally do not append `url` here because if `/api/send-whatsapp` is 404, 
+           // `/api/thumbnail/:eventId` will also be 404 (since the Express server is not running).
+           // Sending an invalid media URL to Fonnte will cause the ENTIRE message to fail (status: false).
+           // By skipping the media url here, at least the text message is delivered successfully.
+           const directResponse = await fetch("https://api.fonnte.com/send", {
+             method: "POST",
+             headers: {
+               "Authorization": import.meta.env.VITE_FONNTE_TOKEN
+             },
+             body: body
+           });
+           const directData = await directResponse.json();
+           if (directData.status) {
+             return { success: true };
+           } else {
+             return { success: false, error: directData.reason || "Fonnte API error (Direct fallback)" };
+           }
+         } catch (fallbackError: any) {
+           return { success: false, error: "Static fallback error (CORS/Network): " + fallbackError.message };
+         }
+      } else {
+         return { success: false, error: "Server API backend tidak ditemukan. URL /api/send-whatsapp mengembalikan 404 Not Found (Biasa terjadi pada static hosting). Pastikan deploy dengan Express." };
+      }
+    }
+
+    // Try catch JSON parse to handle unexpected HTML returns from other error codes (like 502)
+    let data;
+    try {
+      data = await response.json();
+    } catch (parseError: any) {
+      return { success: false, error: `Invalid proxy response (bukan JSON): ${response.status} ${response.statusText}` };
+    }
     if (response.ok && data.success) {
       console.log("WhatsApp message sent successfully via proxy:", data);
-      return true;
+      return { success: true };
     } else {
       console.error("WhatsApp proxy error:", data);
-      return false;
+      return { success: false, error: data.error || data.reason || "Terjadi kesalahan pada server WhatsApp" };
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error("WhatsApp connection error:", error);
-    return false;
+    return { success: false, error: error.message || "Gagal menghubungi server WhatsApp" };
   }
 }

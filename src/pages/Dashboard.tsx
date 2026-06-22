@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 import { collection, query, getDocs, where, onSnapshot, setDoc, doc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
@@ -9,6 +10,7 @@ import { format, isSameDay } from 'date-fns';
 
 export default function Dashboard() {
   const { appUser } = useAuth();
+  const navigate = useNavigate();
   
   // Parse activeUntil safely
   let isTrial = false;
@@ -214,9 +216,9 @@ export default function Dashboard() {
               <p className="text-sm text-indigo-700 mt-1">
                 Anda saat ini menggunakan akses masa percobaan. Untuk membuat lebih banyak acara dan mengundang lebih banyak tamu tanpa batas waktu, silakan upgrade layanan Anda.
               </p>
-              <a href="/services/catalog" className="text-sm font-medium text-indigo-600 hover:text-indigo-800 mt-2 inline-block">
+              <button onClick={() => navigate('/auth/login/services/catalog')} className="text-sm font-medium text-indigo-600 hover:text-indigo-800 mt-2 inline-block">
                 Lihat Katalog Layanan &rarr;
-              </a>
+              </button>
             </div>
           </div>
         )}

@@ -1,6 +1,23 @@
 export default function Changelog() {
   const versions = [
     {
+      version: 'v1.0.9',
+      date: '22 Juni 2026',
+      changes: [
+        'Memperbaiki URL rute Checkout Layanan yang sempat menyebabkan layar putih (blank) ketika diklik.',
+        'Memperbaiki tombol "Lihat Katalog Layanan" di Dashboard dan penyesuaian fallback rute agar pengguna tidak salah navigasi di luar aplikasi.'
+      ]
+    },
+    {
+      version: 'v1.0.8',
+      date: '22 Juni 2026',
+      changes: [
+        'Memperbaiki isu WA Blast yang gagal terkirim (Error: Gagal mengirim) ketika aplikasi sudah dipublish atau dihosting, dengan sistem deteksi jika hosting tersebut tidak mendukung Express backend.',
+        'Menambahkan otomatisasi Fallback API: Jika `/api/send-whatsapp` tidak ditemukan di hosting server, aplikasi akan mencoba menembak API Fonnte secara langsung dari client dengan asisten variabel VITE_FONNTE_TOKEN.',
+        'Teks pesan Blast akan selalu diutamakan terlebih dahulu jika pengiriman gambar (thumbnail url) gagal dirender oleh server (Sering terjadi jika menghosting secara Statis di Vercel/Netlify).'
+      ]
+    },
+    {
       version: 'v1.0.7',
       date: '22 Juni 2026',
       changes: [

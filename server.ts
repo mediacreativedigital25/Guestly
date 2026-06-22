@@ -171,10 +171,10 @@ async function startServer() {
       }
 
       const { target, message, url } = req.body;
-      const token = process.env.FONNTE_TOKEN;
+      const token = process.env.FONNTE_TOKEN || process.env.VITE_FONNTE_TOKEN;
       
       if (!token) {
-        return res.status(500).json({ success: false, error: 'FONNTE_TOKEN environment variable is not configured.' });
+        return res.status(500).json({ success: false, error: 'FONNTE_TOKEN (atau VITE_FONNTE_TOKEN) environment variable is not configured di server hosting.' });
       }
 
       const body = new URLSearchParams({

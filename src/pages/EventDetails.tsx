@@ -380,6 +380,7 @@ export default function EventDetails() {
     setIsBlasting(true);
     let successCount = 0;
     let failCount = 0;
+    let errors: string[] = [];
 
     try {
       const { sendFonnteMessage } = await import('../lib/fonnte');
@@ -414,9 +415,15 @@ export default function EventDetails() {
              imgUrl = `${window.location.origin}/api/thumbnail/${eventId}/image.jpg`;
           }
 
-          const sent = await sendFonnteMessage(null, guest.phone!, message, imgUrl);
-          if (sent) successCount++;
-          else failCount++;
+          const result = await sendFonnteMessage(null, guest.phone!, message, imgUrl);
+          if (result.success) {
+            successCount++;
+          } else {
+            failCount++;
+            if (result.error && !errors.includes(result.error)) {
+              errors.push(result.error);
+            }
+          }
 
           // delay 3 seconds
           await new Promise(resolve => setTimeout(resolve, 3000));
@@ -447,7 +454,8 @@ export default function EventDetails() {
          localStorage.setItem(`waTemplateId_${eventId}`, selectedTemplateId);
       }
 
-      showAlert('Blast Selesai', `Berhasil mengirim: ${successCount}\nGagal mengirim: ${failCount}`, successCount > 0 ? 'success' : 'warning');
+      const errorMessage = errors.length > 0 ? `\n\nAlasan Gagal:\n${errors.join('\n')}` : '';
+      showAlert('Blast Selesai', `Berhasil mengirim: ${successCount}\nGagal mengirim: ${failCount}${errorMessage}`, successCount > 0 ? 'success' : 'warning');
       setSelectedGuestIds([]); // clear selection after blast
     } catch (error) {
       console.error(error);

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './AuthContext';
 import { SettingsProvider } from './SettingsContext';
 import AppLayout from './AppLayout';
@@ -72,6 +72,7 @@ export default function App() {
           <Route path="/public/rsvp/:eventId" element={<PublicRSVP />} />
           <Route path="/public/qr" element={<PublicQR />} />
           <Route path="/events/:eventId/greeting" element={<GreetingScreen />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         </BrowserRouter>
       </AuthProvider>
