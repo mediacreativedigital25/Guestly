@@ -410,15 +410,7 @@ export default function EventDetails() {
             .replace(/\[INVITE_LINK\]/g, digitalInviteLink)
             .replace(/\[SENDER_NAME\]/g, senderName);
 
-          let imgUrl: string | undefined = undefined;
-          const rawUrl = event?.thumbnailUrl || event?.frameOverlayUrl;
-          if (rawUrl) {
-             if (rawUrl.startsWith('data:image/')) {
-                 imgUrl = `${window.location.origin}/api/thumbnail/${eventId}`;
-             } else {
-                 imgUrl = rawUrl;
-             }
-          }
+          let imgUrl: string | undefined = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qrLink)}`;
 
           const result = await sendFonnteMessage(null, guest.phone!, message, imgUrl);
           if (result.success) {

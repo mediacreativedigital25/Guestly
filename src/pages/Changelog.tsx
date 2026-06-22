@@ -5,6 +5,7 @@ export default function Changelog() {
       date: '22 Juni 2026',
       changes: [
         'Memperbarui deskripsi default saat link dibagikan (WhatsApp/Sosmed) agar menjadi lebih informatif dan mengarahkan tamu untuk menyiapkan QR Code.',
+        'Menambahkan opsi "Gunakan QR Code sebagai Foto WhatsApp" pada form Blast WA (Solusi mutlak bagi Hosting Statis agar gambar tetap tayang dengan langsung memberikan QR Code tamu).',
       ]
     },
     {
