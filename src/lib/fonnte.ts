@@ -28,8 +28,8 @@ export async function sendFonnteMessage(token: string | null | undefined, target
       }),
     });
 
-    if (response.status === 404) {
-      console.warn("Express backend API /api/send-whatsapp not found (404). Falling back to direct front-end fetch if VITE_FONNTE_TOKEN is set. Pastikan Anda tidak menghosting secara statis saja atau tambahkan VITE_FONNTE_TOKEN dilingkungan.");
+    if (response.status === 404 || response.status === 405) {
+      console.warn(`Express backend API /api/send-whatsapp not found (${response.status}). Falling back to direct front-end fetch if VITE_FONNTE_TOKEN is set. Pastikan Anda tidak menghosting secara statis saja atau tambahkan VITE_FONNTE_TOKEN dilingkungan.`);
       if (import.meta.env.VITE_FONNTE_TOKEN) {
          try {
            const body = new URLSearchParams({
@@ -58,7 +58,7 @@ export async function sendFonnteMessage(token: string | null | undefined, target
            return { success: false, error: "Static fallback error (CORS/Network): " + fallbackError.message };
          }
       } else {
-         return { success: false, error: "Server API backend tidak ditemukan. URL /api/send-whatsapp mengembalikan 404 Not Found (Biasa terjadi pada static hosting). Pastikan deploy dengan Express." };
+         return { success: false, error: `Server API backend tidak ditemukan. URL /api/send-whatsapp mengembalikan ${response.status}. Pastikan deploy dengan Express.` };
       }
     }
 

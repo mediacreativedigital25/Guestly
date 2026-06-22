@@ -1,6 +1,13 @@
 export default function Changelog() {
   const versions = [
     {
+      version: 'v1.0.10',
+      date: '22 Juni 2026',
+      changes: [
+        'Memperbaiki fallback deteksi WA Blast ketika aplikasi dihosting di platform spesifik seperti Cloudflare Pages (Error 405 Method Not Allowed) akan langsung dialihkan ke eksekusi direct client-side dengan VITE_FONNTE_TOKEN.'
+      ]
+    },
+    {
       version: 'v1.0.9',
       date: '22 Juni 2026',
       changes: [
