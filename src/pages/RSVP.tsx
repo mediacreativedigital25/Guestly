@@ -22,18 +22,28 @@ export default function RSVP() {
     if (!eventData?.date) return;
 
     const calculateTimeLeft = () => {
-      let targetDateStr = `${eventData.date}T00:00:00`;
+      let parsedDate = new Date(eventData.date);
       
-      if (eventData.time) {
-        const timeMatch = eventData.time.match(/(\d{2}:\d{2})/);
-        if (timeMatch) {
-            targetDateStr = `${eventData.date}T${timeMatch[1]}:00`;
-        }
+      if (isNaN(parsedDate.getTime())) {
+          const parts = eventData.date.split(/[/\-]/);
+          if (parts.length === 3) {
+              const day = parseInt(parts[0], 10);
+              const month = parseInt(parts[1], 10) - 1;
+              const year = parseInt(parts[2], 10);
+              parsedDate = new Date(year, month, day);
+          }
       }
 
-      // Fallback if parsing fails, just use the date
-      const targetTime = new Date(targetDateStr).getTime();
-      const difference = (isNaN(targetTime) ? new Date(eventData.date).getTime() : targetTime) - new Date().getTime();
+      if (isNaN(parsedDate.getTime())) return null;
+
+      if (eventData.time) {
+          const timeMatch = eventData.time.match(/(\d{2}):(\d{2})/);
+          if (timeMatch) {
+              parsedDate.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), 0, 0);
+          }
+      }
+
+      const difference = parsedDate.getTime() - new Date().getTime();
 
       if (difference > 0) {
         return {
@@ -43,7 +53,7 @@ export default function RSVP() {
           seconds: Math.floor((difference / 1000) % 60)
         };
       }
-      return { days: 0, hours: 0, minutes: 0, seconds: 0 };
+      return null;
     };
 
     setTimeLeft(calculateTimeLeft());
@@ -78,7 +88,10 @@ export default function RSVP() {
         const eventSnap = await getDoc(doc(db, 'events', eventId!));
         if (eventSnap.exists()) {
            const eventData = eventSnap.data() as EventRecord;
-           setEventData(eventData);
+           if (eventData) {
+        document.title = eventData.title || (eventData.coupleName ? `The Wedding Of ${eventData.coupleName}` : 'Undangan Acara');
+      }
+      setEventData(eventData);
            if (eventData.sessions && eventData.sessions.length > 0 && !currentSession) {
              setSessionInput(eventData.sessions[0]);
            }

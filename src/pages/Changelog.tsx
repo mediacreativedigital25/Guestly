@@ -1,6 +1,28 @@
 export default function Changelog() {
   const versions = [
     {
+      version: 'V1.1.9',
+      date: '22 Juni 2026',
+      changes: [
+        'Memperbarui deskripsi default saat link dibagikan (WhatsApp/Sosmed) agar menjadi lebih informatif dan mengarahkan tamu untuk menyiapkan QR Code.',
+      ]
+    },
+    {
+      version: 'V1.1.8',
+      date: '22 Juni 2026',
+      changes: [
+        'Memperbaiki masalah Thumbnail WhatsApp yang tidak terupdate (mengatasi cache WhatsApp dengan parameter dinamis).',
+        'Mengubah Default Title Website menjadi Judul Acara dinamis saat link WhatsApp dibagikan.',
+      ]
+    },
+    {
+      version: 'V1.1.7',
+      date: '22 Juni 2026',
+      changes: [
+        'Memperbaiki masalah error pada tampilan countdown timer akibat kesalahan format pembacaan waktu (Invalid time value) serta menyembunyikan countdown otomatis ketika acara sudah lewat.',
+      ]
+    },
+    {
       version: 'V1.1.6',
       date: '22 Juni 2026',
       changes: [
