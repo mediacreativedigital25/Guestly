@@ -321,7 +321,7 @@ export default function EventDetails() {
     let digitalInviteLink = event?.digitalInviteLink || qrLink;
     if (event?.digitalInviteLink) {
         const separator = event.digitalInviteLink.includes('?') ? '&' : '?';
-        digitalInviteLink = `${event.digitalInviteLink}${separator}to=${encodeURIComponent(guest.name)}&ticket=${guest.ticketCode}`;
+        digitalInviteLink = `${event.digitalInviteLink}${separator}to=${encodeURIComponent(guest.name)}&ticket=${guest.ticketCode}${guest.phone ? `&phone=${encodeURIComponent(guest.phone)}` : ''}${guest.session ? `&session=${encodeURIComponent(guest.session)}` : ''}`;
     }
 
     const senderName = event?.coupleName || clientName || event?.title || 'Kami';
@@ -398,7 +398,7 @@ export default function EventDetails() {
           let digitalInviteLink = event?.digitalInviteLink || qrLink;
           if (event?.digitalInviteLink) {
               const separator = event.digitalInviteLink.includes('?') ? '&' : '?';
-              digitalInviteLink = `${event.digitalInviteLink}${separator}to=${encodeURIComponent(guest.name)}&ticket=${guest.ticketCode}`;
+              digitalInviteLink = `${event.digitalInviteLink}${separator}to=${encodeURIComponent(guest.name)}&ticket=${guest.ticketCode}${guest.phone ? `&phone=${encodeURIComponent(guest.phone)}` : ''}${guest.session ? `&session=${encodeURIComponent(guest.session)}` : ''}`;
           }
 
           const senderName = event?.coupleName || clientName || event?.title || 'Kami';
@@ -738,13 +738,13 @@ export default function EventDetails() {
             onClick={() => setActiveTab('rsvp')}
             className={`whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'rsvp' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
           >
-            RSVP & Undangan
+            RSVP & Ucapan
           </button>
           <button
             onClick={() => setActiveTab('guest-list')}
             className={`whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'guest-list' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
           >
-            Guest List
+            Daftar Tamu
           </button>
         </nav>
       </div>
@@ -763,7 +763,7 @@ export default function EventDetails() {
         <div className="px-4 sm:px-6 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-gray-100 bg-gray-50 gap-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
             <h2 className="text-lg font-medium text-gray-900 whitespace-nowrap">
-               {activeTab === 'rsvp' ? 'Undangan' : 'Daftar Tamu'} ({filteredGuests.length})
+               {activeTab === 'rsvp' ? 'RSVP & Ucapan' : 'Daftar Tamu'} ({filteredGuests.length})
             </h2>
             <div className="relative w-full sm:w-64">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -948,9 +948,13 @@ export default function EventDetails() {
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama Tamu</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Alamat</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No. Hp</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kategori</th>
+                    {activeTab === 'guest-list' && (
+                      <>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Alamat</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No. Hp</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kategori</th>
+                      </>
+                    )}
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sesi</th>
                     {activeTab === 'rsvp' ? (
                       <>
@@ -959,6 +963,7 @@ export default function EventDetails() {
                       </>
                     ) : (
                       <>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status RSVP</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status Scan</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Waktu Kehadiran</th>
                       </>
@@ -981,13 +986,17 @@ export default function EventDetails() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{guest.name}</div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{guest.address || '-'}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{guest.phone || '-'}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {guest.category ? (
-                          <span className="inline-flex px-2 py-1 bg-indigo-50 text-indigo-700 text-xs font-medium rounded-md">{guest.category}</span>
-                        ) : '-'}
-                      </td>
+                      {activeTab === 'guest-list' && (
+                        <>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{guest.address || '-'}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{guest.phone || '-'}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {guest.category ? (
+                              <span className="inline-flex px-2 py-1 bg-indigo-50 text-indigo-700 text-xs font-medium rounded-md">{guest.category}</span>
+                            ) : '-'}
+                          </td>
+                        </>
+                      )}
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {guest.session ? (
                           <span className="inline-flex px-2 py-1 bg-green-50 text-green-700 text-xs font-medium rounded-md">{guest.session}</span>
@@ -1010,6 +1019,15 @@ export default function EventDetails() {
                         </>
                       ) : (
                         <>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                             <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold leading-4 ${
+                               guest.rsvpStatus === 'attending' ? 'bg-green-100 text-green-800' : 
+                               guest.rsvpStatus === 'declined' ? 'bg-red-100 text-red-800' : 
+                               'bg-yellow-100 text-yellow-800'
+                             }`}>
+                               {guest.rsvpStatus === 'attending' ? 'Hadir' : guest.rsvpStatus === 'declined' ? 'Tidak Hadir' : 'Pending'}
+                             </span>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
                              <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold leading-4 ${guest.attended ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
                                {guest.attended ? 'Sudah Scan' : 'Belum Hadir'}

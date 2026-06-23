@@ -28,6 +28,7 @@ export default function EventsList() {
   const [newEventFrame, setNewEventFrame] = useState('');
   const [newEventThumbnail, setNewEventThumbnail] = useState('');
   const [newEventTheme, setNewEventTheme] = useState('default');
+  const [newEventDisableTicketRsvpForm, setNewEventDisableTicketRsvpForm] = useState(false);
   const [newEventClientId, setNewEventClientId] = useState('');
   const [newEventActiveUntil, setNewEventActiveUntil] = useState('');
   const [guestCategories, setGuestCategories] = useState<string[]>(['VIP', 'Keluarga', 'Reguler']);
@@ -46,6 +47,7 @@ export default function EventsList() {
     setNewEventFrame('');
     setNewEventThumbnail('');
     setNewEventTheme('default');
+    setNewEventDisableTicketRsvpForm(false);
     setNewEventClientId('');
     setNewEventActiveUntil('');
     setGuestCategories(['VIP', 'Keluarga', 'Reguler']);
@@ -110,6 +112,7 @@ export default function EventsList() {
     setNewEventFrame(event.frameOverlayUrl || '');
     setNewEventThumbnail(event.thumbnailUrl || '');
     setNewEventTheme(event.rsvpTheme || 'default');
+    setNewEventDisableTicketRsvpForm(event.disableTicketRsvpForm || false);
     setNewEventClientId(event.clientId || '');
     setNewEventActiveUntil(event.activeUntil || '');
     setGuestCategories(event.guestCategories || []);
@@ -222,6 +225,8 @@ export default function EventsList() {
       
       if (newEventTheme) payload.rsvpTheme = newEventTheme;
       else if (editingEventId) payload.rsvpTheme = deleteField();
+
+      if (newEventDisableTicketRsvpForm !== undefined) payload.disableTicketRsvpForm = newEventDisableTicketRsvpForm;
 
       if (guestCategories && guestCategories.length > 0) payload.guestCategories = guestCategories;
       else if (editingEventId) payload.guestCategories = deleteField();
@@ -423,6 +428,25 @@ export default function EventsList() {
                       Menggunakan thumbnail default sistem
                    </div>
                 )}
+              </div>
+              <div className="flex items-start bg-indigo-50/50 p-4 rounded-lg border border-indigo-100">
+                  <div className="flex items-center h-5">
+                    <input
+                      id="disable-rsvp-form"
+                      type="checkbox"
+                      checked={newEventDisableTicketRsvpForm}
+                      onChange={(e) => setNewEventDisableTicketRsvpForm(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="ml-3 text-sm">
+                    <label htmlFor="disable-rsvp-form" className="font-medium text-indigo-900 cursor-pointer">
+                      Sembunyikan Form Kehadiran di Link Tiket Tamu
+                    </label>
+                    <p className="text-gray-500 mt-1">
+                      Aktifkan ini jika Anda menggunakan platform (seperti Queinvite) untuk mengumpulkan konfirmasi kehadiran, dan ingin layar tiket Guestly hanya menampilkan QR Code saja.
+                    </p>
+                  </div>
               </div>
             </div>
           )}

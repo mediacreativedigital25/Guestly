@@ -298,68 +298,76 @@ export default function RSVP() {
              Merupakan suatu kebahagiaan bagi kami apabila Anda berkenan hadir serta memberikan doa dan restu kepada kami.
           </p>
 
-          <div className="space-y-4">
-            {eventData?.sessions && eventData.sessions.length > 0 && (
-               <div className="text-left">
-                 <select 
-                   value={sessionInput}
-                   onChange={(e) => setSessionInput(e.target.value)}
-                   className="w-full bg-[#fdf2f4] border border-rose-200 rounded-2xl px-4 py-3.5 focus:ring-rose-300 focus:border-rose-300 text-sm text-[#A13444] font-medium"
-                 >
-                   <option value="">-- Pilih Sesi Kehadiran --</option>
-                   {eventData.sessions.map((ses) => (
-                     <option key={ses} value={ses}>{ses}</option>
-                   ))}
-                 </select>
-               </div>
-            )}
-            
-            <div className="relative border border-rose-200 rounded-2xl overflow-hidden focus-within:border-rose-400 focus-within:ring-2 focus-within:ring-rose-100 transition-all bg-white">
-                <div className="absolute left-4 top-4">
-                    <MessageCircle className="text-rose-400" size={18} />
-                </div>
-                <div className="pl-12 pr-4 pt-3.5 pb-3">
-                    <p className="text-[12px] text-rose-500 font-semibold tracking-wide mb-1">Pesan & Doa (Opsional)</p>
-                    <textarea 
-                        value={wishesInput} 
-                        onChange={(e) => setWishesInput(e.target.value)}
-                        className="w-full bg-transparent border-none p-0 focus:ring-0 text-[14px] text-gray-700 resize-none h-16 placeholder:text-gray-400" 
-                        placeholder="Tulis pesan Anda di sini..."
-                    />
-                </div>
-            </div>
-
-            <div className="pt-2">
-              <div className="flex gap-3">
-                <button
-                  onClick={() => handleUpdateRSVP('attending')}
-                  disabled={submitting}
-                  className={`flex-1 py-3.5 px-4 rounded-2xl font-medium transition-all duration-300 text-[14px] ${guest.rsvpStatus === 'attending' ? 'bg-gradient-to-r from-[#A13444] to-[#B9707C] text-white shadow-md shadow-rose-200 scale-100' : 'bg-rose-50 text-[#A13444] hover:bg-rose-100'}`}
-                >
-                  <span className="flex items-center justify-center gap-2">
-                    {submitting && guest.rsvpStatus === 'attending' ? <Loader2 size={16} className="animate-spin" /> : null}
-                    Hadir
-                  </span>
-                </button>
-                <button
-                  onClick={() => handleUpdateRSVP('declined')}
-                  disabled={submitting}
-                  className={`flex-1 py-3.5 px-4 rounded-2xl font-medium transition-all duration-300 text-[14px] ${guest.rsvpStatus === 'declined' ? 'bg-gray-800 text-white shadow-md scale-100' : 'bg-gray-50 text-gray-600 hover:bg-gray-100 hover:text-gray-800'}`}
-                >
-                  <span className="flex items-center justify-center gap-2">
-                    {submitting && guest.rsvpStatus === 'declined' ? <Loader2 size={16} className="animate-spin" /> : null}
-                    Tidak Hadir
-                  </span>
-                </button>
-              </div>
-              
-              {guest.rsvpStatus !== 'pending' && (
-                <div className={`text-center text-[13px] font-medium mt-4 p-3 rounded-xl ${guest.rsvpStatus === 'attending' ? 'bg-[#fdf2f4] text-[#A13444]' : 'bg-gray-50 text-gray-600'}`}>
-                  ✓ Anda telah {guest.rsvpStatus === 'attending' ? 'menerima' : 'menolak'} undangan ini
-                </div>
+          {!eventData?.disableTicketRsvpForm && (
+            <div className="space-y-4">
+              {eventData?.sessions && eventData.sessions.length > 0 && (
+                 <div className="text-left">
+                   <select 
+                     value={sessionInput}
+                     onChange={(e) => setSessionInput(e.target.value)}
+                     className="w-full bg-[#fdf2f4] border border-rose-200 rounded-2xl px-4 py-3.5 focus:ring-rose-300 focus:border-rose-300 text-sm text-[#A13444] font-medium"
+                   >
+                     <option value="">-- Pilih Sesi Kehadiran --</option>
+                     {eventData.sessions.map((ses) => (
+                       <option key={ses} value={ses}>{ses}</option>
+                     ))}
+                   </select>
+                 </div>
               )}
+              
+              <div className="relative border border-rose-200 rounded-2xl overflow-hidden focus-within:border-rose-400 focus-within:ring-2 focus-within:ring-rose-100 transition-all bg-white">
+                  <div className="absolute left-4 top-4">
+                      <MessageCircle className="text-rose-400" size={18} />
+                  </div>
+                  <div className="pl-12 pr-4 pt-3.5 pb-3">
+                      <p className="text-[12px] text-rose-500 font-semibold tracking-wide mb-1">Pesan & Doa (Opsional)</p>
+                      <textarea 
+                          value={wishesInput} 
+                          onChange={(e) => setWishesInput(e.target.value)}
+                          className="w-full bg-transparent border-none p-0 focus:ring-0 text-[14px] text-gray-700 resize-none h-16 placeholder:text-gray-400" 
+                          placeholder="Tulis pesan Anda di sini..."
+                      />
+                  </div>
+              </div>
+
+              <div className="pt-2">
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => handleUpdateRSVP('attending')}
+                    disabled={submitting}
+                    className={`flex-1 py-3.5 px-4 rounded-2xl font-medium transition-all duration-300 text-[14px] ${guest.rsvpStatus === 'attending' ? 'bg-gradient-to-r from-[#A13444] to-[#B9707C] text-white shadow-md shadow-rose-200 scale-100' : 'bg-rose-50 text-[#A13444] hover:bg-rose-100'}`}
+                  >
+                    <span className="flex items-center justify-center gap-2">
+                      {submitting && guest.rsvpStatus === 'attending' ? <Loader2 size={16} className="animate-spin" /> : null}
+                      Hadir
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => handleUpdateRSVP('declined')}
+                    disabled={submitting}
+                    className={`flex-1 py-3.5 px-4 rounded-2xl font-medium transition-all duration-300 text-[14px] ${guest.rsvpStatus === 'declined' ? 'bg-gray-800 text-white shadow-md scale-100' : 'bg-gray-50 text-gray-600 hover:bg-gray-100 hover:text-gray-800'}`}
+                  >
+                    <span className="flex items-center justify-center gap-2">
+                      {submitting && guest.rsvpStatus === 'declined' ? <Loader2 size={16} className="animate-spin" /> : null}
+                      Tidak Hadir
+                    </span>
+                  </button>
+                </div>
+                
+                {guest.rsvpStatus !== 'pending' && (
+                  <div className={`text-center text-[13px] font-medium mt-4 p-3 rounded-xl ${guest.rsvpStatus === 'attending' ? 'bg-[#fdf2f4] text-[#A13444]' : 'bg-gray-50 text-gray-600'}`}>
+                    ✓ Anda telah {guest.rsvpStatus === 'attending' ? 'menerima' : 'menolak'} undangan ini
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
+
+          {eventData?.disableTicketRsvpForm && (
+            <div className="text-center text-sm font-medium text-[#A13444] bg-[#fdf2f4] p-4 rounded-xl">
+              ✓ Akses Tiket Dibuka
+            </div>
+          )}
 
           <div className="mt-12 text-center pb-2 border-t border-rose-50 pt-8">
               <p className="text-[#8e6b70] text-[12px] mb-2 leading-relaxed">Atas perhatian dan kehadirannya,<br/>kami ucapkan terima kasih.</p>

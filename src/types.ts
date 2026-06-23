@@ -63,6 +63,7 @@ export interface EventRecord {
   guestQuota?: number;
   waTemplateId?: string;
   waBlastCount?: number;
+  disableTicketRsvpForm?: boolean;
   createdAt: any;
   updatedAt: any;
 }

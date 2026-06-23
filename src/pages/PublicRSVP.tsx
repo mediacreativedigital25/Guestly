@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { collection, query, getDocs, addDoc, serverTimestamp, doc, getDoc, orderBy } from 'firebase/firestore';
+import { collection, query, getDocs, addDoc, updateDoc, serverTimestamp, doc, getDoc, orderBy, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { EventRecord, Guest } from '../types';
 import { CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
@@ -69,10 +69,10 @@ export default function PublicRSVP() {
   const [guestsWithWishes, setGuestsWithWishes] = useState<Guest[]>([]);
   
   // Form state
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [name, setName] = useState(searchParams.get('to') || searchParams.get('name') || '');
+  const [phone, setPhone] = useState(searchParams.get('phone') || '');
   const [rsvpStatus, setRsvpStatus] = useState('attending');
-  const [sessionInput, setSessionInput] = useState('');
+  const [sessionInput, setSessionInput] = useState(searchParams.get('session') || '');
   const [wishes, setWishes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
@@ -167,31 +167,67 @@ export default function PublicRSVP() {
       setSubmitting(true);
       setErrorObj(null);
       
-      const ticketCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+      let existingGuest: Guest | null = null;
+      let existingGuestId: string | null = null;
+      
+      const ticketParam = searchParams.get('ticket');
+      
+      if (ticketParam) {
+        const q = query(collection(db, 'events', eventId!, 'guests'), where('ticketCode', '==', ticketParam));
+        const snapshot = await getDocs(q);
+        if (!snapshot.empty) {
+          existingGuestId = snapshot.docs[0].id;
+          existingGuest = snapshot.docs[0].data() as Guest;
+        }
+      } else {
+        // Fallback: check by name if no ticket provided
+        const q = query(collection(db, 'events', eventId!, 'guests'), where('name', '==', name.trim()));
+        const snapshot = await getDocs(q);
+        if (!snapshot.empty) {
+           existingGuestId = snapshot.docs[0].id;
+           existingGuest = snapshot.docs[0].data() as Guest;
+        }
+      }
+      
       const payload: any = {
-        eventId: eventId!,
         name: name.trim(),
-        ticketCode: ticketCode,
         rsvpStatus: rsvpStatus as any,
-        attended: false,
-        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };
       
       if (phone.trim()) payload.phone = phone.trim();
       if (wishes.trim()) payload.wishes = wishes.trim();
       if (sessionInput) payload.session = sessionInput;
+      
+      let newGuest: Guest;
 
-      const guestRef = await addDoc(collection(db, 'events', eventId!, 'guests'), payload);
+      if (existingGuestId && existingGuest) {
+        await updateDoc(doc(db, 'events', eventId!, 'guests', existingGuestId), payload);
+        newGuest = {
+           ...existingGuest,
+           ...payload,
+           id: existingGuestId,
+           updatedAt: new Date(),
+        } as unknown as Guest;
+      } else {
+        const ticketCode = ticketParam || Math.random().toString(36).substring(2, 10).toUpperCase();
+        payload.eventId = eventId!;
+        payload.ticketCode = ticketCode;
+        payload.attended = false;
+        payload.createdAt = serverTimestamp();
+        
+        const guestRef = await addDoc(collection(db, 'events', eventId!, 'guests'), payload);
+        newGuest = { 
+          id: guestRef.id, 
+          ...payload, 
+          createdAt: new Date() 
+        } as unknown as Guest;
+      }
       
-      // Update local list
-      const newGuest: Guest = { 
-        id: guestRef.id, 
-        ...payload, 
-        createdAt: new Date() 
-      } as unknown as Guest;
-      
-      setGuestsWithWishes(prev => [newGuest, ...prev]);
+      setGuestsWithWishes(prev => {
+        const filtered = prev.filter(g => g.id !== newGuest.id);
+        return [newGuest, ...filtered];
+      });
       setSubmitSuccess(true);
       
       // Reset form

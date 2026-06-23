@@ -109,6 +109,7 @@ service cloud.firestore {
         (!('waBlastCount' in data) || data.waBlastCount == null || data.waBlastCount is number) &&
         (!('waTemplateId' in data) || data.waTemplateId == null || (data.waTemplateId is string && data.waTemplateId.size() <= 128)) &&
         (!('thumbnailUrl' in data) || data.thumbnailUrl == null || (data.thumbnailUrl is string && data.thumbnailUrl.size() <= 2000000)) &&
+        (!('disableTicketRsvpForm' in data) || data.disableTicketRsvpForm == null || data.disableTicketRsvpForm is bool) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
