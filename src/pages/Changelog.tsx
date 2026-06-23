@@ -1,6 +1,16 @@
 export default function Changelog() {
   const versions = [
     {
+      version: 'V1.2.0',
+      date: '23 Juni 2026',
+      changes: [
+        'Mengubah nama tab "RSVP & Undangan" menjadi "RSVP & Ucapan" dan "Guest List" menjadi "Daftar Tamu" pada detail acara.',
+        'Menambahkan pengaturan "Sembunyikan Form Kehadiran di Link Tiket Tamu" pada Info Acara untuk keperluan integrasi form platform undangan (seperti Queinvite).',
+        'Auto-fill form RSVP: Nama, No WhatsApp, dan Sesi sekarang otomatis terisi pada form RSVP tamu jika undangan digital link menyertakan parameternya.',
+        'Memperbarui logika sinkronisasi tamu: RSVP melalui form Embed/Public kini memperbarui data tamu yang sudah ada jika tiket sesuai, alih-alih membuat entri tamu duplikat.'
+      ]
+    },
+    {
       version: 'V1.1.9',
       date: '22 Juni 2026',
       changes: [
