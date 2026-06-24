@@ -15,6 +15,7 @@ export default function GreetingScreen() {
   const [latestGuest, setLatestGuest] = useState<Guest | null>(null);
   const [showGreeting, setShowGreeting] = useState(false);
   const [errorInfo, setErrorInfo] = useState('');
+  const [partnerLogoUrl, setPartnerLogoUrl] = useState<string | null>(null);
   
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -24,9 +25,24 @@ export default function GreetingScreen() {
     
     // Subscribe to Event Info
     const eventRef = doc(db, 'events', eventId);
-    const unsubscribeEvent = onSnapshot(eventRef, (docSnap) => {
+    const unsubscribeEvent = onSnapshot(eventRef, async (docSnap) => {
       if (docSnap.exists()) {
-        setEventData({ id: docSnap.id, ...docSnap.data() } as EventRecord);
+        const data = { id: docSnap.id, ...docSnap.data() } as EventRecord;
+        setEventData(data);
+        
+        // Fetch partner logo
+        if (data.partnerId) {
+           try {
+              const { getDoc } = await import('firebase/firestore');
+              const partnerDocRef = doc(db, 'users', data.partnerId);
+              const partnerDocSnap = await getDoc(partnerDocRef);
+              if (partnerDocSnap.exists() && partnerDocSnap.data().logoUrl) {
+                 setPartnerLogoUrl(partnerDocSnap.data().logoUrl);
+              }
+           } catch (e) {
+              console.error("Error fetching partner logo:", e);
+           }
+        }
       }
     }, (err: any) => {
       console.error(err);
@@ -105,6 +121,8 @@ export default function GreetingScreen() {
     );
   }
 
+  const displayLogoUrl = partnerLogoUrl || settings?.logoUrl;
+
 const renderFormattedTitle = (title: string, isMain: boolean = false) => {
     const weddingMatch = title.match(/^(the wedding of\s+)(.*)$/i);
     if (weddingMatch) {
@@ -151,8 +169,8 @@ const renderFormattedTitle = (title: string, isMain: boolean = false) => {
 
       {/* Main Content Container */}
       <div className="z-10 w-full px-6 py-12 flex flex-col items-center justify-center transition-all duration-1000 min-h-screen">
-         {settings?.logoUrl && !showGreeting && (
-           <img src={settings.logoUrl} alt="Vendor Logo" className="absolute top-12 h-auto max-h-20 w-auto max-w-[240px] object-contain opacity-80" />
+         {displayLogoUrl && (
+           <img src={displayLogoUrl} alt="Vendor Logo" className="absolute top-12 h-auto max-h-20 w-auto max-w-[240px] object-contain opacity-80" />
          )}
 
          {showGreeting && latestGuest ? (

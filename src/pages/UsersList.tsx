@@ -19,6 +19,7 @@ export default function UsersList() {
   const [newUserRole, setNewUserRole] = useState<Role>('client');
   const [newUserPartnerId, setNewUserPartnerId] = useState('');
   const [newUserClientId, setNewUserClientId] = useState('');
+  const [newUserLogoUrl, setNewUserLogoUrl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   
@@ -29,6 +30,7 @@ export default function UsersList() {
   const [editUserPhone, setEditUserPhone] = useState('');
   const [editUserPassword, setEditUserPassword] = useState('');
   const [editUserBusinessName, setEditUserBusinessName] = useState('');
+  const [editUserLogoUrl, setEditUserLogoUrl] = useState('');
   const [editUserRole, setEditUserRole] = useState<Role>('client');
 
   const { appUser } = useAuth();
@@ -101,6 +103,7 @@ export default function UsersList() {
     setEditUserName(user.name || '');
     setEditUserPhone(user.phone || '');
     setEditUserBusinessName(user.businessName || '');
+    setEditUserLogoUrl(user.logoUrl || '');
     setEditUserRole(user.role);
     setEditUserPassword('');
     setIsEditingUser(true);
@@ -120,6 +123,7 @@ export default function UsersList() {
 
       if (editUserRole === 'partner') {
         updateData.businessName = editUserBusinessName;
+        updateData.logoUrl = editUserLogoUrl;
       }
 
       await updateDoc(doc(db, 'users', editingUserId), updateData);
@@ -161,6 +165,7 @@ export default function UsersList() {
         role: newUserRole,
         partnerId: newUserPartnerId || null,
         clientId: newUserClientId || null,
+        logoUrl: newUserRole === 'partner' ? newUserLogoUrl : undefined,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };
@@ -211,6 +216,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
       setNewUserRole('client');
       setNewUserPartnerId('');
       setNewUserClientId('');
+      setNewUserLogoUrl('');
       setIsAddingUser(false);
       showAlert('Berhasil', 'User berhasil ditambahkan!', 'success');
     } catch (err: any) {
@@ -271,11 +277,17 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
           </div>
 
           {newUserRole === 'partner' && (
-            <div>
-               <label className="block text-sm font-medium text-gray-700 mb-1">Partner ID</label>
-               <input value={newUserPartnerId} onChange={e => setNewUserPartnerId(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="Biarkan kosong jika buat otomatis atau isi ID Partner" />
-               <p className="text-xs text-gray-500 mt-1">Opsional: Isi dengan ID jika akan diasosiasikan dengan ID Partner yang sudah ada.</p>
-            </div>
+            <>
+              <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">Partner ID</label>
+                 <input value={newUserPartnerId} onChange={e => setNewUserPartnerId(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="Biarkan kosong jika buat otomatis atau isi ID Partner" />
+                 <p className="text-xs text-gray-500 mt-1">Opsional: Isi dengan ID jika akan diasosiasikan dengan ID Partner yang sudah ada.</p>
+              </div>
+              <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">Logo URL Partner</label>
+                 <input value={newUserLogoUrl} onChange={e => setNewUserLogoUrl(e.target.value)} type="url" className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="https://contoh.com/logo.png" />
+              </div>
+            </>
           )}
 
           {newUserRole === 'client' && (
@@ -324,10 +336,16 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
           </div>
           
           {editUserRole === 'partner' && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Nama Usaha</label>
-              <input value={editUserBusinessName} onChange={e => setEditUserBusinessName(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="Nama Usaha (Opsional)" />
-            </div>
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nama Usaha</label>
+                <input value={editUserBusinessName} onChange={e => setEditUserBusinessName(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="Nama Usaha (Opsional)" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Logo URL Partner</label>
+                <input value={editUserLogoUrl} onChange={e => setEditUserLogoUrl(e.target.value)} type="url" className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="https://contoh.com/logo.png" />
+              </div>
+            </>
           )}
 
           <div>
