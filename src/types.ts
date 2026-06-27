@@ -90,8 +90,23 @@ export interface Guest {
   wishes?: string;
   attended: boolean;
   attendedAt?: any;
+  hasResponded?: boolean;
   createdAt: any;
   updatedAt: any;
+}
+
+export interface GuestEditRequest {
+  id?: string;
+  eventId: string;
+  eventTitle: string;
+  guestId: string;
+  clientId: string;
+  partnerId?: string | null;
+  originalData: Partial<Guest>;
+  requestedData: Partial<Guest>;
+  status: 'pending' | 'approved' | 'rejected';
+  requestedAt: any;
+  resolvedAt?: any;
 }
 
 export interface GuestlyService {

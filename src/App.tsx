@@ -18,6 +18,7 @@ import RSVP from './pages/RSVP';
 import PublicRSVP from './pages/PublicRSVP';
 import Scanner from './pages/Scanner';
 import Changelog from './pages/Changelog';
+import Approvals from './pages/Approvals';
 import PublicQR from './pages/PublicQR';
 import SalesPage from './pages/SalesPage';
 
@@ -48,6 +49,7 @@ export default function App() {
             <Route path="events/:eventId" element={<EventDetails />} />
             <Route path="events/:eventId/scan" element={<Scanner />} />
             <Route path="clients" element={<ClientsList />} />
+            <Route path="approvals" element={<Approvals />} />
             <Route path="settings" element={<WhiteLabelSettings />} />
             <Route path="users" element={<UsersList />} />
             <Route path="roles" element={<RolesSettings />} />

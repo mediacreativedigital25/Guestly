@@ -144,7 +144,7 @@ export default function PublicRSVP() {
           const q = query(guestsRef, orderBy('createdAt', 'desc'));
           const snapshot = await getDocs(q);
           const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
-          setGuestsWithWishes(data.filter(g => g.wishes || g.rsvpStatus));
+          setGuestsWithWishes(data.filter(g => g.wishes && g.wishes.trim().length > 0));
         }
       } catch (error) {
         console.error("Error fetching event data", error);
@@ -173,25 +173,31 @@ export default function PublicRSVP() {
       const ticketParam = searchParams.get('ticket');
       
       if (ticketParam) {
-        const q = query(collection(db, 'events', eventId!, 'guests'), where('ticketCode', '==', ticketParam));
+        const q = query(collection(db, 'events', eventId!, 'guests'), where('ticketCode', '==', ticketParam || ''));
         const snapshot = await getDocs(q);
         if (!snapshot.empty) {
           existingGuestId = snapshot.docs[0].id;
           existingGuest = snapshot.docs[0].data() as Guest;
         }
       } else {
-        // Fallback: check by name if no ticket provided
-        const q = query(collection(db, 'events', eventId!, 'guests'), where('name', '==', name.trim()));
-        const snapshot = await getDocs(q);
-        if (!snapshot.empty) {
-           existingGuestId = snapshot.docs[0].id;
-           existingGuest = snapshot.docs[0].data() as Guest;
+        // Fallback: check by name if no ticket provided (case-insensitive)
+        const allGuestsSnapshot = await getDocs(collection(db, 'events', eventId!, 'guests'));
+        const searchName = name.trim().toLowerCase();
+        
+        for (const doc of allGuestsSnapshot.docs) {
+           const gData = doc.data() as Guest;
+           if (gData.name && gData.name.trim().toLowerCase() === searchName) {
+             existingGuestId = doc.id;
+             existingGuest = gData;
+             break;
+           }
         }
       }
       
       const payload: any = {
         name: name.trim(),
         rsvpStatus: rsvpStatus as any,
+        hasResponded: true,
         updatedAt: serverTimestamp()
       };
       

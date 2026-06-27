@@ -137,11 +137,11 @@ export default function EventsList() {
         let cQuery = query(clientsRef);
         
         if (appUser?.role === 'partner') {
-          const partnerId = appUser.id;
+          const partnerId = appUser.id || '';
           q = query(eventsRef, where('partnerId', '==', partnerId));
           cQuery = query(clientsRef, where('partnerId', '==', partnerId));
         } else if (appUser?.role === 'client') {
-          const targetClientId = appUser?.clientId || appUser?.id;
+          const targetClientId = appUser?.clientId || appUser?.id || '';
           if (!targetClientId) {
             setEvents([]);
             return;

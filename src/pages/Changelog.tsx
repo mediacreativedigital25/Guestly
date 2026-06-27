@@ -1,6 +1,15 @@
 export default function Changelog() {
   const versions = [
     {
+      version: 'V1.2.1',
+      date: '27 Juni 2026',
+      changes: [
+        'Menambahkan fitur hapus massal (bulk delete) untuk tamu yang dipilih pada daftar tamu, khusus untuk Super Admin dan Partner.',
+        'Memperbarui pop-up Integrasi Undangan Digital untuk secara khusus menampilkan ID Acara yang dapat disalin, memudahkan integrasi dengan platform Queinvite.',
+        'Menambahkan notifikasi WhatsApp via Fonnte kepada Partner ketika ada pengajuan perubahan data tamu dari Klien.',
+      ]
+    },
+    {
       version: 'V1.2.0',
       date: '23 Juni 2026',
       changes: [

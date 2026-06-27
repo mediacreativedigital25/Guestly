@@ -58,10 +58,10 @@ export default function Dashboard() {
         let q = query(eventsRef);
         
         if (appUser?.role === 'partner') {
-          const partnerId = appUser.id;
+          const partnerId = appUser.id || '';
           q = query(eventsRef, where('partnerId', '==', partnerId));
         } else if (appUser?.role === 'client') {
-          const targetClientId = appUser?.clientId || appUser?.id;
+          const targetClientId = appUser?.clientId || appUser?.id || '';
           if (!targetClientId) {
              setLoading(false);
              return;

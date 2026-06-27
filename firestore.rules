@@ -290,5 +290,10 @@ service cloud.firestore {
       allow create: if isSignedIn() && isValidCounter(incoming()) && incoming().seq == 1;
       allow update: if isSignedIn() && isValidCounter(incoming()) && incoming().seq == existing().seq + 1;
     }
+
+    match /guest_edit_requests/{requestId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
   }
 }

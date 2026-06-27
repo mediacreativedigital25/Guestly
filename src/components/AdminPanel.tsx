@@ -693,7 +693,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
     });
 
   return (
-    <div className="max-w-7xl mx-auto space-y-12 pb-20 font-sans">
+    <div className="mx-auto space-y-12 pb-20 font-sans">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
         <div className="flex items-center gap-3">
           <ShieldCheck className={cn("w-8 h-8", isResellerMode ? "text-orange-600" : "text-olive")} />

@@ -43,7 +43,20 @@ export default function EventDetails() {
   const [isBlastModalOpen, setIsBlastModalOpen] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [selectedGuestIds, setSelectedGuestIds] = useState<string[]>([]);
+  const [itemsPerPage, setItemsPerPage] = useState<number>(25);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [isEditingGuest, setIsEditingGuest] = useState(false);
+  const [editingGuestId, setEditingGuestId] = useState<string | null>(null);
+  const [editGuestName, setEditGuestName] = useState('');
+  const [editGuestAddress, setEditGuestAddress] = useState('');
+  const [editGuestPhone, setEditGuestPhone] = useState('');
+  const [editGuestCategory, setEditGuestCategory] = useState('');
+  const [editGuestSession, setEditGuestSession] = useState('');
 
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, rsvpFilter, attendanceFilter, activeTab]);
 
   useEffect(() => {
     if (!eventId) return;
@@ -189,6 +202,32 @@ export default function EventDetails() {
     }
   };
 
+  const handleBulkDeleteGuests = async () => {
+    if (selectedGuestIds.length === 0) return;
+    if (appUser?.role !== 'superadmin' && appUser?.role !== 'partner') {
+      showAlert("Ditolak", "Hanya Super Admin dan Partner yang dapat menghapus massal.", "error");
+      return;
+    }
+    
+    const confirmed = await showConfirm(`Apakah Anda yakin ingin menghapus ${selectedGuestIds.length} tamu yang dipilih?`);
+    if (!confirmed) return;
+
+    try {
+      const promises = selectedGuestIds.map(id => 
+        deleteDoc(doc(db, 'events', eventId!, 'guests', id))
+      );
+      
+      await Promise.all(promises);
+      
+      setGuests(guests.filter(g => !selectedGuestIds.includes(g.id!)));
+      setSelectedGuestIds([]);
+      showAlert("Berhasil", `${selectedGuestIds.length} tamu berhasil dihapus!`, "success");
+    } catch (error) {
+      console.error('Error deleting guests:', error);
+      showAlert("Gagal", "Gagal menghapus beberapa tamu", "error");
+    }
+  };
+
   const handleStatusChange = async (newStatus: string) => {
     if (!eventId || !event) return;
     
@@ -235,7 +274,9 @@ export default function EventDetails() {
     }
   };
 
-  const baseFilteredGuests = activeTab === 'guest-list' ? guests.filter(g => g.rsvpStatus !== 'declined') : guests;
+  const baseFilteredGuests = activeTab === 'guest-list' 
+    ? guests 
+    : guests.filter(g => g.hasResponded || (g.wishes && g.wishes.trim().length > 0));
   
   const filteredGuests = baseFilteredGuests.filter(guest => {
     const matchesSearch = guest.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -256,6 +297,9 @@ export default function EventDetails() {
     
     return matchesSearch && matchesStatus;
   });
+
+  const totalPages = Math.ceil(filteredGuests.length / itemsPerPage);
+  const paginatedGuests = filteredGuests.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const handleExportPDF = () => {
     const doc = new jsPDF();
@@ -597,6 +641,87 @@ export default function EventDetails() {
     }
   };
 
+  const handleEditGuestClick = (guest: Guest) => {
+    setEditingGuestId(guest.id!);
+    setEditGuestName(guest.name || '');
+    setEditGuestAddress(guest.address || '');
+    setEditGuestPhone(guest.phone || '');
+    setEditGuestCategory(guest.category || '');
+    setEditGuestSession(guest.session || '');
+    setIsEditingGuest(true);
+  };
+
+  const handleSaveEditGuest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingGuestId || !event) return;
+
+    try {
+      const originalGuest = guests.find(g => g.id === editingGuestId);
+      if (!originalGuest) return;
+
+      if (appUser?.role === 'client') {
+        // Create approval request
+        await addDoc(collection(db, 'guest_edit_requests'), {
+          eventId: eventId,
+          eventTitle: event.title || 'Unknown Event',
+          guestId: editingGuestId,
+          clientId: event.clientId || '', 
+          partnerId: event.partnerId || null,
+          originalData: {
+            name: originalGuest.name,
+            address: originalGuest.address || '',
+            phone: originalGuest.phone || '',
+            category: originalGuest.category || '',
+            session: originalGuest.session || '',
+          },
+          requestedData: {
+            name: editGuestName,
+            address: editGuestAddress,
+            phone: editGuestPhone,
+            category: editGuestCategory,
+            session: editGuestSession,
+          },
+          status: 'pending',
+          requestedAt: serverTimestamp()
+        });
+        
+        if (event.partnerId) {
+          try {
+            const partnerDoc = await getDoc(doc(db, 'users', event.partnerId));
+            if (partnerDoc.exists()) {
+              const partnerData = partnerDoc.data();
+              if (partnerData.phone) {
+                const { sendFonnteMessage } = await import('../lib/fonnte');
+                const message = `*🔔 Notifikasi Guestly - Pengajuan Edit Tamu*\n\nHalo, terdapat pengajuan perubahan data tamu dari Klien untuk acara *${event.title || 'Unknown Event'}*.\n\n*Data Lama:*\n- Nama: ${originalGuest.name}\n- No HP: ${originalGuest.phone || '-'}\n- Kategori: ${originalGuest.category || '-'}\n- Alamat: ${originalGuest.address || '-'}\n- Sesi: ${originalGuest.session || '-'}\n\n*Data Baru:*\n- Nama: ${editGuestName}\n- No HP: ${editGuestPhone || '-'}\n- Kategori: ${editGuestCategory || '-'}\n- Alamat: ${editGuestAddress || '-'}\n- Sesi: ${editGuestSession || '-'}\n\nSilakan login ke dashboard Guestly dan cek menu *Approvals* untuk menyetujui atau menolak perubahan ini.`;
+                await sendFonnteMessage(null, partnerData.phone, message);
+              }
+            }
+          } catch (notifyError) {
+            console.error('Failed to notify partner via Fonnte:', notifyError);
+          }
+        }
+
+        showAlert('Berhasil', 'Permintaan edit tamu telah dikirim untuk disetujui oleh Partner/Admin.', 'success');
+      } else {
+        // Save directly
+        await updateDoc(doc(db, 'events', eventId!, 'guests', editingGuestId), {
+           name: editGuestName,
+           address: editGuestAddress,
+           phone: editGuestPhone,
+           category: editGuestCategory,
+           session: editGuestSession,
+           updatedAt: serverTimestamp()
+        });
+        showAlert('Berhasil', 'Data tamu berhasil diubah.', 'success');
+      }
+      setIsEditingGuest(false);
+      setEditingGuestId(null);
+    } catch (error) {
+      console.error(error);
+      showAlert('Error', 'Gagal mengedit tamu.', 'error');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -928,11 +1053,23 @@ export default function EventDetails() {
               <p className="text-gray-500 text-sm">Belum ada tamu yang ditambahkan di daftar ini.</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              {selectedGuestIds.length > 0 && (
+            <>
+              <div className="overflow-x-auto">
+                {selectedGuestIds.length > 0 && (
                 <div className="bg-indigo-50 px-6 py-3 border-b border-indigo-100 flex items-center justify-between">
                   <span className="text-sm text-indigo-700 font-medium">{selectedGuestIds.length} tamu terpilih</span>
-                  <button onClick={() => setSelectedGuestIds([])} className="text-sm text-indigo-600 hover:text-indigo-800 underline">Batal Pilih Semua</button>
+                  <div className="flex items-center space-x-4">
+                    {(appUser?.role === 'superadmin' || appUser?.role === 'partner') && (
+                      <button 
+                        onClick={handleBulkDeleteGuests} 
+                        className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4 mr-1" />
+                        Hapus Terpilih
+                      </button>
+                    )}
+                    <button onClick={() => setSelectedGuestIds([])} className="text-sm text-indigo-600 hover:text-indigo-800 underline transition-colors">Batal Pilih Semua</button>
+                  </div>
                 </div>
               )}
               <table className="min-w-full divide-y divide-gray-200">
@@ -968,12 +1105,12 @@ export default function EventDetails() {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Waktu Kehadiran</th>
                       </>
                     )}
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky right-0 bg-white shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)] z-10">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
-                  {filteredGuests.map((guest, index) => (
-                    <tr key={guest.id} className={`transition-colors ${selectedGuestIds.includes(guest.id) ? 'bg-indigo-50/30' : 'hover:bg-gray-50'}`}>
+                  {paginatedGuests.map((guest, index) => (
+                    <tr key={guest.id} className={`group transition-colors ${selectedGuestIds.includes(guest.id) ? 'bg-indigo-50/30' : 'hover:bg-gray-50'}`}>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <input 
                           type="checkbox" 
@@ -982,7 +1119,7 @@ export default function EventDetails() {
                           onChange={(e) => handleSelectGuest(guest.id, e.target.checked)}
                         />
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{index + 1}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{(currentPage - 1) * itemsPerPage + index + 1}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{guest.name}</div>
                       </td>
@@ -1038,7 +1175,7 @@ export default function EventDetails() {
                           </td>
                         </>
                       )}
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium sticky right-0 z-10 shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)] ${selectedGuestIds.includes(guest.id) ? 'bg-indigo-50/30' : 'bg-white group-hover:bg-gray-50'}`}>
                         <div className="flex space-x-2">
                            <button 
                                onClick={() => handleToggleAttendance(guest.id!, guest.attended)}
@@ -1059,7 +1196,7 @@ export default function EventDetails() {
                              <QrCode className="w-4 h-4" />
                            </button>
                            <button 
-                               onClick={() => showAlert('Info', "Edit tamu not fully implemented yet.", 'info')} 
+                               onClick={() => handleEditGuestClick(guest)} 
                                className="text-blue-600 hover:text-blue-900 flex items-center justify-center p-1.5 rounded-full hover:bg-blue-50 transition-colors" 
                                title="Edit Tamu"
                            >
@@ -1079,6 +1216,72 @@ export default function EventDetails() {
                 </tbody>
               </table>
             </div>
+            
+            <div className="px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
+              <div className="flex-1 flex justify-between sm:hidden">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages || totalPages === 0}
+                  className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+              <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-4">
+                  <p className="text-sm text-gray-700">
+                    Menampilkan <span className="font-medium">{filteredGuests.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0}</span> hingga <span className="font-medium">{Math.min(currentPage * itemsPerPage, filteredGuests.length)}</span> dari <span className="font-medium">{filteredGuests.length}</span> hasil
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-700">Tampilkan:</span>
+                    <select
+                      value={itemsPerPage}
+                      onChange={(e) => {
+                        setItemsPerPage(Number(e.target.value));
+                        setCurrentPage(1);
+                      }}
+                      className="block w-full pl-2 pr-8 py-1 text-sm border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                    >
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                      disabled={currentPage === 1}
+                      className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <span className="sr-only">Previous</span>
+                      <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                      disabled={currentPage === totalPages || totalPages === 0}
+                      className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <span className="sr-only">Next</span>
+                      <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  </nav>
+                </div>
+              </div>
+            </div>
+            </>
           )}
         </div>
       </div>
@@ -1132,6 +1335,70 @@ export default function EventDetails() {
             </button>
           </div>
         </div>
+      </Modal>
+
+      <Modal isOpen={isEditingGuest} onClose={() => { setIsEditingGuest(false); setEditingGuestId(null); }} title="Edit Tamu">
+        <form onSubmit={handleSaveEditGuest} className="p-4 bg-white">
+          <div className="grid grid-cols-1 gap-4 mb-4">
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Nama *</label>
+               <input required value={editGuestName} onChange={e => setEditGuestName(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Budi Santoso" />
+             </div>
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">No HP</label>
+               <input value={editGuestPhone} onChange={e => setEditGuestPhone(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="08123456789" />
+             </div>
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Alamat</label>
+               <input value={editGuestAddress} onChange={e => setEditGuestAddress(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Jl. Sudirman No 1" />
+             </div>
+             {event?.guestCategories && event.guestCategories.length > 0 && (
+               <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">Kategori Tamu</label>
+                 <select 
+                   value={editGuestCategory} 
+                   onChange={e => setEditGuestCategory(e.target.value)} 
+                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+                 >
+                   <option value="">-- Pilih Kategori --</option>
+                   {event.guestCategories.map(cat => (
+                     <option key={cat} value={cat}>{cat}</option>
+                   ))}
+                 </select>
+               </div>
+             )}
+             {event?.sessions && event.sessions.length > 0 && (
+               <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">Sesi Acara</label>
+                 <select 
+                   value={editGuestSession} 
+                   onChange={e => setEditGuestSession(e.target.value)} 
+                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+                 >
+                   <option value="">-- Pilih Sesi --</option>
+                   {event.sessions.map(ses => (
+                     <option key={ses} value={ses}>{ses}</option>
+                   ))}
+                 </select>
+               </div>
+             )}
+          </div>
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <button 
+              type="button" 
+              onClick={() => { setIsEditingGuest(false); setEditingGuestId(null); }} 
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+            >
+              Batal
+            </button>
+            <button 
+              type="submit" 
+              className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700 transition-colors"
+            >
+              {appUser?.role === 'client' ? 'Ajukan Edit' : 'Simpan Perubahan'}
+            </button>
+          </div>
+        </form>
       </Modal>
 
       <Modal isOpen={!!guestToDelete} onClose={() => setGuestToDelete(null)} title="Konfirmasi Hapus">
@@ -1198,59 +1465,35 @@ export default function EventDetails() {
         )}
       </Modal>
 
-      <Modal isOpen={isEmbedModalOpen} onClose={() => setIsEmbedModalOpen(false)} title="Integrasi Undangan Digital (Elementor dll)">
+      <Modal isOpen={isEmbedModalOpen} onClose={() => setIsEmbedModalOpen(false)} title="Integrasi Queinvite">
         <div className="space-y-6">
-          
           <div className="space-y-4">
-            <h3 className="text-md font-bold text-gray-900 border-b pb-2">1. Embed Form RSVP & Ucapan</h3>
-            <p className="text-sm text-gray-500">
-              Anda dapat menempelkan kode iframe berikut pada widget HTML di Elementor untuk menampilkan form RSVP beserta daftar ucapan tamu.
+            <p className="text-sm text-gray-600">
+              Salin ID Acara di bawah ini untuk menghubungkan Guestly dengan platform Queinvite.
             </p>
-            <div className="bg-gray-100 p-4 rounded-md relative text-sm font-mono text-gray-800 break-all select-all">
-              {`<iframe src="${window.location.origin}/public/rsvp/${eventId}?embed=true" width="100%" height="800px" frameborder="0" scrolling="yes" style="border: none; max-width: 100%; border-radius: 12px; overflow: hidden;"></iframe>`}
-            </div>
-            <p className="text-sm text-gray-500 mt-2">
-              Sesuaikan <code className="bg-gray-100 px-1 py-0.5 rounded">height="800px"</code> sesuai dengan kebutuhan desain halaman website Anda.
-            </p>
-            <div className="flex justify-end pt-2">
-              <button
-                 onClick={() => {
-                   navigator.clipboard.writeText(`<iframe src="${window.location.origin}/public/rsvp/${eventId}?embed=true" width="100%" height="800px" frameborder="0" scrolling="yes" style="border: none; max-width: 100%; border-radius: 12px; overflow: hidden;"></iframe>`);
-                   showAlert('Berhasil', 'Kode iframe RSVP disalin ke clipboard!', 'success');
-                 }}
-                 className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors text-sm"
-              >
-                <Copy className="w-4 h-4" /> Salin Kode iframe
-              </button>
+            <div className="space-y-1">
+              <label className="block text-sm font-medium text-gray-700">
+                ID Acara
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={eventId || ''}
+                  className="block w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-gray-800 font-mono text-sm focus:ring-0 focus:outline-none"
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(eventId || '');
+                    showAlert('Berhasil', 'ID Acara disalin ke clipboard!', 'success');
+                  }}
+                  className="flex-shrink-0 flex items-center gap-2 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium transition-colors"
+                >
+                  <Copy className="w-4 h-4" /> Salin ID
+                </button>
+              </div>
             </div>
           </div>
-
-          <div className="space-y-4 pt-4 border-t border-gray-100">
-            <h3 className="text-md font-bold text-gray-900 border-b pb-2">2. Embed Dinamis Barcode / QR (Elementor)</h3>
-            <p className="text-sm text-gray-500">
-              Untuk memunculkan Barcode (QR Code) setiap tamu secara dinamis di Elementor, Anda bisa memasukkan script iframe berikut pada widget HTML. Pastikan Anda mengatur parameter URL undangan dengan dinamis tag elementor, misalnya menggunakan Data URL param <code className="bg-gray-100 px-1 py-0.5 rounded">ticket</code> dan <code className="bg-gray-100 px-1 py-0.5 rounded">to</code> (sebagai nama tamu).
-            </p>
-            <div className="bg-gray-100 p-4 rounded-md relative text-sm font-mono text-gray-800 break-all select-all">
-              {`<iframe src="${window.location.origin}/public/qr?ticket=[QueryParam:ticket]&to=[QueryParam:to]" width="100%" height="320px" frameborder="0" scrolling="no" style="border: none; overflow: hidden; background: transparent;"></iframe>`}
-            </div>
-            <div className="bg-blue-50 p-3 rounded-md border border-blue-100">
-              <p className="text-xs text-blue-800">
-                <strong>Tips Elementor:</strong> Ganti bagian <code className="font-mono bg-blue-100 px-1 rounded">[QueryParam:ticket]</code> & <code className="font-mono bg-blue-100 px-1 rounded">[QueryParam:to]</code> dengan Dynamic Tag (Request Parameter &gt; Get) yang Anda gunakan saat membagikan link ke tamu. Contoh URL undangan Anda: <code className="font-mono bg-blue-100 px-1 rounded">domain.com/?to=Budi&ticket=NSAV0FV1</code>.
-              </p>
-            </div>
-            <div className="flex justify-end pt-2">
-              <button
-                 onClick={() => {
-                   navigator.clipboard.writeText(`<iframe src="${window.location.origin}/public/qr?ticket=[ticket]&to=[to]" width="100%" height="320px" frameborder="0" scrolling="no" style="border: none; overflow: hidden; background: transparent;"></iframe>`);
-                   showAlert('Berhasil', 'Kode iframe QR disalin ke clipboard!', 'success');
-                 }}
-                 className="flex items-center gap-2 px-4 py-2 text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-md hover:bg-indigo-100 hover:border-indigo-200 font-medium transition-colors text-sm"
-              >
-                <Copy className="w-4 h-4" /> Salin Template QR
-              </button>
-            </div>
-          </div>
-
         </div>
       </Modal>
 

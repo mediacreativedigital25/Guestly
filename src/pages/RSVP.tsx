@@ -69,7 +69,7 @@ export default function RSVP() {
     const fetchRSVP = async () => {
       try {
         const guestsRef = collection(db, 'events', eventId!, 'guests');
-        const q = query(guestsRef, where('ticketCode', '==', ticketCode));
+        const q = query(guestsRef, where('ticketCode', '==', ticketCode || ''));
         const snapshot = await getDocs(q);
         
         let currentSession = '';

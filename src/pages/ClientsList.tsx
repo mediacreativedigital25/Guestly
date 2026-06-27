@@ -51,11 +51,12 @@ export default function ClientsList() {
             return;
           }
           const pid = appUser?.role === 'partner' ? appUser.id : appUser?.partnerId;
+          const safePid = pid || '';
           if (appUser?.role === 'partner') {
              setPartners([{id: appUser.id!, name: appUser.businessName || appUser.name, logoUrl: appUser.logoUrl}]);
           }
-          qClients = query(clientsRef, where('partnerId', '==', pid));
-          qEvents = query(eventsRef, where('partnerId', '==', pid));
+          qClients = query(clientsRef, where('partnerId', '==', safePid));
+          qEvents = query(eventsRef, where('partnerId', '==', safePid));
         } else {
           // Fetch partners for superadmin
           const usersRef = collection(db, 'users');

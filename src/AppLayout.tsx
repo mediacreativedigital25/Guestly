@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { useSettings } from './SettingsContext';
-import { LayoutDashboard, Users, CalendarDays, Settings, LogOut, FileText, ChevronDown, ChevronRight, UserCog, Menu, X, Shield, User, Briefcase, CreditCard, ShoppingBag, Package, Receipt } from 'lucide-react';
+import { LayoutDashboard, Users, CalendarDays, Settings, LogOut, FileText, ChevronDown, ChevronRight, ChevronLeft, UserCog, Menu, X, Shield, User, Briefcase, CreditCard, ShoppingBag, Package, Receipt, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { cn } from './lib/utils';
 import { auth, db } from './lib/firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
@@ -17,6 +17,7 @@ export default function AppLayout() {
   const [isAdminPanelMenuOpen, setIsAdminPanelMenuOpen] = useState(false);
   const [isServiceInfoMenuOpen, setIsServiceInfoMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -209,6 +210,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
     { name: 'Dashboard', path: '/auth/login', icon: LayoutDashboard },
     { name: 'Clients', path: '/auth/login/clients', icon: Users, role: ['superadmin', 'partner'] },
     { name: 'Events', path: '/auth/login/events', icon: CalendarDays },
+    { name: 'Approvals', path: '/auth/login/approvals', icon: FileText, role: ['superadmin', 'partner'] },
     { name: 'White Label', path: '/auth/login/settings', icon: Settings, role: ['superadmin', 'partner'] },
   ];
 
@@ -226,18 +228,33 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
       {/* Sidebar */}
       <aside 
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-64 transform bg-white flex flex-col border-r border-gray-200 transition-transform duration-300 ease-in-out md:relative md:translate-x-0 md:flex-shrink-0",
-          isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+          "fixed inset-y-0 left-0 z-50 transform bg-white flex flex-col border-r border-gray-200 transition-all duration-300 ease-in-out md:relative md:translate-x-0 md:flex-shrink-0",
+          isSidebarCollapsed ? "md:w-20" : "md:w-64",
+          isMobileMenuOpen ? "translate-x-0 w-64" : "-translate-x-full md:translate-x-0"
         )}
       >
-        <div className="flex h-16 items-center justify-between px-6 border-b border-gray-200 md:border-b-0">
-          <div className="font-bold text-xl tracking-tight text-indigo-600">
-            {settings?.logoUrl ? (
-              <img src={settings.logoUrl} alt="Logo" className="h-auto max-h-12 w-auto max-w-[160px] object-contain" />
-            ) : (
-              "Guestly"
-            )}
-          </div>
+        <div className={cn("flex h-16 items-center border-b border-gray-200 md:border-b-0", isSidebarCollapsed ? "justify-center px-0" : "justify-between px-6")}>
+          {!isSidebarCollapsed && (
+            <div className="font-bold text-xl tracking-tight text-indigo-600 truncate">
+              {settings?.logoUrl ? (
+                <img src={settings.logoUrl} alt="Logo" className="h-auto max-h-12 w-auto max-w-[140px] object-contain" />
+              ) : (
+                "Guestly"
+              )}
+            </div>
+          )}
+          {isSidebarCollapsed && settings?.faviconUrl && (
+             <img src={settings.faviconUrl} alt="Logo" className="w-8 h-8 object-contain" />
+          )}
+          
+          <button 
+            className="hidden md:flex p-1 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md"
+            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+          >
+            {isSidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+          </button>
+          
           <button 
             className="md:hidden text-gray-500 hover:text-gray-700"
             onClick={() => setIsMobileMenuOpen(false)}
@@ -250,32 +267,42 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
             <Link
               key={item.name}
               to={item.path}
+              title={isSidebarCollapsed ? item.name : undefined}
               onClick={() => setIsMobileMenuOpen(false)}
               className={cn(
                 "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                isSidebarCollapsed ? "justify-center px-0" : "",
                 location.pathname === item.path
                   ? "bg-indigo-50 text-indigo-700"
                   : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
               )}
             >
-              <item.icon className="h-5 w-5" />
-              {item.name}
+              <item.icon className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+              {!isSidebarCollapsed && <span>{item.name}</span>}
             </Link>
           ))}
 
            {/* Informasi Layanan Dropdown */}
           <div className="mt-2">
             <button 
-              onClick={() => setIsServiceInfoMenuOpen(!isServiceInfoMenuOpen)}
-              className="w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+              onClick={() => {
+                if (isSidebarCollapsed) {
+                  setIsSidebarCollapsed(false);
+                  setIsServiceInfoMenuOpen(true);
+                } else {
+                  setIsServiceInfoMenuOpen(!isServiceInfoMenuOpen);
+                }
+              }}
+              title={isSidebarCollapsed ? "Informasi Layanan" : undefined}
+              className={cn("w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors", isSidebarCollapsed ? "justify-center px-0" : "")}
             >
               <div className="flex items-center gap-3">
-                 <ShoppingBag className="h-5 w-5" />
-                 Informasi Layanan
+                 <ShoppingBag className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                 {!isSidebarCollapsed && <span>Informasi Layanan</span>}
               </div>
-              {isServiceInfoMenuOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              {!isSidebarCollapsed && (isServiceInfoMenuOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />)}
             </button>
-            {isServiceInfoMenuOpen && (
+            {!isSidebarCollapsed && isServiceInfoMenuOpen && (
               <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
                  <Link
                    to="/auth/login/services/dashboard"
@@ -343,16 +370,24 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
              <>
                <div className="mt-2">
                <button 
-                 onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                 className="w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                 onClick={() => {
+                   if (isSidebarCollapsed) {
+                     setIsSidebarCollapsed(false);
+                     setIsUserMenuOpen(true);
+                   } else {
+                     setIsUserMenuOpen(!isUserMenuOpen);
+                   }
+                 }}
+                 title={isSidebarCollapsed ? "Manajemen User" : undefined}
+                 className={cn("w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors", isSidebarCollapsed ? "justify-center px-0" : "")}
                >
                  <div className="flex items-center gap-3">
-                    <UserCog className="h-5 w-5" />
-                    Manajemen User
+                    <UserCog className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                    {!isSidebarCollapsed && <span>Manajemen User</span>}
                  </div>
-                 {isUserMenuOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                 {!isSidebarCollapsed && (isUserMenuOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />)}
                </button>
-               {isUserMenuOpen && (
+               {!isSidebarCollapsed && isUserMenuOpen && (
                  <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
                     <Link
                       to="/auth/login/users"
@@ -378,16 +413,24 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
 
              <div className="mt-2">
                <button 
-                 onClick={() => setIsAdminPanelMenuOpen(!isAdminPanelMenuOpen)}
-                 className="w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                 onClick={() => {
+                   if (isSidebarCollapsed) {
+                     setIsSidebarCollapsed(false);
+                     setIsAdminPanelMenuOpen(true);
+                   } else {
+                     setIsAdminPanelMenuOpen(!isAdminPanelMenuOpen);
+                   }
+                 }}
+                 title={isSidebarCollapsed ? "Admin Panel" : undefined}
+                 className={cn("w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors", isSidebarCollapsed ? "justify-center px-0" : "")}
                >
                  <div className="flex items-center gap-3">
-                    <Shield className="h-5 w-5" />
-                    Admin Panel
+                    <Shield className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                    {!isSidebarCollapsed && <span>Admin Panel</span>}
                  </div>
-                 {isAdminPanelMenuOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                 {!isSidebarCollapsed && (isAdminPanelMenuOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />)}
                </button>
-               {isAdminPanelMenuOpen && (
+               {!isSidebarCollapsed && isAdminPanelMenuOpen && (
                  <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
                     <Link
                       to="/auth/login/admin/services"
@@ -460,30 +503,38 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
           <Link
             to="/auth/login/changelog"
             onClick={() => setIsMobileMenuOpen(false)}
+            title={isSidebarCollapsed ? "Changelog" : undefined}
             className={cn(
               "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium mb-1 transition-colors",
+              isSidebarCollapsed ? "justify-center px-0" : "",
               location.pathname === '/auth/login/changelog' ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
             )}
           >
-            <FileText className="h-5 w-5" />
-            Changelog
+            <FileText className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+            {!isSidebarCollapsed && <span>Changelog</span>}
           </Link>
           <Link
             to="/auth/login/profile"
+            title={isSidebarCollapsed ? "Profil Saya" : undefined}
             className={cn(
               "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium mb-1 transition-colors",
+              isSidebarCollapsed ? "justify-center px-0" : "",
               location.pathname === '/auth/login/profile' ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
             )}
           >
-            <User className="h-5 w-5" />
-            Profil Saya
+            <User className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+            {!isSidebarCollapsed && <span>Profil Saya</span>}
           </Link>
           <button
             onClick={logout}
-            className="w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+            title={isSidebarCollapsed ? "Keluar" : undefined}
+            className={cn(
+              "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors",
+              isSidebarCollapsed ? "justify-center px-0" : ""
+            )}
           >
-            <LogOut className="h-5 w-5" />
-            Keluar
+            <LogOut className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+            {!isSidebarCollapsed && <span>Keluar</span>}
           </button>
         </div>
       </aside>
@@ -506,7 +557,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">
-          <div className="mx-auto max-w-6xl">
+          <div className="w-full">
             <Outlet />
           </div>
         </main>
