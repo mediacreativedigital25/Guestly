@@ -2,8 +2,10 @@ export default function Changelog() {
   const versions = [
     {
       version: 'V1.2.1',
-      date: '27 Juni 2026',
+      date: '29 Juni 2026',
       changes: [
+        'Sistem pengingat otomatis (Cron Job) via WhatsApp Fonnte kepada Partner untuk acara yang akan diselenggarakan pada H-30, H-14, H-7, dan H-3.',
+        'Menambahkan pilihan template pesan WhatsApp saat akan menyebar undangan QR tamu secara manual.',
         'Menambahkan fitur hapus massal (bulk delete) untuk tamu yang dipilih pada daftar tamu, khusus untuk Super Admin dan Partner.',
         'Memperbarui pop-up Integrasi Undangan Digital untuk secara khusus menampilkan ID Acara yang dapat disalin, memudahkan integrasi dengan platform Queinvite.',
         'Menambahkan notifikasi WhatsApp via Fonnte kepada Partner ketika ada pengajuan perubahan data tamu dari Klien.',

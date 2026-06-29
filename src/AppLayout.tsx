@@ -113,93 +113,133 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
 
   if (!currentUser || !appUser) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 px-4">
-        <div className="w-full max-w-md p-6 sm:p-8 space-y-8 bg-white rounded-lg shadow-sm border border-gray-100">
-          <div className="text-center">
-            {settings?.logoUrl ? (
-              <img src={settings.logoUrl} alt="Logo" className="h-auto max-h-24 w-auto max-w-[240px] mx-auto object-contain" />
-            ) : (
-              <h1 className="text-3xl font-bold tracking-tight text-gray-900">Guestly</h1>
-            )}
-            <p className="mt-2 text-sm text-gray-500">
-              {isRegistering ? 'Daftar untuk membuat akun baru' : 'Masuk untuk mengelola acara dan tamu Anda'}
-            </p>
+      <div className="flex min-h-screen bg-gray-50">
+        {/* Left Column - Image */}
+        <div className="hidden lg:flex lg:w-1/2 relative bg-gray-900">
+          <div className="absolute inset-0">
+            <img 
+              src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?q=80&w=2070&auto=format&fit=crop" 
+              alt="Wedding Event" 
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-gray-900/90 via-gray-900/40 to-transparent"></div>
           </div>
-          
-          <form className="mt-8 space-y-6" onSubmit={handleEmailAuth}>
-            {loginError && (
-              <div className="bg-red-50 text-red-600 p-3 rounded text-sm text-center">
-                {loginError}
-              </div>
-            )}
-            <div className="space-y-4">
-              {isRegistering && (
-                <>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 block mb-1">Nama Lengkap</label>
-                    <input
-                      type="text"
-                      required
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="Nama Anda"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 block mb-1">No. WhatsApp / HP</label>
-                    <input
-                      type="tel"
-                      required
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="08123456789"
-                    />
-                  </div>
-                </>
+          <div className="relative z-10 flex flex-col justify-between p-16 xl:p-24 h-full text-white w-full">
+            <div>
+              {settings?.logoUrl ? (
+                <img src={settings.logoUrl} alt="Logo" className="h-10 w-auto object-contain brightness-0 invert" />
+              ) : (
+                <h1 className="text-3xl font-bold tracking-tight text-white">Guestly</h1>
               )}
-              <div>
-                <label className="text-sm font-medium text-gray-700 block mb-1">Email</label>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
-                  placeholder="email@example.com"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700 block mb-1">Password</label>
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
-                  placeholder="••••••••"
-                />
-              </div>
             </div>
+            <blockquote className="space-y-6">
+              <p className="text-2xl font-medium leading-relaxed font-serif">
+                "Manajemen tamu yang modern dan elegan. Membuat hari spesial Anda lebih terorganisir dan bebas dari kekhawatiran."
+              </p>
+              <footer className="text-sm text-gray-300">
+                — Guestly Smart Management
+              </footer>
+            </blockquote>
+          </div>
+        </div>
 
-            <button
-              type="submit"
-              disabled={isLoggingIn}
-              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
-            >
-              {isLoggingIn ? 'Memproses...' : (isRegistering ? 'Daftar' : 'Masuk')}
-            </button>
-          </form>
+        {/* Right Column - Form */}
+        <div className="w-full lg:w-1/2 flex flex-col justify-center px-4 sm:px-6 lg:px-20 xl:px-24 relative py-12 lg:py-0">
+          <div className="w-full max-w-md mx-auto space-y-6 mt-4 lg:mt-0 bg-white p-8 sm:p-10 rounded-2xl shadow-xl border border-gray-100">
+            <div className="flex justify-center mb-6">
+              {settings?.logoUrl ? (
+                <img src={settings.logoUrl} alt="Logo" className="h-10 sm:h-12 w-auto object-contain" />
+              ) : (
+                <h1 className="text-3xl font-bold tracking-tight text-indigo-600">Guestly</h1>
+              )}
+            </div>
+            
+            <div className="text-center">
+              <h2 className="text-2xl font-bold tracking-tight text-gray-900">
+                {isRegistering ? 'Buat Akun Baru' : 'Selamat Datang'}
+              </h2>
+              <p className="mt-2 text-sm text-gray-500">
+                {isRegistering 
+                  ? 'Daftar untuk mulai mengelola acara dan tamu Anda' 
+                  : 'Masuk ke akun Anda untuk mengelola acara dan tamu'}
+              </p>
+            </div>
+            
+            <form className="space-y-6" onSubmit={handleEmailAuth}>
+              {loginError && (
+                <div className="bg-red-50 border border-red-100 text-red-600 p-3 rounded-lg text-sm flex items-center">
+                  {loginError}
+                </div>
+              )}
+              <div className="space-y-5">
+                {isRegistering && (
+                  <>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 block mb-1.5">Nama Lengkap</label>
+                      <input
+                        type="text"
+                        required
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
+                        placeholder="Nama Anda"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 block mb-1.5">No. WhatsApp / HP</label>
+                      <input
+                        type="tel"
+                        required
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
+                        placeholder="08123456789"
+                      />
+                    </div>
+                  </>
+                )}
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1.5">Email</label>
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
+                    placeholder="email@example.com"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1.5">Password</label>
+                  <input
+                    type="password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
+                    placeholder="••••••••"
+                  />
+                </div>
+              </div>
 
-          <div className="mt-6 text-center">
-            <button
-              type="button"
-              onClick={() => setIsRegistering(!isRegistering)}
-              className="text-sm text-indigo-600 hover:text-indigo-500 font-medium"
-            >
-              {isRegistering ? 'Sudah punya akun? Masuk' : 'Belum punya akun? Daftar'}
-            </button>
+              <button
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition-colors"
+              >
+                {isLoggingIn ? 'Memproses...' : (isRegistering ? 'Daftar' : 'Masuk')}
+              </button>
+            </form>
+
+            <div className="text-center pt-2">
+              <button
+                type="button"
+                onClick={() => setIsRegistering(!isRegistering)}
+                className="text-sm text-gray-600 hover:text-indigo-600 font-medium transition-colors"
+              >
+                {isRegistering ? 'Sudah punya akun? Masuk' : 'Belum punya akun? Daftar'}
+              </button>
+            </div>
           </div>
         </div>
       </div>

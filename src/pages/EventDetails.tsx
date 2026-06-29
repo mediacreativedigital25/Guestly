@@ -105,19 +105,20 @@ export default function EventDetails() {
         // Fetch WA Templates
         getDoc(doc(db, 'settings', 'waTemplates')).then(docSnap => {
            if (docSnap.exists() && docSnap.data().templates) {
-              setWaTemplates(docSnap.data().templates as WATemplate[]);
+              const templates = docSnap.data().templates as WATemplate[];
+              setWaTemplates(templates);
+              const savedTpl = localStorage.getItem(`waTemplateId_${eventId}`);
+              if (savedTpl && templates.some(t => t.id === savedTpl)) {
+                 setSelectedTemplateId(savedTpl);
+              } else if (templates.length > 0) {
+                 setSelectedTemplateId(templates[0].id);
+              }
            }
         }).catch((err: any) => {
            if (err.code !== 'permission-denied') {
              console.warn('Failed to fetch WA templates from settings', err);
            }
         });
-
-        // Load saved template id from localStorage
-        const savedTpl = localStorage.getItem(`waTemplateId_${eventId}`);
-        if (savedTpl) {
-           setSelectedTemplateId(savedTpl);
-        }
 
       } catch (error) {
         handleFirestoreError(error, OperationType.GET, `events/${eventId}`);
@@ -369,9 +370,19 @@ export default function EventDetails() {
     }
 
     const senderName = event?.coupleName || clientName || event?.title || 'Kami';
-    const text = `Halo *${guest.name}* 👋🏻\n\nDengan penuh rasa hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara spesial kami:\n\n✨ *${event?.title}* ✨\n\nUntuk konfirmasi kehadiran saat acara berlangsung, silakan tunjukkan QR Code berikut:\n🔳 ${qrLink}\n\nDetail lengkap acara dapat dilihat melalui undangan digital berikut:\n💌 ${digitalInviteLink}\n\nMerupakan suatu kebahagiaan bagi kami apabila Bapak/Ibu/Saudara/i berkenan hadir serta memberikan doa dan restu kepada kami.\n\nAtas perhatian dan kehadirannya, kami ucapkan terima kasih 🙏🏻\n\nHormat kami,\n*${senderName}*`;
+    
+    const template = waTemplates.find(t => t.id === selectedTemplateId) || waTemplates[0];
+    const defaultMessageContent = `Halo *[GUEST_NAME]* 👋🏻\n\nDengan penuh rasa hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara spesial kami:\n\n✨ *[EVENT_TITLE]* ✨\n\nUntuk konfirmasi kehadiran saat acara berlangsung, silakan tunjukkan QR Code berikut:\n🔳 [QR_LINK]\n\nDetail lengkap acara dapat dilihat melalui undangan digital berikut:\n💌 [INVITE_LINK]\n\nMerupakan suatu kebahagiaan bagi kami apabila Bapak/Ibu/Saudara/i berkenan hadir serta memberikan doa dan restu kepada kami.\n\nAtas perhatian dan kehadirannya, kami ucapkan terima kasih 🙏🏻\n\nHormat kami,\n*[SENDER_NAME]*`;
+    const templateContent = template?.content || defaultMessageContent;
 
-    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    const message = templateContent
+      .replace(/\[GUEST_NAME\]/g, guest.name)
+      .replace(/\[EVENT_TITLE\]/g, event?.title || '')
+      .replace(/\[QR_LINK\]/g, qrLink)
+      .replace(/\[INVITE_LINK\]/g, digitalInviteLink)
+      .replace(/\[SENDER_NAME\]/g, senderName);
+
+    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
     window.open(waUrl, '_blank');
   };
 
@@ -885,12 +896,83 @@ export default function EventDetails() {
       )}
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        <div className="px-4 sm:px-6 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-gray-100 bg-gray-50 gap-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
+        <div className="px-4 sm:px-6 py-4 flex flex-col gap-4 border-b border-gray-100 bg-gray-50">
+          {/* Top Row: Title & Action Buttons */}
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 w-full">
             <h2 className="text-lg font-medium text-gray-900 whitespace-nowrap">
                {activeTab === 'rsvp' ? 'RSVP & Ucapan' : 'Daftar Tamu'} ({filteredGuests.length})
             </h2>
-            <div className="relative w-full sm:w-64">
+            
+            <div className="flex flex-wrap items-center justify-start lg:justify-end gap-3 w-full lg:w-auto">
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileUpload} 
+                accept=".xlsx, .xls" 
+                className="hidden" 
+              />
+              
+              <div className="flex items-center rounded-md shadow-sm border border-gray-300 bg-white overflow-hidden">
+                <button 
+                  onClick={handleDownloadTemplate}
+                  className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-1.5 border-r border-gray-200 transition-colors whitespace-nowrap"
+                  title="Download Template"
+                >
+                  <DownloadIcon className="w-4 h-4 text-gray-500" /> <span className="hidden sm:inline">Template</span>
+                </button>
+                <button 
+                  onClick={handleImportClick}
+                  className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-1.5 border-r border-gray-200 transition-colors whitespace-nowrap"
+                  title="Import Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-green-600"/> <span className="hidden sm:inline">Import</span>
+                </button>
+                <button 
+                  onClick={handleExportPDF}
+                  className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-1.5 border-r border-gray-200 transition-colors whitespace-nowrap"
+                  title="Export PDF"
+                >
+                  <FileText className="w-4 h-4 text-red-500"/> <span className="hidden sm:inline">PDF</span>
+                </button>
+                <button 
+                  onClick={handleExportExcel}
+                  className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                  title="Export Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-green-600"/> <span className="hidden sm:inline">Excel</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={openBlastModal}
+                  disabled={isBlasting}
+                  className={`justify-center text-sm font-medium flex items-center gap-1.5 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${
+                    isBlasting 
+                      ? 'text-green-700 bg-green-100 cursor-not-allowed opacity-70 border border-green-200' 
+                      : 'text-green-700 bg-green-50 border border-green-200 hover:bg-green-100 shadow-sm'
+                  }`}
+                  title="Blast WA"
+                >
+                  <MessageCircle className="w-4 h-4 text-green-600"/> {isBlasting ? 'Memproses...' : 'Blast WA'}
+                </button>
+                <button 
+                  onClick={() => setIsAddingGuest(!isAddingGuest)}
+                  className={`justify-center text-sm font-medium flex items-center gap-1.5 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${
+                    isAddingGuest 
+                      ? 'text-gray-700 bg-gray-100 hover:bg-gray-200 border border-gray-300' 
+                      : 'text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm border border-transparent'
+                  }`}
+                >
+                  <Plus className="w-4 h-4"/> {isAddingGuest ? 'Batal' : 'Tambah Tamu'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Row: Search & Filters */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full">
+            <div className="relative w-full sm:max-w-xs">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-4 w-4 text-gray-400" />
               </div>
@@ -899,90 +981,46 @@ export default function EventDetails() {
                 placeholder="Cari nama atau tiket..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="block w-full pl-10 pr-3 py-2 sm:py-1.5 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
+                className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
               />
             </div>
-            {activeTab === 'rsvp' ? (
+            
+            <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+              {activeTab === 'rsvp' ? (
+                <select
+                  value={rsvpFilter}
+                  onChange={(e) => setRsvpFilter(e.target.value)}
+                  className="block w-full sm:w-auto pl-3 pr-8 py-2 border border-gray-300 rounded-md leading-5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
+                >
+                  <option value="all">Semua Status</option>
+                  <option value="attending">Hadir</option>
+                  <option value="declined">Tidak Hadir</option>
+                  <option value="pending">Pending</option>
+                </select>
+              ) : (
+                <select
+                  value={attendanceFilter}
+                  onChange={(e) => setAttendanceFilter(e.target.value)}
+                  className="block w-full sm:w-auto pl-3 pr-8 py-2 border border-gray-300 rounded-md leading-5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
+                >
+                  <option value="all">Semua Kehadiran</option>
+                  <option value="attended">Sudah Scan</option>
+                  <option value="not_attended">Belum Hadir</option>
+                </select>
+              )}
               <select
-                value={rsvpFilter}
-                onChange={(e) => setRsvpFilter(e.target.value)}
-                className="block w-full sm:w-auto pl-3 pr-8 py-2 sm:py-1.5 border border-gray-300 rounded-md leading-5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
+                value={itemsPerPage}
+                onChange={(e) => {
+                  setItemsPerPage(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="block w-full sm:w-auto pl-3 pr-8 py-2 border border-gray-300 rounded-md leading-5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
               >
-                <option value="all">Semua Status</option>
-                <option value="attending">Hadir</option>
-                <option value="declined">Tidak Hadir</option>
-                <option value="pending">Pending</option>
+                <option value={10}>Tampilkan 10</option>
+                <option value={25}>Tampilkan 25</option>
+                <option value={50}>Tampilkan 50</option>
               </select>
-            ) : (
-              <select
-                value={attendanceFilter}
-                onChange={(e) => setAttendanceFilter(e.target.value)}
-                className="block w-full sm:w-auto pl-3 pr-8 py-2 sm:py-1.5 border border-gray-300 rounded-md leading-5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
-              >
-                <option value="all">Semua Kehadiran</option>
-                <option value="attended">Sudah Scan</option>
-                <option value="not_attended">Belum Hadir</option>
-              </select>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              onChange={handleFileUpload} 
-              accept=".xlsx, .xls" 
-              className="hidden" 
-            />
-            <button 
-              onClick={handleDownloadTemplate}
-              className="flex-1 sm:flex-none justify-center text-sm text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-md transition-colors whitespace-nowrap"
-              title="Download Template"
-            >
-              <DownloadIcon className="w-4 h-4 text-gray-500" /> Template
-            </button>
-            <button 
-              onClick={handleImportClick}
-              className="flex-1 sm:flex-none justify-center text-sm text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-md transition-colors whitespace-nowrap"
-              title="Import Excel"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-green-600"/> Import
-            </button>
-            <button 
-              onClick={handleExportPDF}
-              className="flex-1 sm:flex-none justify-center text-sm text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-md transition-colors whitespace-nowrap"
-              title="Export PDF"
-            >
-              <FileText className="w-4 h-4 text-red-500"/> PDF
-            </button>
-            <button 
-              onClick={handleExportExcel}
-              className="flex-1 sm:flex-none justify-center text-sm text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-md transition-colors whitespace-nowrap"
-              title="Export Excel"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-green-600"/> Excel
-            </button>
-            <button 
-              onClick={openBlastModal}
-              disabled={isBlasting}
-              className={`flex-1 sm:flex-none justify-center text-sm font-medium flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-md transition-colors whitespace-nowrap lg:ml-2 ${
-                isBlasting 
-                  ? 'text-green-700 bg-green-100 cursor-not-allowed opacity-70' 
-                  : 'text-green-700 bg-green-50 border border-green-200 hover:bg-green-100 shadow-sm'
-              }`}
-              title="Blast WA"
-            >
-              <MessageCircle className="w-4 h-4 text-green-600"/> {isBlasting ? 'Memproses...' : 'Blast WA'}
-            </button>
-            <button 
-              onClick={() => setIsAddingGuest(!isAddingGuest)}
-              className={`flex-1 sm:flex-none justify-center text-sm font-medium flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-md transition-colors whitespace-nowrap lg:ml-2 ${
-                isAddingGuest 
-                  ? 'text-gray-700 bg-gray-100 hover:bg-gray-200' 
-                  : 'text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm'
-              }`}
-            >
-              <Plus className="w-4 h-4"/> {isAddingGuest ? 'Batal Tambah' : 'Tambah Tamu'}
-            </button>
+            </div>
           </div>
         </div>
 
@@ -1249,9 +1287,9 @@ export default function EventDetails() {
                       }}
                       className="block w-full pl-2 pr-8 py-1 text-sm border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                     >
+                      <option value={10}>10</option>
                       <option value={25}>25</option>
                       <option value={50}>50</option>
-                      <option value={100}>100</option>
                     </select>
                   </div>
                 </div>
@@ -1436,6 +1474,25 @@ export default function EventDetails() {
             </div>
             
             <div className="mt-8 w-full space-y-3">
+              <div className="w-full mb-4 text-left">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Pilih Template WhatsApp
+                </label>
+                <select
+                  value={selectedTemplateId}
+                  onChange={(e) => {
+                     setSelectedTemplateId(e.target.value);
+                     localStorage.setItem(`waTemplateId_${eventId}`, e.target.value);
+                  }}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  {waTemplates.length === 0 && <option value="">Default Pesan Sistem</option>}
+                  {waTemplates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+
               <button 
                 onClick={() => handleShareWA(activeQrGuest)}
                 className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-500 text-white font-medium rounded-lg hover:bg-green-600 transition-colors"
