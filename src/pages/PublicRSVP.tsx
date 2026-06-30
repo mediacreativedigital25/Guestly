@@ -70,6 +70,7 @@ export default function PublicRSVP() {
   
   // Form state
   const [name, setName] = useState(searchParams.get('to') || searchParams.get('name') || '');
+  const isNamePrefilled = Boolean(searchParams.get('to') || searchParams.get('name'));
   const [phone, setPhone] = useState(searchParams.get('phone') || '');
   const [rsvpStatus, setRsvpStatus] = useState('attending');
   const [sessionInput, setSessionInput] = useState(searchParams.get('session') || '');
@@ -237,10 +238,16 @@ export default function PublicRSVP() {
       setSubmitSuccess(true);
       
       // Reset form
-      setName('');
-      setPhone('');
+      if (!isNamePrefilled) {
+        setName('');
+      }
+      if (!searchParams.get('phone')) {
+        setPhone('');
+      }
       setWishes('');
-      setSessionInput('');
+      if (!searchParams.get('session')) {
+        setSessionInput('');
+      }
       setRsvpStatus('attending');
       
     } catch (error: any) {
@@ -348,7 +355,8 @@ export default function PublicRSVP() {
                         value={name} 
                         onChange={e => setName(e.target.value)} 
                         type="text" 
-                        className={`w-full border ${isDark ? 'border-neutral-700 bg-neutral-800 text-white placeholder-neutral-500' : 'border-gray-300 bg-white text-gray-900 placeholder-gray-400'} ${isEmbed ? 'rounded-lg px-3 py-2 text-sm' : 'rounded-xl px-4 py-3'} transition-colors ${theme.ringColor}`} 
+                        readOnly={isNamePrefilled}
+                        className={`w-full border ${isDark ? 'border-neutral-700 bg-neutral-800 text-white placeholder-neutral-500' : 'border-gray-300 bg-white text-gray-900 placeholder-gray-400'} ${isEmbed ? 'rounded-lg px-3 py-2 text-sm' : 'rounded-xl px-4 py-3'} transition-colors ${theme.ringColor} ${isNamePrefilled ? 'cursor-not-allowed opacity-80' : ''}`} 
                         placeholder="Contoh: Budi Santoso" 
                       />
                     </div>

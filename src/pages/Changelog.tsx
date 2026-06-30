@@ -1,6 +1,16 @@
 export default function Changelog() {
   const versions = [
     {
+      version: 'V1.2.2',
+      date: '30 Juni 2026',
+      changes: [
+        'Menambahkan filter tampilan jumlah data (10, 25, 50) pada tabel daftar tamu.',
+        'Merapikan tata letak tombol aksi (template, import, dll) pada detail acara agar lebih profesional.',
+        'Mencegah duplikasi RSVP dengan mengunci (read-only) kolom Nama Lengkap jika parameter nama sudah terisi dari link undangan.',
+        'Menambahkan fitur auto-logout otomatis beserta notifikasi peringatan jika tidak ada aktivitas selama 2 jam demi keamanan akun.',
+      ]
+    },
+    {
       version: 'V1.2.1',
       date: '29 Juni 2026',
       changes: [

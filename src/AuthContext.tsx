@@ -3,6 +3,7 @@ import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
 import { User } from './types';
+import { showAlert } from './lib/alerts';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
@@ -107,6 +108,43 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const logout = () => {
     auth.signOut();
   };
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    let timeoutId: NodeJS.Timeout;
+
+    const resetTimer = () => {
+      clearTimeout(timeoutId);
+      // 2 hours = 2 * 60 * 60 * 1000 ms
+      timeoutId = setTimeout(() => {
+        logout();
+        showAlert('Sesi Berakhir', 'Anda telah otomatis logout karena tidak ada aktivitas selama 2 jam.', 'warning');
+      }, 2 * 60 * 60 * 1000);
+    };
+
+    const events = [
+      'mousedown',
+      'mousemove',
+      'keydown',
+      'scroll',
+      'touchstart'
+    ];
+
+    events.forEach((event) => {
+      window.addEventListener(event, resetTimer, { passive: true });
+    });
+
+    // Initialize timer
+    resetTimer();
+
+    return () => {
+      clearTimeout(timeoutId);
+      events.forEach((event) => {
+        window.removeEventListener(event, resetTimer);
+      });
+    };
+  }, [currentUser]);
 
   return (
     <AuthContext.Provider value={{ currentUser, appUser, loading, logout }}>
