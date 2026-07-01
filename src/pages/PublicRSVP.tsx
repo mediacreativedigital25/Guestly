@@ -195,28 +195,34 @@ export default function PublicRSVP() {
         }
       }
       
-      const payload: any = {
-        name: name.trim(),
-        rsvpStatus: rsvpStatus as any,
-        hasResponded: true,
-        updatedAt: serverTimestamp()
-      };
-      
-      if (phone.trim()) payload.phone = phone.trim();
-      if (wishes.trim()) payload.wishes = wishes.trim();
-      if (sessionInput) payload.session = sessionInput;
-      
       let newGuest: Guest;
 
       if (existingGuestId && existingGuest) {
-        await updateDoc(doc(db, 'events', eventId!, 'guests', existingGuestId), payload);
+        const updatePayload: any = {
+          rsvpStatus: rsvpStatus as any,
+          updatedAt: serverTimestamp()
+        };
+        if (wishes.trim()) updatePayload.wishes = wishes.trim();
+        if (sessionInput) updatePayload.session = sessionInput;
+
+        await updateDoc(doc(db, 'events', eventId!, 'guests', existingGuestId), updatePayload);
         newGuest = {
            ...existingGuest,
-           ...payload,
+           ...updatePayload,
            id: existingGuestId,
            updatedAt: new Date(),
         } as unknown as Guest;
       } else {
+        const payload: any = {
+          name: name.trim(),
+          rsvpStatus: rsvpStatus as any,
+          hasResponded: true,
+          updatedAt: serverTimestamp()
+        };
+        if (phone.trim()) payload.phone = phone.trim();
+        if (wishes.trim()) payload.wishes = wishes.trim();
+        if (sessionInput) payload.session = sessionInput;
+        
         const ticketCode = ticketParam || Math.random().toString(36).substring(2, 10).toUpperCase();
         payload.eventId = eventId!;
         payload.ticketCode = ticketCode;

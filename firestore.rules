@@ -115,7 +115,7 @@ service cloud.firestore {
     }
 
     function isValidGuest(data) {
-      return data.size() >= 7 && data.size() <= 14 &&
+      return data.size() >= 7 && data.size() <= 15 &&
         data.keys().hasAll(['eventId', 'name', 'ticketCode', 'rsvpStatus', 'attended', 'createdAt', 'updatedAt']) &&
         data.eventId is string && data.eventId.size() <= 128 &&
         data.name is string && data.name.size() <= 150 &&
@@ -129,6 +129,7 @@ service cloud.firestore {
         (!('wishes' in data) || data.wishes == null || (data.wishes is string && data.wishes.size() <= 1000)) &&
         (!('session' in data) || data.session == null || (data.session is string && data.session.size() <= 150)) &&
         (!('attendedAt' in data) || data.attendedAt == null || data.attendedAt is timestamp) &&
+        (!('hasResponded' in data) || data.hasResponded == null || data.hasResponded is bool) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -238,7 +239,7 @@ service cloud.firestore {
         (
           (isSuperAdmin() || isPartnerUser(get(/databases/$(database)/documents/events/$(eventId)).data.partnerId) || isClientUser(get(/databases/$(database)/documents/events/$(eventId)).data.clientId))
           ||
-          (incoming().diff(existing()).affectedKeys().hasOnly(['rsvpStatus', 'wishes', 'session', 'updatedAt']))
+          (incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'rsvpStatus', 'wishes', 'session', 'updatedAt', 'hasResponded']))
         );
       allow delete: if isValidId(eventId) && isValidId(guestId) && (isSuperAdmin() || isPartnerUser(get(/databases/$(database)/documents/events/$(eventId)).data.partnerId) || isClientUser(get(/databases/$(database)/documents/events/$(eventId)).data.clientId));
     }
