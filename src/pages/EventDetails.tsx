@@ -277,7 +277,7 @@ export default function EventDetails() {
 
   const baseFilteredGuests = activeTab === 'guest-list' 
     ? guests 
-    : guests.filter(g => g.hasResponded || (g.wishes && g.wishes.trim().length > 0));
+    : guests.filter(g => g.hasResponded || g.rsvpStatus !== 'pending' || (g.wishes && g.wishes.trim().length > 0));
   
   const filteredGuests = baseFilteredGuests.filter(guest => {
     const matchesSearch = guest.name.toLowerCase().includes(searchTerm.toLowerCase()) || 

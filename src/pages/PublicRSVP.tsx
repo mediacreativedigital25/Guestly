@@ -216,7 +216,6 @@ export default function PublicRSVP() {
         const payload: any = {
           name: name.trim(),
           rsvpStatus: rsvpStatus as any,
-          hasResponded: true,
           updatedAt: serverTimestamp()
         };
         if (phone.trim()) payload.phone = phone.trim();
@@ -242,6 +241,24 @@ export default function PublicRSVP() {
         return [newGuest, ...filtered];
       });
       setSubmitSuccess(true);
+      
+      // Send Fonnte WhatsApp Notification if phone is provided
+      let targetPhone = phone.trim();
+      if (!targetPhone && existingGuest && existingGuest.phone) {
+          targetPhone = existingGuest.phone;
+      }
+
+      if (targetPhone && rsvpStatus === 'attending') {
+        import('../lib/fonnte').then(({ sendFonnteMessage }) => {
+          const eventName = eventData?.title || 'acara kami';
+          const coupleName = eventData?.coupleName ? `*${eventData.coupleName}*` : '*Penyelenggara Acara*';
+          const qrLink = `${window.location.origin}/rsvp/${eventId}/${newGuest.ticketCode}`;
+          
+          const waMessage = `Hallo kak *${name.trim()}*,\n\nTerima kasih telah melakukan konfirmasi kehadiran (Hadir) pada acara *${eventName}*.\n\nKehadiran dan doa restu Anda sangat berarti bagi kami. Kami menantikan kehadiran Anda di acara nanti!\n\nIni adalah kode QR anda untuk check in:\n${qrLink}\n\nSalam Hangat,\n${coupleName}\n\n_Notifikasi otomatis dari Guestly,_\nInfo dan layanan\n085158636606`;
+
+          sendFonnteMessage(null, targetPhone, waMessage).catch(console.error);
+        }).catch(err => console.error("Failed to load fonnte module", err));
+      }
       
       // Reset form
       if (!isNamePrefilled) {
