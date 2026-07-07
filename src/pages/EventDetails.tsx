@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom';
-import { QrCode, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code, MessageCircle } from 'lucide-react';
+import { QrCode, Printer, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code, MessageCircle } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'react-qr-code';
 import * as htmlToImage from 'html-to-image';
@@ -168,15 +168,41 @@ export default function EventDetails() {
       if (newGuestCategory) payload.category = newGuestCategory;
       if (newGuestSession) payload.session = newGuestSession;
       
-      const guestRef = await addDoc(collection(db, 'events', eventId!, 'guests'), payload);
-      setGuests([...guests, { id: guestRef.id, ...payload } as unknown as Guest]);
+      if (appUser?.role === 'client') {
+        await addDoc(collection(db, 'guest_edit_requests'), {
+          eventId: eventId!,
+          eventTitle: event?.title || 'Unknown Event',
+          guestId: 'new_guest',
+          clientId: event?.clientId || '',
+          partnerId: event?.partnerId || null,
+          type: 'add',
+          originalData: {},
+          requestedData: {
+            name: cleanedGuestName,
+            address: newGuestAddress || '',
+            phone: newGuestPhone || '',
+            category: newGuestCategory || '',
+            session: newGuestSession || '',
+            ticketCode: ticketCode,
+            rsvpStatus: 'pending',
+            attended: false,
+          },
+          status: 'pending',
+          requestedAt: serverTimestamp()
+        });
+        showAlert('Berhasil', "Permintaan penambahan tamu berhasil dikirim dan menunggu persetujuan Admin/Vendor.", "success");
+      } else {
+        const guestRef = await addDoc(collection(db, 'events', eventId!, 'guests'), payload);
+        setGuests([...guests, { id: guestRef.id, ...payload } as unknown as Guest]);
+        showAlert('Berhasil', "Tamu berhasil ditambahkan!", "success");
+      }
+
       setNewGuestName('');
       setNewGuestAddress('');
       setNewGuestPhone('');
       setNewGuestCategory('');
       setNewGuestSession('');
       setIsAddingGuest(false);
-      showAlert('Berhasil', "Tamu berhasil ditambahkan!", "success");
     } catch (error) {
       showAlert("Gagal", "Failed to add guest. Check permissions.", "error");
       handleFirestoreError(error, OperationType.CREATE, `events/${eventId}/guests`);
@@ -184,6 +210,56 @@ export default function EventDetails() {
   };
 
   const [guestToDelete, setGuestToDelete] = useState<string | null>(null);
+  
+  const [isEditingWishes, setIsEditingWishes] = useState(false);
+  const [editingWishesGuestId, setEditingWishesGuestId] = useState<string | null>(null);
+  const [editWishesText, setEditWishesText] = useState('');
+  const [editStickerUrl, setEditStickerUrl] = useState<string>('');
+
+  const STICKERS = ['❤️', '🎉', '🙏', '✨', '🔥', '🌸', '💍', '🕊️'];
+
+  const handleEditWishesClick = (guest: Guest) => {
+    setEditingWishesGuestId(guest.id!);
+    setEditWishesText(guest.wishes || '');
+    setEditStickerUrl(guest.stickerUrl || '');
+    setIsEditingWishes(true);
+  };
+
+  const handleSaveEditWishes = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingWishesGuestId || !event) return;
+
+    try {
+      await updateDoc(doc(db, 'events', eventId!, 'guests', editingWishesGuestId), {
+         wishes: editWishesText,
+         stickerUrl: editStickerUrl,
+         updatedAt: serverTimestamp()
+      });
+      showAlert('Berhasil', 'Ucapan berhasil diubah.', 'success');
+      setIsEditingWishes(false);
+      setEditingWishesGuestId(null);
+    } catch (error) {
+      console.error(error);
+      showAlert('Error', 'Gagal mengubah ucapan.', 'error');
+    }
+  };
+
+  const handleDeleteWishes = async (guestId: string) => {
+    const confirmed = await showConfirm("Apakah Anda yakin ingin menghapus ucapan dan stiker dari tamu ini?");
+    if (!confirmed) return;
+
+    try {
+      await updateDoc(doc(db, 'events', eventId!, 'guests', guestId), {
+         wishes: '',
+         stickerUrl: '',
+         updatedAt: serverTimestamp()
+      });
+      showAlert('Berhasil', 'Ucapan berhasil dihapus.', 'success');
+    } catch (error) {
+      console.error(error);
+      showAlert('Error', 'Gagal menghapus ucapan.', 'error');
+    }
+  };
 
   const promptDeleteGuest = (guestId: string) => {
     setGuestToDelete(guestId);
@@ -708,7 +784,7 @@ export default function EventDetails() {
               }
             }
           } catch (notifyError) {
-            console.error('Failed to notify partner via Fonnte:', notifyError);
+            console.warn('Failed to notify partner via Fonnte: Missing permissions to read partner phone number.', notifyError);
           }
         }
 
@@ -1097,6 +1173,13 @@ export default function EventDetails() {
                 <div className="bg-indigo-50 px-6 py-3 border-b border-indigo-100 flex items-center justify-between">
                   <span className="text-sm text-indigo-700 font-medium">{selectedGuestIds.length} tamu terpilih</span>
                   <div className="flex items-center space-x-4">
+                    <button 
+                      onClick={() => window.print()} 
+                      className="text-sm text-indigo-600 hover:text-indigo-800 font-medium flex items-center transition-colors"
+                    >
+                      <Printer className="w-4 h-4 mr-1" />
+                      Cetak QR
+                    </button>
                     {(appUser?.role === 'superadmin' || appUser?.role === 'partner') && (
                       <button 
                         onClick={handleBulkDeleteGuests} 
@@ -1189,7 +1272,10 @@ export default function EventDetails() {
                              </span>
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate" title={guest.wishes || '-'}>
-                            {guest.wishes || '-'}
+                            <div className="flex items-center gap-2">
+                              {guest.stickerUrl && <span className="text-xl leading-none drop-shadow-sm">{guest.stickerUrl}</span>}
+                              <span>{guest.wishes || '-'}</span>
+                            </div>
                           </td>
                         </>
                       ) : (
@@ -1215,38 +1301,59 @@ export default function EventDetails() {
                       )}
                       <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium sticky right-0 z-10 shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)] ${selectedGuestIds.includes(guest.id) ? 'bg-indigo-50/30' : 'bg-white group-hover:bg-gray-50'}`}>
                         <div className="flex space-x-2">
-                           <button 
-                               onClick={() => handleToggleAttendance(guest.id!, guest.attended)}
-                               className={`flex items-center justify-center p-1.5 rounded-full transition-colors ${
-                                 guest.attended 
-                                   ? 'text-green-600 hover:text-green-900 hover:bg-green-50' 
-                                   : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'
-                               }`}
-                               title={guest.attended ? 'Batalkan Kehadiran' : 'Konfirmasi Kehadiran'}
-                           >
-                             {guest.attended ? <XCircle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
-                           </button>
-                           <button 
-                               onClick={() => setActiveQrGuest(guest)}
-                               className="text-indigo-600 hover:text-indigo-900 flex items-center justify-center p-1.5 rounded-full hover:bg-indigo-50 transition-colors" 
-                               title="Lihat / Bagikan QR"
-                           >
-                             <QrCode className="w-4 h-4" />
-                           </button>
-                           <button 
-                               onClick={() => handleEditGuestClick(guest)} 
-                               className="text-blue-600 hover:text-blue-900 flex items-center justify-center p-1.5 rounded-full hover:bg-blue-50 transition-colors" 
-                               title="Edit Tamu"
-                           >
-                             <Edit className="w-4 h-4" />
-                           </button>
-                           <button 
-                               onClick={() => promptDeleteGuest(guest.id!)} 
-                               className="text-red-600 hover:text-red-900 flex items-center justify-center p-1.5 rounded-full hover:bg-red-50 transition-colors" 
-                               title="Hapus Tamu"
-                           >
-                             <Trash2 className="w-4 h-4" />
-                           </button>
+                          {activeTab === 'rsvp' ? (
+                            <>
+                               <button
+                                    onClick={() => handleEditWishesClick(guest)}
+                                    className="text-blue-600 hover:text-blue-900 flex items-center justify-center p-1.5 rounded-full hover:bg-blue-50 transition-colors"
+                                    title="Edit Ucapan"
+                               >
+                                 <Edit className="w-4 h-4" />
+                               </button>
+                               <button
+                                    onClick={() => handleDeleteWishes(guest.id!)}
+                                    className="text-red-600 hover:text-red-900 flex items-center justify-center p-1.5 rounded-full hover:bg-red-50 transition-colors"
+                                    title="Hapus Ucapan"
+                               >
+                                 <Trash2 className="w-4 h-4" />
+                               </button>
+                            </>
+                          ) : (
+                            <>
+                               <button 
+                                   onClick={() => handleToggleAttendance(guest.id!, guest.attended)}
+                                   className={`flex items-center justify-center p-1.5 rounded-full transition-colors ${
+                                     guest.attended 
+                                       ? 'text-green-600 hover:text-green-900 hover:bg-green-50' 
+                                       : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'
+                                   }`}
+                                   title={guest.attended ? 'Batalkan Kehadiran' : 'Konfirmasi Kehadiran'}
+                               >
+                                 {guest.attended ? <XCircle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
+                               </button>
+                               <button 
+                                   onClick={() => setActiveQrGuest(guest)}
+                                   className="text-indigo-600 hover:text-indigo-900 flex items-center justify-center p-1.5 rounded-full hover:bg-indigo-50 transition-colors" 
+                                   title="Lihat / Bagikan QR"
+                               >
+                                 <QrCode className="w-4 h-4" />
+                               </button>
+                               <button 
+                                   onClick={() => handleEditGuestClick(guest)} 
+                                   className="text-blue-600 hover:text-blue-900 flex items-center justify-center p-1.5 rounded-full hover:bg-blue-50 transition-colors" 
+                                   title="Edit Tamu"
+                               >
+                                 <Edit className="w-4 h-4" />
+                               </button>
+                               <button 
+                                   onClick={() => promptDeleteGuest(guest.id!)} 
+                                   className="text-red-600 hover:text-red-900 flex items-center justify-center p-1.5 rounded-full hover:bg-red-50 transition-colors" 
+                                   title="Hapus Tamu"
+                               >
+                                 <Trash2 className="w-4 h-4" />
+                               </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1439,6 +1546,52 @@ export default function EventDetails() {
         </form>
       </Modal>
 
+      <Modal isOpen={isEditingWishes} onClose={() => { setIsEditingWishes(false); setEditingWishesGuestId(null); }} title="Edit Ucapan">
+        <form onSubmit={handleSaveEditWishes} className="p-4 bg-white">
+          <div className="grid grid-cols-1 gap-4 mb-4">
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Ucapan</label>
+               <textarea 
+                 value={editWishesText} 
+                 onChange={e => setEditWishesText(e.target.value)} 
+                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500 min-h-[100px]" 
+                 placeholder="Tulis ucapan di sini..." 
+               />
+             </div>
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Stiker (Opsional)</label>
+               <div className="flex flex-wrap gap-2">
+                 {STICKERS.map((sticker, idx) => (
+                   <button
+                     key={idx}
+                     type="button"
+                     onClick={() => setEditStickerUrl(editStickerUrl === sticker ? '' : sticker)}
+                     className={`text-2xl transition-transform hover:scale-110 focus:outline-none ${editStickerUrl === sticker ? 'scale-125 drop-shadow-md bg-indigo-50 rounded-full' : 'opacity-70 grayscale-[30%]'}`}
+                   >
+                     {sticker}
+                   </button>
+                 ))}
+               </div>
+             </div>
+          </div>
+          <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-100">
+            <button 
+              type="button" 
+              onClick={() => { setIsEditingWishes(false); setEditingWishesGuestId(null); }} 
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+            >
+              Batal
+            </button>
+            <button 
+              type="submit" 
+              className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700 transition-colors"
+            >
+              Simpan Perubahan
+            </button>
+          </div>
+        </form>
+      </Modal>
+
       <Modal isOpen={!!guestToDelete} onClose={() => setGuestToDelete(null)} title="Konfirmasi Hapus">
         <div className="p-4 bg-red-50 border border-red-100 rounded-lg text-red-800 mb-6">
           <p>Apakah Anda yakin ingin menghapus tamu ini? Tindakan ini tidak dapat dibatalkan.</p>
@@ -1554,6 +1707,23 @@ export default function EventDetails() {
         </div>
       </Modal>
 
+      {/* Hidden Print Area */}
+      <div id="print-area" className="hidden">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-8 p-8 bg-white text-black min-h-screen">
+          {guests.filter(g => selectedGuestIds.includes(g.id!)).map(guest => {
+             const baseUrl = window.location.origin;
+             const qrLink = `${baseUrl}/rsvp/${eventId}/${guest.ticketCode}`;
+             return (
+               <div key={guest.id} className="flex flex-col items-center justify-center p-4 border-2 border-gray-800 rounded-lg" style={{ pageBreakInside: 'avoid' }}>
+                 <div className="text-center font-bold text-lg mb-2 truncate w-full">{guest.name}</div>
+                 <QRCode value={qrLink} size={150} />
+                 <div className="text-center text-sm mt-2">{guest.category || '-'}</div>
+                 <div className="text-center text-xs mt-1 font-mono">{guest.ticketCode}</div>
+               </div>
+             )
+          })}
+        </div>
+      </div>
     </div>
   );
 }

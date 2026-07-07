@@ -75,8 +75,11 @@ export default function PublicRSVP() {
   const [rsvpStatus, setRsvpStatus] = useState('attending');
   const [sessionInput, setSessionInput] = useState(searchParams.get('session') || '');
   const [wishes, setWishes] = useState('');
+  const [selectedSticker, setSelectedSticker] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  
+  const STICKERS = ['❤️', '🎉', '🙏', '✨', '🔥', '🌸', '💍', '🕊️'];
   const [errorObj, setErrorObj] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<{ days: number, hours: number, minutes: number, seconds: number } | null>(null);
 
@@ -204,6 +207,8 @@ export default function PublicRSVP() {
         };
         if (wishes.trim()) updatePayload.wishes = wishes.trim();
         if (sessionInput) updatePayload.session = sessionInput;
+        if (phone.trim()) updatePayload.phone = phone.trim();
+        if (selectedSticker) updatePayload.stickerUrl = selectedSticker;
 
         await updateDoc(doc(db, 'events', eventId!, 'guests', existingGuestId), updatePayload);
         newGuest = {
@@ -221,6 +226,7 @@ export default function PublicRSVP() {
         if (phone.trim()) payload.phone = phone.trim();
         if (wishes.trim()) payload.wishes = wishes.trim();
         if (sessionInput) payload.session = sessionInput;
+        if (selectedSticker) payload.stickerUrl = selectedSticker;
         
         const ticketCode = ticketParam || Math.random().toString(36).substring(2, 10).toUpperCase();
         payload.eventId = eventId!;
@@ -271,6 +277,7 @@ export default function PublicRSVP() {
       if (!searchParams.get('session')) {
         setSessionInput('');
       }
+      setSelectedSticker('');
       setRsvpStatus('attending');
       
     } catch (error: any) {
@@ -436,6 +443,22 @@ export default function PublicRSVP() {
                     />
                   </div>
 
+                  <div className="space-y-2">
+                    <label className={`block text-[11px] font-semibold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Pilih Stiker (Opsional)</label>
+                    <div className="flex flex-wrap gap-2">
+                      {STICKERS.map((sticker, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setSelectedSticker(selectedSticker === sticker ? '' : sticker)}
+                          className={`text-2xl transition-transform hover:scale-110 focus:outline-none ${selectedSticker === sticker ? 'scale-125 drop-shadow-md bg-indigo-50 dark:bg-indigo-900/30 rounded-full' : 'opacity-70 grayscale-[30%]'}`}
+                        >
+                          {sticker}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <button 
                     type="submit" 
                     disabled={submitting}
@@ -465,13 +488,18 @@ export default function PublicRSVP() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1 flex-wrap">
                         <h3 className={`${isEmbed ? 'text-xs' : 'text-sm'} font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{guest.name}</h3>
-                        <span className={`inline-flex items-center ${isEmbed ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-xs'} rounded font-semibold ${
-                          guest.rsvpStatus === 'attending' ? (isDark ? 'bg-green-900 text-green-300' : 'bg-green-100 text-green-800') : 
-                          guest.rsvpStatus === 'declined' ? (isDark ? 'bg-red-900 text-red-300' : 'bg-red-100 text-red-800') : 
-                          (isDark ? 'bg-yellow-900 text-yellow-300' : 'bg-yellow-100 text-yellow-800')
-                        }`}>
-                          {guest.rsvpStatus === 'attending' ? 'Hadir' : guest.rsvpStatus === 'declined' ? 'Tidak Hadir' : 'Masih Ragu'}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {guest.stickerUrl && (
+                            <span className="text-lg leading-none drop-shadow-sm">{guest.stickerUrl}</span>
+                          )}
+                          <span className={`inline-flex items-center ${isEmbed ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-xs'} rounded font-semibold ${
+                            guest.rsvpStatus === 'attending' ? (isDark ? 'bg-green-900 text-green-300' : 'bg-green-100 text-green-800') : 
+                            guest.rsvpStatus === 'declined' ? (isDark ? 'bg-red-900 text-red-300' : 'bg-red-100 text-red-800') : 
+                            (isDark ? 'bg-yellow-900 text-yellow-300' : 'bg-yellow-100 text-yellow-800')
+                          }`}>
+                            {guest.rsvpStatus === 'attending' ? 'Hadir' : guest.rsvpStatus === 'declined' ? 'Tidak Hadir' : 'Masih Ragu'}
+                          </span>
+                        </div>
                       </div>
                       <p className={`mt-0.5 mb-1 ${isEmbed ? 'text-[10px]' : 'text-xs'} ${isDark ? 'text-neutral-500' : 'text-gray-500'}`}>
                         {guest.createdAt && (guest.createdAt as any).seconds 

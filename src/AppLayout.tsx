@@ -250,7 +250,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
     { name: 'Dashboard', path: '/auth/login', icon: LayoutDashboard },
     { name: 'Clients', path: '/auth/login/clients', icon: Users, role: ['superadmin', 'partner'] },
     { name: 'Events', path: '/auth/login/events', icon: CalendarDays },
-    { name: 'Approvals', path: '/auth/login/approvals', icon: FileText, role: ['superadmin', 'partner'] },
+    { name: 'Approvals', path: '/auth/login/approvals', icon: FileText },
     { name: 'White Label', path: '/auth/login/settings', icon: Settings, role: ['superadmin', 'partner'] },
   ];
 

@@ -156,7 +156,7 @@ export default function BarcodeScannerModal({
 
             <div className="p-8">
               <div className="relative rounded-3xl overflow-hidden border-4 border-olive/10 shadow-inner bg-gray-50 min-h-[300px]">
-                <div id="reader" className="w-full"></div>
+                <div id="reader" className="w-full [&>video]:object-cover [&_button]:px-4 [&_button]:py-2 [&_button]:bg-olive [&_button]:text-white [&_button]:rounded-lg [&_button]:hover:bg-olive/90 [&_button]:transition-colors [&_button]:mb-6 [&_button]:shadow-sm [&_a]:text-olive [&_a]:underline [&_a]:mt-6 [&_a]:block [&_a]:cursor-pointer [&_#html5-qrcode-anchor-scan-type-change]:mt-6 [&_span]:block [&_span]:mb-4"></div>
                 <div id="reader-hidden" className="hidden"></div>
                 
                 {/* Scanning Animation Overlay */}
@@ -205,12 +205,28 @@ export default function BarcodeScannerModal({
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}
                     className={cn(
-                      "mt-6 p-4 rounded-2xl flex items-center gap-3 shadow-lg border",
-                      scanResult.success ? "bg-green-50 border-green-100 text-green-700" : "bg-red-50 border-red-100 text-red-700"
+                      "mt-6 p-5 rounded-2xl flex items-start gap-4 shadow-sm border",
+                      scanResult.success ? "bg-green-50/50 border-green-200/50" : "bg-red-50/50 border-red-200/50"
                     )}
                   >
-                    {scanResult.success ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
-                    <p className="text-sm font-bold">{scanResult.message}</p>
+                    <div className={cn(
+                      "p-2 rounded-full shrink-0",
+                      scanResult.success ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
+                    )}>
+                      {scanResult.success ? <CheckCircle2 className="w-6 h-6" /> : <AlertCircle className="w-6 h-6" />}
+                    </div>
+                    <div>
+                      <h4 className={cn(
+                        "text-base font-bold mb-1",
+                        scanResult.success ? "text-green-800" : "text-red-800"
+                      )}>
+                        {scanResult.success ? 'Scan Berhasil' : 'Scan Gagal'}
+                      </h4>
+                      <p className={cn(
+                        "text-sm font-medium leading-relaxed",
+                        scanResult.success ? "text-green-700" : "text-red-700"
+                      )}>{scanResult.message}</p>
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>

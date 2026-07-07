@@ -88,6 +88,7 @@ export interface Guest {
   ticketCode: string;
   rsvpStatus: 'pending' | 'attending' | 'declined';
   wishes?: string;
+  stickerUrl?: string;
   attended: boolean;
   attendedAt?: any;
   hasResponded?: boolean;
@@ -107,6 +108,7 @@ export interface GuestEditRequest {
   status: 'pending' | 'approved' | 'rejected';
   requestedAt: any;
   resolvedAt?: any;
+  type?: 'add' | 'edit' | 'delete';
 }
 
 export interface GuestlyService {

@@ -115,7 +115,7 @@ service cloud.firestore {
     }
 
     function isValidGuest(data) {
-      return data.size() >= 7 && data.size() <= 15 &&
+      return data.size() >= 7 && data.size() <= 16 &&
         data.keys().hasAll(['eventId', 'name', 'ticketCode', 'rsvpStatus', 'attended', 'createdAt', 'updatedAt']) &&
         data.eventId is string && data.eventId.size() <= 128 &&
         data.name is string && data.name.size() <= 150 &&
@@ -128,6 +128,7 @@ service cloud.firestore {
         (!('address' in data) || data.address == null || (data.address is string && data.address.size() <= 500)) &&
         (!('wishes' in data) || data.wishes == null || (data.wishes is string && data.wishes.size() <= 1000)) &&
         (!('session' in data) || data.session == null || (data.session is string && data.session.size() <= 150)) &&
+        (!('stickerUrl' in data) || data.stickerUrl == null || (data.stickerUrl is string && data.stickerUrl.size() <= 500)) &&
         (!('attendedAt' in data) || data.attendedAt == null || data.attendedAt is timestamp) &&
         (!('hasResponded' in data) || data.hasResponded == null || data.hasResponded is bool) &&
         data.createdAt is timestamp &&
@@ -185,7 +186,7 @@ service cloud.firestore {
     // --- Collections ---
 
     match /users/{userId} {
-      allow get: if isValidId(userId) && (request.auth.uid == userId || isSuperAdmin());
+      allow get: if isValidId(userId) && (request.auth.uid == userId || isSuperAdmin() || (isSignedIn() && existing().get('role', '') == 'partner'));
       allow list: if isSuperAdmin();
       // Allow user creation by superadmins or if authenticated (but can't set role to superadmin unless done by function)
       allow create: if isSignedIn() && isValidUser(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time &&
@@ -239,7 +240,7 @@ service cloud.firestore {
         (
           (isSuperAdmin() || isPartnerUser(get(/databases/$(database)/documents/events/$(eventId)).data.partnerId) || isClientUser(get(/databases/$(database)/documents/events/$(eventId)).data.clientId))
           ||
-          (incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'rsvpStatus', 'wishes', 'session', 'updatedAt', 'hasResponded']))
+          (incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'rsvpStatus', 'wishes', 'session', 'updatedAt', 'hasResponded', 'stickerUrl']))
         );
       allow delete: if isValidId(eventId) && isValidId(guestId) && (isSuperAdmin() || isPartnerUser(get(/databases/$(database)/documents/events/$(eventId)).data.partnerId) || isClientUser(get(/databases/$(database)/documents/events/$(eventId)).data.clientId));
     }

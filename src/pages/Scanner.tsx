@@ -179,15 +179,24 @@ export default function Scanner() {
       </div>
       
       {scanResult && (
-        <div className={`p-4 rounded-md flex items-center gap-3 ${scanResult.status === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
-          {scanResult.status === 'success' ? <CheckCircle className="w-6 h-6" /> : <AlertCircle className="w-6 h-6" />}
-          <p className="font-medium">{scanResult.message}</p>
+        <div className={`mb-6 p-5 rounded-xl flex items-start gap-4 shadow-sm border ${scanResult.status === 'success' ? 'bg-green-50/50 border-green-200/50' : 'bg-red-50/50 border-red-200/50'}`}>
+          <div className={`p-2 rounded-full shrink-0 ${scanResult.status === 'success' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+            {scanResult.status === 'success' ? <CheckCircle className="w-6 h-6" /> : <AlertCircle className="w-6 h-6" />}
+          </div>
+          <div>
+            <h4 className={`text-base font-semibold mb-1 ${scanResult.status === 'success' ? 'text-green-800' : 'text-red-800'}`}>
+              {scanResult.status === 'success' ? 'Scan Berhasil' : 'Scan Gagal'}
+            </h4>
+            <p className={`text-sm leading-relaxed ${scanResult.status === 'success' ? 'text-green-700' : 'text-red-700'}`}>
+              {scanResult.message}
+            </p>
+          </div>
         </div>
       )}
 
       {scanMode === 'camera' && (
           <div className="bg-white p-2 sm:p-4 rounded-lg shadow-sm border border-gray-200 overflow-hidden w-full">
-            <div id="reader" className="w-full max-w-sm sm:max-w-md mx-auto aspect-square overflow-hidden [&>video]:object-cover"></div>
+            <div id="reader" className="w-full max-w-sm sm:max-w-md mx-auto min-h-[300px] overflow-hidden [&>video]:object-cover [&_button]:px-4 [&_button]:py-2 [&_button]:bg-indigo-600 [&_button]:text-white [&_button]:rounded-lg [&_button]:hover:bg-indigo-700 [&_button]:transition-colors [&_button]:mb-6 [&_button]:shadow-sm [&_a]:text-indigo-600 [&_a]:underline [&_a]:mt-6 [&_a]:block [&_a]:cursor-pointer [&_#html5-qrcode-anchor-scan-type-change]:mt-6 [&_span]:block [&_span]:mb-4"></div>
             <p className="text-center text-gray-500 text-xs sm:text-sm mt-4">Arahkan kamera ke QRCode untuk memindai tiket.</p>
           </div>
       )}
