@@ -12,59 +12,53 @@ export default function AdminInvoice() {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let unsubscribeUsers: (() => void) | null = null;
-    let unsubscribeInvoices: (() => void) | null = null;
+  const [lastVisible, setLastVisible] = useState<any>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
+
+  useEffect(() => {
     if (appUser?.role === 'superadmin') {
-      const setupListeners = async () => {
+      const setupData = async () => {
         setLoading(true);
-        let usersMap: Record<string, string> = {};
+        let usersMap = {};
         
         try {
-          unsubscribeUsers = onSnapshot(collection(db, 'users'), (usersSnap) => {
-            usersSnap.forEach(d => {
-              const u = d.data();
-              if (u.name) usersMap[u.uid || d.id] = u.name;
-            });
-            // Not immediately updating invoices here, but the map is ready
+          const usersSnap = await getDocs(collection(db, 'users'));
+          usersSnap.forEach(d => {
+            const u = d.data();
+            if (u.name) usersMap[u.uid || d.id] = u.name;
           });
-
+          
           const q = query(collection(db, 'invoices'));
-          unsubscribeInvoices = onSnapshot(q, (querySnapshot) => {
-            const fetchedInvoices: any[] = [];
-            querySnapshot.forEach((doc) => {
-              const data = doc.data();
-              fetchedInvoices.push({ 
-                id: doc.id, 
-                ...data,
-                userName: data.userName || usersMap[data.userId] || null
-              });
+          const querySnapshot = await getDocs(q);
+          const fetchedInvoices = [];
+          querySnapshot.forEach((doc) => {
+            const data = doc.data();
+            fetchedInvoices.push({ 
+              id: doc.id, 
+              ...data,
+              userName: data.userName || usersMap[data.userId] || null
             });
-            
-            // Sort manually by createdAt descended
-            fetchedInvoices.sort((a, b) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
-            setInvoices(fetchedInvoices);
-            setLoading(false);
-          }, (error) => {
-            handleFirestoreError(error, OperationType.GET, 'invoices');
-            showAlert('Error', 'Gagal memuat invoice', 'error');
-            setLoading(false);
           });
+              
+          // Sort manually by createdAt descended
+          fetchedInvoices.sort((a, b) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
+          setInvoices(fetchedInvoices);
+          setLoading(false);
         } catch (error) {
            handleFirestoreError(error, OperationType.GET, 'admin_invoices_setup');
            setLoading(false);
         }
       };
 
-      setupListeners();
+      setupData();
     } else {
       setLoading(false);
     }
 
     return () => {
-      if (unsubscribeUsers) unsubscribeUsers();
-      if (unsubscribeInvoices) unsubscribeInvoices();
+      
     };
   }, [appUser]);
 

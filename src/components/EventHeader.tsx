@@ -5,18 +5,18 @@
 
 import { motion } from 'motion/react';
 import { Calendar, MapPin, Clock } from 'lucide-react';
-import { EventDetails } from '../types';
+import { EventRecord } from '../types';
 import { getExpirationDate, isEventExpired } from '../lib/utils';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 
 interface EventHeaderProps {
-  event: EventDetails;
+  event: EventRecord;
 }
 
 export default function EventHeader({ event }: EventHeaderProps) {
-  const expirationDate = getExpirationDate(event);
-  const isExpired = isEventExpired(event);
+  const expirationDate = getExpirationDate(event as any);
+  const isExpired = isEventExpired(event as any);
 
   return (
     <motion.div 

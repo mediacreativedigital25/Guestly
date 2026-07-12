@@ -1,231 +1,203 @@
+import React from 'react';
+import { Sparkles, Zap, ShieldCheck, Image as ImageIcon, Users, LayoutDashboard, Smartphone, Bug, CheckCircle2, Megaphone } from 'lucide-react';
+
 export default function Changelog() {
   const versions = [
     {
       version: 'V2.0.0',
       date: '12 Juli 2026',
+      badge: 'Major Update',
       changes: [
-        'Migrasi infrastruktur media dari Firebase Storage ke Cloudflare R2 untuk mempercepat waktu muat (CDN) dan efisiensi.',
-        'Pembaruan mekanisme unggah media terpusat untuk Logo, Banner, dan White Label menggunakan Cloudflare Pages Functions.',
-        'Perbaikan isu thumbnail WhatsApp Blast yang sebelumnya menggunakan format base64, kini menggunakan URL R2 langsung.',
-        'Penghapusan integrasi Firebase Storage secara penuh guna mendukung sistem penyimpanan Cloudflare R2 yang lebih scalable.',
+        {
+          icon: Zap,
+          title: 'Upload Media Sekejap Mata',
+          description: 'Mengunggah logo, banner, dan foto galeri kini terasa jauh lebih cepat, stabil, dan tanpa hambatan.',
+          color: 'text-amber-500',
+          bgColor: 'bg-amber-50'
+        },
+        {
+          icon: ImageIcon,
+          title: 'Tampilan Link WhatsApp Selalu Sempurna',
+          description: 'Gambar undangan (thumbnail) saat dibagikan via WhatsApp kini dijamin selalu muncul dengan kualitas terbaik.',
+          color: 'text-blue-500',
+          bgColor: 'bg-blue-50'
+        }
       ]
     },
     {
       version: 'V1.2.2',
       date: '30 Juni 2026',
       changes: [
-        'Menambahkan filter tampilan jumlah data (10, 25, 50) pada tabel daftar tamu.',
-        'Merapikan tata letak tombol aksi (template, import, dll) pada detail acara agar lebih profesional.',
-        'Mencegah duplikasi RSVP dengan mengunci (read-only) kolom Nama Lengkap jika parameter nama sudah terisi dari link undangan.',
-        'Menambahkan fitur auto-logout otomatis beserta notifikasi peringatan jika tidak ada aktivitas selama 2 jam demi keamanan akun.',
+        {
+          icon: Users,
+          title: 'Tampilan Daftar Tamu Lebih Fleksibel',
+          description: 'Anda bisa mengatur jumlah tamu yang tampil dalam satu halaman (10, 25, atau 50 tamu). Tombol-tombol aksi juga ditata ulang agar lebih rapi.',
+          color: 'text-indigo-500',
+          bgColor: 'bg-indigo-50'
+        },
+        {
+          icon: ShieldCheck,
+          title: 'Anti Data Ganda & Keamanan Akun',
+          description: 'Nama tamu otomatis terkunci jika mengisi dari link pribadi untuk mencegah duplikat. Akun Anda juga akan otomatis keluar (logout) jika dibiarkan terbuka tanpa aktivitas selama 2 jam.',
+          color: 'text-emerald-500',
+          bgColor: 'bg-emerald-50'
+        }
       ]
     },
     {
       version: 'V1.2.1',
       date: '29 Juni 2026',
       changes: [
-        'Sistem pengingat otomatis (Cron Job) via WhatsApp Fonnte kepada Partner untuk acara yang akan diselenggarakan pada H-30, H-14, H-7, dan H-3.',
-        'Menambahkan pilihan template pesan WhatsApp saat akan menyebar undangan QR tamu secara manual.',
-        'Menambahkan fitur hapus massal (bulk delete) untuk tamu yang dipilih pada daftar tamu, khusus untuk Super Admin dan Partner.',
-        'Memperbarui pop-up Integrasi Undangan Digital untuk secara khusus menampilkan ID Acara yang dapat disalin, memudahkan integrasi dengan platform Queinvite.',
-        'Menambahkan notifikasi WhatsApp via Fonnte kepada Partner ketika ada pengajuan perubahan data tamu dari Klien.',
+        {
+          icon: Smartphone,
+          title: 'Pengingat Acara & Perubahan Data',
+          description: 'Sistem kini mengirimkan pesan WhatsApp otomatis untuk mengingatkan hari acara (H-30 hingga H-3), dan memberi tahu Anda jika klien mengubah data tamu.',
+          color: 'text-green-500',
+          bgColor: 'bg-green-50'
+        },
+        {
+          icon: CheckCircle2,
+          title: 'Hapus Banyak Tamu & Pilih Template Cepat',
+          description: 'Hemat waktu dengan menghapus banyak tamu sekaligus, dan bebas memilih template pesan saat membagikan undangan.',
+          color: 'text-purple-500',
+          bgColor: 'bg-purple-50'
+        }
       ]
     },
     {
       version: 'V1.2.0',
       date: '23 Juni 2026',
       changes: [
-        'Mengubah nama tab "RSVP & Undangan" menjadi "RSVP & Ucapan" dan "Guest List" menjadi "Daftar Tamu" pada detail acara.',
-        'Menambahkan pengaturan "Sembunyikan Form Kehadiran di Link Tiket Tamu" pada Info Acara untuk keperluan integrasi form platform undangan (seperti Queinvite).',
-        'Auto-fill form RSVP: Nama, No WhatsApp, dan Sesi sekarang otomatis terisi pada form RSVP tamu jika undangan digital link menyertakan parameternya.',
-        'Memperbarui logika sinkronisasi tamu: RSVP melalui form Embed/Public kini memperbarui data tamu yang sudah ada jika tiket sesuai, alih-alih membuat entri tamu duplikat.'
+        {
+          icon: Sparkles,
+          title: 'Pengisian Kehadiran Otomatis',
+          description: 'Nama dan nomor WA tamu kini terisi otomatis di form undangan. Tab menu juga diganti nama agar lebih mudah dimengerti.',
+          color: 'text-pink-500',
+          bgColor: 'bg-pink-50'
+        },
+        {
+          icon: LayoutDashboard,
+          title: 'Sinkronisasi Data Cerdas',
+          description: 'Menyembunyikan form kehadiran kini bisa dilakukan dengan sekali klik. Sistem juga lebih pintar mencegah nama tamu yang tersimpan ganda.',
+          color: 'text-blue-500',
+          bgColor: 'bg-blue-50'
+        }
       ]
     },
     {
-      version: 'V1.1.9',
+      version: 'V1.1.x',
       date: '22 Juni 2026',
+      badge: 'Feature Drop',
       changes: [
-        'Memperbarui deskripsi default saat link dibagikan (WhatsApp/Sosmed) agar menjadi lebih informatif dan mengarahkan tamu untuk menyiapkan QR Code.',
-        'Menambahkan opsi "Gunakan QR Code sebagai Foto WhatsApp" pada form Blast WA (Solusi mutlak bagi Hosting Statis agar gambar tetap tayang dengan langsung memberikan QR Code tamu).',
+        {
+          icon: Sparkles,
+          title: 'Hitung Mundur Acara & Tema Floral',
+          description: 'Tamu bisa melihat waktu hitung mundur menuju hari bahagia Anda. Halaman undangan juga tampil lebih segar dengan nuansa floral elegan.',
+          color: 'text-rose-500',
+          bgColor: 'bg-rose-50'
+        },
+        {
+          icon: Megaphone,
+          title: 'Kustomisasi Pesan Bebas',
+          description: 'Buat dan atur template pesan WhatsApp sesuka Anda langsung dari dasbor. Sistem akan mengingat pilihan terakhir Anda untuk setiap acara.',
+          color: 'text-teal-500',
+          bgColor: 'bg-teal-50'
+        },
+        {
+          icon: Bug,
+          title: 'Berbagi Pesan Lebih Stabil',
+          description: 'Berbagai penyempurnaan memastikan pesan WhatsApp, pratinjau link, dan pengiriman gambar selalu berhasil terkirim tanpa kendala.',
+          color: 'text-gray-500',
+          bgColor: 'bg-gray-50'
+        }
       ]
     },
     {
-      version: 'V1.1.8',
-      date: '22 Juni 2026',
+      version: 'V1.0.0 - V1.0.6',
+      date: 'Mei - Juni 2026',
       changes: [
-        'Memperbaiki masalah Thumbnail WhatsApp yang tidak terupdate (mengatasi cache WhatsApp dengan parameter dinamis).',
-        'Mengubah Default Title Website menjadi Judul Acara dinamis saat link WhatsApp dibagikan.',
-      ]
-    },
-    {
-      version: 'V1.1.7',
-      date: '22 Juni 2026',
-      changes: [
-        'Memperbaiki masalah error pada tampilan countdown timer akibat kesalahan format pembacaan waktu (Invalid time value) serta menyembunyikan countdown otomatis ketika acara sudah lewat.',
-      ]
-    },
-    {
-      version: 'V1.1.6',
-      date: '22 Juni 2026',
-      changes: [
-        'Memperbaiki Thumbnail WA Share yang salah mengambil gambar. Memperbarui Server Side Metadata Injection agar WhatsApp membaca gambar thumbnail yang benar.',
-      ]
-    },
-    {
-      version: 'V1.1.5',
-      date: '22 Juni 2026',
-      changes: [
-        'Menambahkan widget Countdown Timer (hitung mundur) di halaman undangan RSVP tamu dan RSVP Publik.',
-      ]
-    },
-    {
-      version: 'V1.1.4',
-      date: '22 Juni 2026',
-      changes: [
-        'Memperbarui halaman Undangan RSVP Publik menjadi tema elegan bernuansa floral (pink pastel) sesuai referensi desain pernikahan.',
-      ]
-    },
-    {
-      version: 'V1.1.3',
-      date: '22 Juni 2026',
-      changes: [
-        'Memperbaiki navigasi geser (slider) pada halaman sales yang tidak berfungsi (tidak bisa scroll pada gambar/dashboard maupun section harga) dan menghapus duplikasi referensi.',
-      ]
-    },
-    {
-      version: 'V1.1.2',
-      date: '22 Juni 2026',
-      changes: [
-        'Memperbaiki isu "url must start with http(s)" pada fitur WA Blast ketika menggunakan gambar thumbnail undangan berformat bawaan/base64.'
-      ]
-    },
-    {
-      version: 'V1.1.1',
-      date: '22 Juni 2026',
-      changes: [
-        'Memperbaiki Thumbnail Otomatis pada pesan WA Blast jika aplikasi di-hosting statis (Cloudflare Pages / Vercel). Sekarang thumbnail undangan akan muncul kembali.',
-        'Menambahkan parameter Open Graph Meta Tag untuk standard link previews.'
-      ]
-    },
-    {
-      version: 'V1.1.0',
-      date: '22 Juni 2026',
-      changes: [
-        'Memperbaiki fallback deteksi WA Blast ketika aplikasi dihosting di platform spesifik seperti Cloudflare Pages (Error 405 Method Not Allowed) akan langsung dialihkan ke eksekusi direct client-side dengan VITE_FONNTE_TOKEN.'
-      ]
-    },
-    {
-      version: 'V1.0.9',
-      date: '22 Juni 2026',
-      changes: [
-        'Memperbaiki URL rute Checkout Layanan yang sempat menyebabkan layar putih (blank) ketika diklik.',
-        'Memperbaiki tombol "Lihat Katalog Layanan" di Dashboard dan penyesuaian fallback rute agar pengguna tidak salah navigasi di luar aplikasi.'
-      ]
-    },
-    {
-      version: 'V1.0.8',
-      date: '22 Juni 2026',
-      changes: [
-        'Memperbaiki isu WA Blast yang gagal terkirim (Error: Gagal mengirim) ketika aplikasi sudah dipublish atau dihosting, dengan sistem deteksi jika hosting tersebut tidak mendukung Express backend.',
-        'Menambahkan otomatisasi Fallback API: Jika `/api/send-whatsapp` tidak ditemukan di hosting server, aplikasi akan mencoba menembak API Fonnte secara langsung dari client dengan asisten variabel VITE_FONNTE_TOKEN.',
-        'Teks pesan Blast akan selalu diutamakan terlebih dahulu jika pengiriman gambar (thumbnail url) gagal dirender oleh server (Sering terjadi jika menghosting secara Statis di Vercel/Netlify).'
-      ]
-    },
-    {
-      version: 'V1.0.7',
-      date: '22 Juni 2026',
-      changes: [
-        'Menambahkan fitur kustomisasi dan manajemen Template WhatsApp Blast pada Admin Panel',
-        'Sistem otomatis menyimpan pilihan Template WA terakhir yang digunakan untuk setiap acara',
-        'Penyempurnaan sistem kuota: Kuota WA Blast kini dipastikan hanya berkurang secara otomatis ketika pesan berhasil terkirim',
-        'Memperbaiki isu perizinan akses database (Firestore rules) saat memperbarui kuota dan menyimpan template'
-      ]
-    },
-    {
-      version: 'V1.0.6',
-      date: '20 Juni 2026',
-      changes: [
-        'Memperbarui tampilan Greeting Screen dengan logo vendor partner dan watermark "Powered by Guestly"',
-        'Penyempurnaan tipografi pada Greeting Screen menggunakan font Poppins dan Great Vibes',
-        'Memperbaiki tampilan preview thumbnail gambar saat membagikan pesan undangan di WhatsApp',
-        'Penyesuaian daftar tamu: Tamu yang belum melakukan konfirmasi (Pending) akan tetap masuk ke dalam Guest List',
-        'Menambahkan fitur Filter di tab "RSVP & Undangan" dan "Guest List" untuk mempermudah pencarian tamu berdasarkan status RSVP dan Kehadiran'
-      ]
-    },
-    {
-      version: 'V1.0.5',
-      date: '27 Mei 2026',
-      changes: [
-        'Menambahkan logo pada layar pemuatan (loading screen)',
-        'Sinkronisasi otomatis pembaruan data profil atau nama lengkap pengguna pada dashboard dan profil',
-        'Menambahkan efek suara notifikasi (beep) ketika pemindaian barcode tiket berhasil'
-      ]
-    },
-    {
-      version: 'V1.0.4',
-      date: '24 Mei 2026',
-      changes: [
-        'Menambahkan pilihan "Sesi Acara" pada Form RSVP Publik apabila event memiliki sesi',
-        'Pembaruan integrasi agar data sesi tamu tersimpan saat melakukan RSVP',
-        'Memperbaiki error koneksi server-side pada aplikasi',
-        'Memperbaiki aturan keamanan Firestore terkait timestamp'
-      ]
-    },
-    {
-      version: 'V1.0.3',
-      date: '15 Mei 2026',
-      changes: [
-        'Memperbarui template pesan WhatsApp Broadcast dengan menampilkan Nama Client secara otomatis',
-        'Perbaikan aturan keamanan database untuk akses data Client'
-      ]
-    },
-    {
-      version: 'V1.0.2',
-      date: '11 Mei 2026',
-      changes: [
-        'Menghapus Menu Partner Setting dan menggabungkannya ke menu White Label',
-        'Menambahkan menu Detail Edit Client',
-        'Menambahkan fitur Layar Sapa (Greeting Screen) tamu VIP realtime setelah berhasil scan',
-        'Penyempurnaan navigasi dan perbaikan bug minor'
-      ]
-    },
-    {
-      version: 'V1.0.1',
-      date: '7 Mei 2026',
-      changes: [
-        'Rilis perdana Guestly',
-        'Penyempurnaan Manajemen Acara untuk Super Admin dan Partner',
-        'Penambahan fitur pembuatan dan pemindaian Barcode Digital',
-        'Dukungan pengaturan Label Putih (White label) dengan logo dan warna merek kustom',
-        'Integrasi fungsionalitas RSVP daring (online)'
+        {
+          icon: Sparkles,
+          title: 'Layar Sapa VIP (Greeting Screen)',
+          description: 'Tamu spesial yang hadir akan disambut dengan layar sapaan yang cantik secara realtime, lengkap dengan logo Anda.',
+          color: 'text-amber-500',
+          bgColor: 'bg-amber-50'
+        },
+        {
+          icon: Zap,
+          title: 'Otomatisasi & Suara Notifikasi',
+          description: 'Pencarian tamu dengan filter baru, sinkronisasi profil otomatis, dan penambahan suara "beep" penanda sukses saat tiket tamu di-scan.',
+          color: 'text-indigo-500',
+          bgColor: 'bg-indigo-50'
+        }
       ]
     }
   ];
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      <h1 className="text-2xl font-bold text-gray-900">Riwayat Perubahan</h1>
-      <p className="text-gray-500">Pantau pembaruan dan peningkatan terbaru.</p>
+    <div className="max-w-4xl mx-auto py-8 font-sans">
+      <div className="text-center mb-16">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 mb-6">
+          <Sparkles className="w-8 h-8" />
+        </div>
+        <h1 className="text-4xl font-bold text-gray-900 mb-4 tracking-tight">Apa yang Baru di Guestly</h1>
+        <p className="text-lg text-gray-500 max-w-2xl mx-auto">
+          Kami terus menghadirkan pembaruan untuk membuat pengelolaan acara Anda menjadi lebih mudah, cepat, dan aman.
+        </p>
+      </div>
       
-      <div className="space-y-8 mt-8">
-        {versions.map((release) => (
-          <div key={release.version} className="relative pl-8 border-l border-gray-200 ml-4 pb-8">
-            <div className="absolute w-3 h-3 bg-indigo-600 rounded-full -left-[6.5px] top-1.5 ring-4 ring-white" />
-            <div className="flex gap-4 items-center mb-4">
-              <h2 className="text-xl font-bold text-gray-900">{release.version}</h2>
-              <span className="text-sm font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">{release.date}</span>
+      <div className="space-y-12 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-gray-200 before:to-transparent">
+        {versions.map((release, index) => (
+          <div key={index} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+            <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-white bg-indigo-100 text-indigo-600 shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">
+              <span className="text-xs font-bold">v{release.version.replace(/[^0-9]/g, '').charAt(0) || '1'}</span>
             </div>
-            <ul className="space-y-3">
-              {release.changes.map((change, i) => (
-                <li key={i} className="flex gap-2 text-gray-700">
-                  <span className="text-gray-300 select-none">•</span>
-                  <span>{change}</span>
-                </li>
-              ))}
-            </ul>
+            
+            <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-xl font-bold text-gray-900">{release.version}</h2>
+                  {release.badge && (
+                    <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-600">
+                      {release.badge}
+                    </span>
+                  )}
+                </div>
+                <span className="text-sm font-medium text-gray-400 bg-gray-50 px-3 py-1 rounded-full">
+                  {release.date}
+                </span>
+              </div>
+              
+              <div className="space-y-6">
+                {release.changes.map((change, i) => {
+                  const Icon = change.icon;
+                  return (
+                    <div key={i} className="flex gap-4">
+                      <div className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center ${change.bgColor} ${change.color}`}>
+                        <Icon className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-bold text-gray-900 mb-1">{change.title}</h3>
+                        <p className="text-sm text-gray-600 leading-relaxed">
+                          {change.description}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         ))}
+      </div>
+
+      <div className="mt-20 text-center bg-gray-50 rounded-3xl p-8 border border-gray-100">
+        <h3 className="text-lg font-bold text-gray-900 mb-2">🙏 Terima kasih telah menggunakan Guestly.</h3>
+        <p className="text-gray-500">
+          Saran dan masukan Anda membantu kami menjadi lebih baik setiap harinya.
+        </p>
       </div>
     </div>
   );
 }
+

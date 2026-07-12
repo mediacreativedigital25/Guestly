@@ -8,10 +8,10 @@ import { formatDistanceToNow } from 'date-fns';
 import { id } from 'date-fns/locale';
 import { CheckCircle2, XCircle, HelpCircle, User } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { GuestEntry } from '../types';
+import { GuestbookEntry } from '../types';
 
 interface GuestbookListProps {
-  entries: GuestEntry[];
+  entries: GuestbookEntry[];
   isLoading: boolean;
 }
 

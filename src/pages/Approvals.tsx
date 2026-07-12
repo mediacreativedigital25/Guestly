@@ -25,16 +25,20 @@ export default function Approvals() {
       return;
     }
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as GuestEditRequest));
-      setRequests(data);
-      setLoading(false);
-    }, (err) => {
-      console.error('Approvals snapshot error:', err);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
+    const fetchApprovals = async () => {
+      try {
+        const { getDocs } = await import('firebase/firestore');
+        const snapshot = await getDocs(q);
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+        setRequests(data);
+      } catch (err) {
+        console.error('Approvals getDocs error:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchApprovals();
   }, [appUser]);
 
   const handleApprove = async (request: GuestEditRequest) => {

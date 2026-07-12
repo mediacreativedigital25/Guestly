@@ -28,7 +28,7 @@ import {
   createUserWithEmailAndPassword,
 } from 'firebase/auth';
 import { initializeApp, getApps } from 'firebase/app';
-import { GuestEntry, EventDetails, AppUser } from '../types';
+import { Guest, EventRecord, User, AppUser } from '../types';
 import { PACKAGES } from '../constants';
 import { toast } from 'sonner';
 import { 
@@ -38,7 +38,7 @@ import {
   CheckCircle2, 
   XCircle, 
   HelpCircle, 
-  User, 
+  UserIcon, 
   LayoutDashboard, 
   Edit3, 
   Save, 
@@ -66,7 +66,8 @@ import {
   Key,
   Lock,
   Upload,
-  Loader2
+  Loader2,
+  RefreshCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -79,13 +80,13 @@ import BarcodeScannerModal from './BarcodeScannerModal';
 import { auth, updatePassword } from '../firebase';
 
 interface ClientPanelProps {
-  event: EventDetails;
+  event: EventRecord;
 }
 
 export default function ClientPanel({ event: initialEvent }: ClientPanelProps) {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'staff' | 'settings'>('dashboard');
-  const [event, setEvent] = useState<EventDetails>(initialEvent);
-  const [entries, setEntries] = useState<GuestEntry[]>([]);
+  const [event, setEvent] = useState<EventRecord>(initialEvent);
+  const [entries, setEntries] = useState<Guest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
@@ -105,6 +106,12 @@ export default function ClientPanel({ event: initialEvent }: ClientPanelProps) {
   // Entry Editing State
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [editEntryText, setEditEntryText] = useState("");
+  const [isRefreshingEntries, setIsRefreshingEntries] = useState(false);
+
+  const [lastVisibleGuest, setLastVisibleGuest] = useState<any>(null);
+  const [hasMoreGuests, setHasMoreGuests] = useState(false);
+  const [loadingMoreGuests, setLoadingMoreGuests] = useState(false);
+
 
   // Confirmation Modals
   const [confirmDelete, setConfirmDelete] = useState<{ id: string, type: 'guest' | 'staff' } | null>(null);
@@ -124,6 +131,34 @@ export default function ClientPanel({ event: initialEvent }: ClientPanelProps) {
 
   const currentUser = auth.currentUser;
 
+
+  const handleLoadMoreGuests = async () => {
+    if (!event.id || !lastVisibleGuest) return;
+    setLoadingMoreGuests(true);
+    try {
+      const { startAfter, limit } = await import('firebase/firestore');
+      const q = query(
+        collection(db, 'guests'), 
+        where('eventId', '==', event.id),
+        orderBy('timestamp', 'desc'),
+        startAfter(lastVisibleGuest),
+        limit(50)
+      );
+      const snapshot = await getDocs(q);
+      const guestEntries = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as Guest[];
+      setEntries(prev => [...prev, ...guestEntries]);
+      setLastVisibleGuest(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMoreGuests(snapshot.docs.length === 50);
+    } catch (error) {
+      console.error("Error loading more guests", error);
+    } finally {
+      setLoadingMoreGuests(false);
+    }
+  };
+
   useEffect(() => {
     setEvent(initialEvent);
     setEditEventForm({
@@ -135,34 +170,72 @@ export default function ClientPanel({ event: initialEvent }: ClientPanelProps) {
     });
   }, [initialEvent]);
 
-  useEffect(() => {
-    const q = query(
-      collection(db, 'guests'), 
-      where('eventId', '==', event.id),
-      orderBy('timestamp', 'desc')
-    );
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+  const fetchEntries = async (showIndicator = false) => {
+    if (!event.id) return;
+    if (showIndicator) setIsRefreshingEntries(true);
+    try {
+      const { limit } = await import('firebase/firestore');
+      const q = query(
+        collection(db, 'guests'), 
+        where('eventId', '==', event.id),
+        orderBy('timestamp', 'desc'),
+        limit(50)
+      );
+      const snapshot = await getDocs(q);
       const guestEntries = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
-      })) as GuestEntry[];
+      })) as Guest[];
       setEntries(guestEntries);
-      setIsLoading(false);
-    }, (error) => {
+      setLastVisibleGuest(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMoreGuests(snapshot.docs.length === 50);
+    } catch (error) {
       handleFirestoreError(error, OperationType.GET, 'guests');
+    } finally {
       setIsLoading(false);
-    });
+      if (showIndicator) setIsRefreshingEntries(false);
+    }
+  };
 
-    return () => unsubscribe();
+
+
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+
+    const setup = async () => {
+      setIsLoading(true);
+      await fetchEntries();
+
+      intervalId = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          fetchEntries();
+        }
+      }, 30000);
+    };
+
+    setup();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchEntries();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [event.id]);
 
   // Fetch User Data and Reseller Brand
+
+
   useEffect(() => {
     if (currentUser) {
       const unsubscribe = onSnapshot(doc(db, 'users', currentUser.uid), (doc) => {
         if (doc.exists()) {
-          const data = { uid: doc.id, ...doc.data() } as AppUser;
+          const data = { uid: doc.id, ...doc.data() as any } as unknown as AppUser;
           setUserData(data);
           setProfileForm({
             name: data.name || '',
@@ -173,6 +246,8 @@ export default function ClientPanel({ event: initialEvent }: ClientPanelProps) {
       return () => unsubscribe();
     }
   }, [currentUser]);
+
+
 
   useEffect(() => {
     if (event.resellerUid) {
@@ -343,14 +418,16 @@ export default function ClientPanel({ event: initialEvent }: ClientPanelProps) {
 
   const [isAddingStaff, setIsAddingStaff] = useState(false);
   const [newStaff, setNewStaff] = useState({ name: '', email: '', password: '' });
-  const [staffList, setStaffList] = useState<AppUser[]>([]);
+  const [staffList, setStaffList] = useState<User[]>([]);
 
   // 1. Fetch Staff
+
+
   useEffect(() => {
     if (!event.id) return;
     const q = query(collection(db, 'users'), where('eventId', '==', event.id), where('role', '==', 'staff'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setStaffList(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser)));
+      setStaffList(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() as any } as unknown as AppUser)));
     });
     return () => unsubscribe();
   }, [event.id]);
@@ -397,8 +474,8 @@ export default function ClientPanel({ event: initialEvent }: ClientPanelProps) {
   };
 
   const getInvitationLink = (guestName: string) => {
-    if (!event.invitationUrl) return null;
-    const baseUrl = event.invitationUrl.endsWith('/') ? event.invitationUrl : `${event.invitationUrl}/`;
+    if (!(event as any).invitationUrl) return null;
+    const baseUrl = (event as any).invitationUrl.endsWith('/') ? (event as any).invitationUrl : `${(event as any).invitationUrl}/`;
     return `${baseUrl}?to=${encodeURIComponent(guestName)}`;
   };
 
@@ -683,7 +760,7 @@ export default function ClientPanel({ event: initialEvent }: ClientPanelProps) {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: 'Total Tamu', value: stats.total, icon: User, color: 'bg-blue-50 text-blue-600' },
+              { label: 'Total Tamu', value: stats.total, icon: UserIcon, color: 'bg-blue-50 text-blue-600' },
               { label: 'Check-in', value: stats.checkedIn, icon: UserCheck, color: 'bg-green-50 text-green-600' },
               { label: 'Souvenir', value: stats.souvenirClaimed, icon: Gift, color: 'bg-purple-50 text-purple-600' },
               { label: 'Hadir', value: stats.hadir, icon: CheckCircle2, color: 'bg-emerald-50 text-emerald-600' },
@@ -721,6 +798,17 @@ export default function ClientPanel({ event: initialEvent }: ClientPanelProps) {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <h3 className="text-xl font-serif font-bold">Daftar Tamu & Pesan</h3>
           <div className="flex flex-wrap items-center gap-4">
+            <button
+              onClick={() => fetchEntries(true)}
+              disabled={isRefreshingEntries}
+              className={`flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-bold transition-all shadow-sm ${
+                isRefreshingEntries 
+                  ? 'bg-gray-100 text-gray-500 cursor-not-allowed opacity-70' 
+                  : 'bg-white text-olive border border-olive/10 hover:bg-olive/5 active:scale-95'
+              }`}
+            >
+              <RefreshCcw className={`w-4 h-4 ${isRefreshingEntries ? 'animate-spin' : ''}`} /> Refresh
+            </button>
             <button
               onClick={() => setIsScannerOpen(true)}
               className="flex items-center gap-2 px-5 py-3 bg-olive text-white rounded-2xl text-sm font-bold hover:bg-olive/90 transition-all shadow-lg active:scale-95"
@@ -766,7 +854,7 @@ export default function ClientPanel({ event: initialEvent }: ClientPanelProps) {
               <div className="flex flex-col md:flex-row md:items-start justify-between gap-6 mb-6">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-cream rounded-2xl flex items-center justify-center text-olive shadow-inner">
-                    <User className="w-6 h-6" />
+                    <UserIcon className="w-6 h-6" />
                   </div>
                   <div>
                     <h4 className="font-serif text-lg font-bold text-gray-800 flex items-center gap-2">
@@ -1018,7 +1106,7 @@ export default function ClientPanel({ event: initialEvent }: ClientPanelProps) {
             {/* Profile Settings */}
             <div className="bg-white p-8 rounded-[40px] border border-olive/10 shadow-sm space-y-8">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-cream rounded-2xl flex items-center justify-center text-olive"><User className="w-5 h-5" /></div>
+                <div className="w-10 h-10 bg-cream rounded-2xl flex items-center justify-center text-olive"><UserIcon className="w-5 h-5" /></div>
                 <h3 className="text-xl font-serif font-bold">Pengaturan Profil</h3>
               </div>
               
@@ -1027,7 +1115,7 @@ export default function ClientPanel({ event: initialEvent }: ClientPanelProps) {
                   <div className="space-y-1">
                     <label className="text-[10px] font-bold text-olive uppercase tracking-widest ml-2">Nama Lengkap</label>
                     <div className="relative">
-                      <User className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <UserIcon className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
                       <input 
                         type="text" value={profileForm.name} 
                         onChange={e => setProfileForm({...profileForm, name: e.target.value})}
@@ -1261,7 +1349,7 @@ export default function ClientPanel({ event: initialEvent }: ClientPanelProps) {
                 <div key={staff.uid} className="bg-white p-6 rounded-[32px] border border-olive/10 shadow-sm flex items-center justify-between group hover:border-olive/30 transition-all">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-cream rounded-2xl flex items-center justify-center text-olive">
-                      <User className="w-6 h-6" />
+                      <UserIcon className="w-6 h-6" />
                     </div>
                     <div>
                       <h4 className="font-bold text-gray-800">{staff.name}</h4>

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
-import { collection, query, orderBy, onSnapshot, deleteDoc, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, deleteDoc, doc, updateDoc, getDoc, where } from 'firebase/firestore';
 import { File as FileIcon, ImageIcon, FileText, Film, FileArchive, Upload, Search, Filter, Trash2, Copy, RefreshCw, X } from 'lucide-react';
 import { mediaService } from '../../services/media/media.service';
 import { MediaUploader } from '../../components/media/MediaUploader';
 import { showAlert, showConfirm } from '../../lib/alerts';
 import { format } from 'date-fns';
+import { useAuth } from '../../AuthContext';
 
 interface MediaItem {
   id: string;
@@ -20,8 +21,14 @@ interface MediaItem {
 }
 
 export default function MediaLibrary() {
+  const { appUser } = useAuth();
   const [mediaFiles, setMediaFiles] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [lastVisible, setLastVisible] = useState<any>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   
@@ -30,18 +37,63 @@ export default function MediaLibrary() {
   const [isReplaceModalOpen, setIsReplaceModalOpen] = useState(false);
 
   useEffect(() => {
-    const q = query(collection(db, 'media'), orderBy('uploadedAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    if (!appUser) return;
+    
+    const fetchMedia = async () => {
+      try {
+        const { getDocs, limit, query, collection, orderBy, where } = await import('firebase/firestore');
+        let baseQ;
+        if (appUser.role === 'superadmin') {
+          baseQ = query(collection(db, 'media'), orderBy('uploadedAt', 'desc'));
+        } else {
+          baseQ = query(collection(db, 'media'), where('uploadedBy', '==', appUser.id), orderBy('uploadedAt', 'desc'));
+        }
+        const qLimited = query(baseQ, limit(50));
+        const snapshot = await getDocs(qLimited);
+        const files: MediaItem[] = [];
+        snapshot.forEach((doc) => {
+          files.push({ id: doc.id, ...doc.data() as any });
+        });
+        setMediaFiles(files);
+        setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+        setHasMore(snapshot.docs.length === 50);
+      } catch (err) {
+        console.error("MediaLibrary getDocs error:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchMedia();
+  }, [appUser]);
+
+  
+  const handleLoadMore = async () => {
+    if (!lastVisible || !appUser) return;
+    setLoadingMore(true);
+    try {
+      const { collection, query, getDocs, limit, startAfter, orderBy, where } = await import('firebase/firestore');
+      let baseQ;
+      if (appUser.role === 'superadmin') {
+        baseQ = query(collection(db, 'media'), orderBy('uploadedAt', 'desc'), startAfter(lastVisible));
+      } else {
+        baseQ = query(collection(db, 'media'), where('uploadedBy', '==', appUser.id), orderBy('uploadedAt', 'desc'), startAfter(lastVisible));
+      }
+      const q = query(baseQ, limit(50));
+      const snapshot = await getDocs(q);
       const files: MediaItem[] = [];
       snapshot.forEach((doc) => {
-        files.push({ id: doc.id, ...doc.data() } as MediaItem);
+        files.push({ id: doc.id, ...doc.data() as any });
       });
-      setMediaFiles(files);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, []);
+      setMediaFiles(prev => [...prev, ...files]);
+      setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMore(snapshot.docs.length === 50);
+    } catch (error) {
+      console.error("Error loading more media", error);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const formatBytes = (bytes: number, decimals = 2) => {
     if (!+bytes) return '0 Bytes';

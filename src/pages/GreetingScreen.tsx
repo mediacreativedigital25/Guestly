@@ -88,7 +88,9 @@ export default function GreetingScreen() {
       }
     }, (err: any) => {
       console.error(err);
-      if (err.code !== 'unavailable') {
+      if (err.code === 'permission-denied') {
+        setErrorInfo('Akses ditolak. Rekomendasi: Gunakan Cloudflare endpoint khusus untuk Public Greeting Screen agar lebih aman (tanpa expose PII).');
+      } else if (err.code !== 'unavailable') {
         setErrorInfo('Failed to listen to guest check-ins. ' + err.message);
       }
     });

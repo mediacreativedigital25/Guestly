@@ -45,10 +45,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let unsubscribeEvents: (() => void) | null = null;
     let unsubscribeGuestsList: (() => void)[] = [];
-    let unsubscribeUsers: (() => void) | null = null;
-    let unsubscribeClients: (() => void) | null = null;
 
     const setupListeners = async () => {
       try {
@@ -70,24 +67,29 @@ export default function Dashboard() {
         }
 
         if (appUser?.role === 'superadmin') {
-          unsubscribeUsers = onSnapshot(collection(db, 'users'), (usersSnapshot) => {
-            let partners = 0;
-            usersSnapshot.forEach(u => {
-              if (u.data().role === 'partner') partners++;
-            });
-            setSuperMetrics(prev => ({ ...prev, totalUsers: usersSnapshot.size, totalPartners: partners }));
-          });
-          
-          unsubscribeClients = onSnapshot(collection(db, 'clients'), (clientsSnapshot) => {
-            setSuperMetrics(prev => ({ ...prev, totalClients: clientsSnapshot.size }));
-          });
+          try {
+             const { getCountFromServer } = await import('firebase/firestore');
+             const usersRef = collection(db, 'users');
+             const totalUsersSnap = await getCountFromServer(usersRef);
+             const partnersSnap = await getCountFromServer(query(usersRef, where('role', '==', 'partner')));
+             const clientsSnap = await getCountFromServer(collection(db, 'clients'));
+             setSuperMetrics(prev => ({ 
+               ...prev, 
+               totalUsers: totalUsersSnap.data().count, 
+               totalPartners: partnersSnap.data().count,
+               totalClients: clientsSnap.data().count 
+             }));
+          } catch (error: any) {
+             handleFirestoreError(error, OperationType.GET, 'superadmin metrics');
+          }
         }
 
-        unsubscribeEvents = onSnapshot(q, (eventsSnapshot) => {
+        try {
+          const eventsSnapshot = await getDocs(q);
           const eventsList: EventRecord[] = [];
           let drafts = 0;
           let published = 0;
-          
+              
           eventsSnapshot.forEach(doc => {
             const data = doc.data() as EventRecord;
             eventsList.push({ ...data, id: doc.id });
@@ -96,13 +98,13 @@ export default function Dashboard() {
           });
 
           setEvents(eventsList);
-          
+             
           // Clean up old guest listeners
           unsubscribeGuestsList.forEach(unsub => unsub());
           unsubscribeGuestsList = [];
 
           const publishedEvents = eventsList.filter(e => e.status === 'published' || e.status === 'completed');
-          
+             
           if (publishedEvents.length === 0) {
             setMetrics({
               totalEvents: eventsList.length,
@@ -115,48 +117,35 @@ export default function Dashboard() {
             return;
           }
 
-          const guestCounts: Record<string, { expected: number, attended: number }> = {};
-          
-          publishedEvents.forEach(event => {
-            guestCounts[event.id!] = { expected: 0, attended: 0 };
-            
-            const guestsRef = collection(db, 'events', event.id!, 'guests');
-            const unsub = onSnapshot(guestsRef, (guestsSnapshot) => {
-              let e = guestsSnapshot.size;
-              let a = 0;
-              guestsSnapshot.forEach(guestDoc => {
-                if (guestDoc.data().attended === true) {
-                  a++;
-                }
-              });
-              
-              guestCounts[event.id!] = { expected: e, attended: a };
-              
-              let currentExpected = 0;
-              let currentAttended = 0;
-              Object.values(guestCounts).forEach(counts => {
-                currentExpected += counts.expected;
-                currentAttended += counts.attended;
-              });
-              
-              setMetrics({
-                totalEvents: eventsList.length,
-                draftEvents: drafts,
-                publishedEvents: published,
-                expectedGuests: currentExpected,
-                attendedGuests: currentAttended
-              });
-              setLoading(false);
-            }, (error) => {
-                console.error("Error fetching guests for dashboard:", error);
-            });
-            
-            unsubscribeGuestsList.push(unsub);
+          let currentExpected = 0;
+          let currentAttended = 0;
+
+          await Promise.all(publishedEvents.map(async (event) => {
+             try {
+                const guestsRef = collection(db, 'events', event.id!, 'guests');
+                // Use getCountFromServer to avoid document reads (Sprint 5A)
+                const { getCountFromServer } = await import('firebase/firestore');
+                const totalSnap = await getCountFromServer(guestsRef);
+                const attendedSnap = await getCountFromServer(query(guestsRef, where('attended', '==', true)));
+                currentExpected += totalSnap.data().count;
+                currentAttended += attendedSnap.data().count;
+             } catch (e) {
+                console.error("Error fetching guest counts for event", event.id, e);
+             }
+          }));
+
+          setMetrics({
+             totalEvents: eventsList.length,
+             draftEvents: drafts,
+             publishedEvents: published,
+             expectedGuests: currentExpected,
+             attendedGuests: currentAttended
           });
-        }, (error) => {
+          setLoading(false);
+        } catch (error: any) {
             handleFirestoreError(error, OperationType.GET, 'dashboard-metrics');
             setLoading(false);
-        });
+        }
 
       } catch (error) {
         handleFirestoreError(error, OperationType.GET, 'dashboard-metrics');
@@ -169,9 +158,6 @@ export default function Dashboard() {
     }
 
     return () => {
-      if (unsubscribeEvents) unsubscribeEvents();
-      if (unsubscribeUsers) unsubscribeUsers();
-      if (unsubscribeClients) unsubscribeClients();
       unsubscribeGuestsList.forEach(unsub => unsub());
     };
   }, [appUser]);

@@ -11,6 +11,11 @@ import { showAlert, showConfirm } from '../lib/alerts';
 export default function UsersList() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [lastVisible, setLastVisible] = useState<any>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
@@ -44,14 +49,14 @@ export default function UsersList() {
 
       try {
         const q = query(collection(db, 'users'));
-        unsubscribeUsers = onSnapshot(q, (snapshot) => {
-          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
-          setUsers(data);
-          setLoading(false);
-        }, (error) => {
-          console.error('Error fetching users:', error);
-          setLoading(false);
-        });
+                const { getDocs, limit } = await import('firebase/firestore');
+        const qLimited = query(q, limit(50));
+        const snapshot = await getDocs(qLimited);
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as User }));
+        setUsers(data);
+        setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+        setHasMore(snapshot.docs.length === 50);
+        setLoading(false);
       } catch (error) {
         console.error('Error setup listeners users:', error);
         setLoading(false);
@@ -59,10 +64,27 @@ export default function UsersList() {
     };
     fetchUsers();
 
-    return () => {
-      if (unsubscribeUsers) unsubscribeUsers();
-    };
+    return () => {};
   }, [appUser]);
+
+  
+  const handleLoadMore = async () => {
+    if (!lastVisible || appUser?.role !== 'superadmin') return;
+    setLoadingMore(true);
+    try {
+      const { collection, query, getDocs, limit, startAfter } = await import('firebase/firestore');
+      const q = query(collection(db, 'users'), startAfter(lastVisible), limit(50));
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as User }));
+      setUsers(prev => [...prev, ...data]);
+      setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMore(snapshot.docs.length === 50);
+    } catch (error) {
+      console.error("Error loading more users", error);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const handleDelete = async (userId: string) => {
     const confirmed = await showConfirm('Yakin ingin menghapus pengguna ini?');
@@ -448,6 +470,17 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
               </tbody>
             </table>
           </div>
+          {hasMore && (
+            <div className="p-4 border-t border-gray-200 flex justify-center">
+              <button
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 font-medium disabled:opacity-50"
+              >
+                {loadingMore ? 'Memuat...' : 'Muat Lebih Banyak'}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

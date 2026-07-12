@@ -23,3 +23,18 @@ export function parseFirestoreDate(timestamp: any): Date | null {
   }
   return null;
 }
+
+export function getExpirationDate(dateString: string): Date {
+  const date = new Date(dateString);
+  date.setDate(date.getDate() + 30); // Or whatever default
+  return date;
+}
+
+export function getDaysRemaining(dateString: string): number {
+  const diff = getExpirationDate(dateString).getTime() - new Date().getTime();
+  return Math.max(0, Math.ceil(diff / (1000 * 3600 * 24)));
+}
+
+export function isEventExpired(dateString: string): boolean {
+  return getDaysRemaining(dateString) <= 0;
+}

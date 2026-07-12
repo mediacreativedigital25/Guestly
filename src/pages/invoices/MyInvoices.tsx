@@ -12,6 +12,11 @@ export default function MyInvoices() {
   const { settings } = useSettings();
   const [invoices, setInvoices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [lastVisible, setLastVisible] = useState<any>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
   const [copied, setCopied] = useState(false);
@@ -25,7 +30,7 @@ export default function MyInvoices() {
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
     
-    const fetchInvoices = () => {
+    const fetchInvoices = async () => {
       if (!currentUser) return;
       try {
         setLoading(true);
@@ -33,20 +38,17 @@ export default function MyInvoices() {
           collection(db, 'invoices'),
           where('userId', '==', currentUser.uid)
         );
-        unsubscribe = onSnapshot(q, (querySnapshot) => {
-          const fetchedInvoices: any[] = [];
-          querySnapshot.forEach((doc) => {
-            fetchedInvoices.push({ id: doc.id, ...doc.data() });
-          });
-          
-          // Sort manually by createdAt descended
-          fetchedInvoices.sort((a, b) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
-          setInvoices(fetchedInvoices);
-          setLoading(false);
-        }, (error) => {
-          handleFirestoreError(error, OperationType.GET, 'invoices');
-          setLoading(false);
+        const { getDocs } = await import('firebase/firestore');
+        const querySnapshot = await getDocs(q);
+        const fetchedInvoices = [];
+        querySnapshot.forEach((doc) => {
+          fetchedInvoices.push({ id: doc.id, ...doc.data() });
         });
+            
+        // Sort manually by createdAt descended
+        fetchedInvoices.sort((a, b) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
+        setInvoices(fetchedInvoices);
+        setLoading(false);
       } catch (error) {
         handleFirestoreError(error, OperationType.GET, 'setup_invoices_listener');
         setLoading(false);
@@ -55,10 +57,36 @@ export default function MyInvoices() {
 
     fetchInvoices();
     
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
+    return () => {};
   }, [currentUser]);
+
+  
+  const handleLoadMore = async () => {
+    if (!lastVisible || !currentUser) return;
+    setLoadingMore(true);
+    try {
+      const { startAfter, limit } = await import('firebase/firestore');
+      const q = query(
+        collection(db, 'invoices'),
+        where('userId', '==', currentUser.uid),
+        startAfter(lastVisible),
+        limit(50)
+      );
+      const querySnapshot = await getDocs(q);
+      const fetchedInvoices: any[] = [];
+      querySnapshot.forEach((doc) => {
+        fetchedInvoices.push({ id: doc.id, ...doc.data() });
+      });
+      fetchedInvoices.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+      setInvoices(prev => [...prev, ...fetchedInvoices]);
+      setLastVisible(querySnapshot.docs[querySnapshot.docs.length - 1]);
+      setHasMore(querySnapshot.docs.length === 50);
+    } catch (error) {
+      console.error("Error loading more invoices", error);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const handlePayNow = (invoice: any) => {
     setSelectedInvoice(invoice);

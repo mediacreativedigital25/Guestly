@@ -15,6 +15,11 @@ export default function EventsList() {
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [lastVisible, setLastVisible] = useState<any>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const [isCreating, setIsCreating] = useState(false);
   const [activeTab, setActiveTab] = useState<'info' | 'frame' | 'categories' | 'theme'>('info');
   
@@ -150,24 +155,31 @@ export default function EventsList() {
           // No need to fetch all clients for a client user, just their own record if needed, but we don't necessarily need the list for the dropdown since they can't create events.
         }
 
-        unsubscribeEvents = onSnapshot(q, (snapshot) => {
-          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventRecord));
+                try {
+          const { getDocs, limit } = await import('firebase/firestore');
+          const qLimited = query(q, limit(50));
+          const snapshot = await getDocs(qLimited);
+          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           setEvents(data);
+          setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+          setHasMore(snapshot.docs.length === 50);
           setLoading(false);
-        }, (error) => {
+        } catch(error) {
           handleFirestoreError(error, OperationType.GET, 'events');
           setLoading(false);
-        });
+        }
 
         if (appUser?.role === 'client') {
            setClients([]);
         } else {
-           unsubscribeClients = onSnapshot(cQuery, (snapClients) => {
-             const clientsData = snapClients.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
+           try {
+             const { getDocs } = await import('firebase/firestore');
+             const snapClients = await getDocs(cQuery);
+             const clientsData = snapClients.docs.map(doc => ({ id: doc.id, ...doc.data() }));
              setClients(clientsData);
-           }, (error) => {
+           } catch(error) {
              console.error("Error fetching clients for events list:", error);
-           });
+           }
         }
       } catch (error) {
         handleFirestoreError(error, OperationType.GET, 'events');
@@ -177,11 +189,35 @@ export default function EventsList() {
 
     if (appUser) fetchEventsAndClients();
 
-    return () => {
-      if (unsubscribeEvents) unsubscribeEvents();
-      if (unsubscribeClients) unsubscribeClients();
-    };
+    return () => {};
   }, [appUser]);
+
+  
+  const handleLoadMore = async () => {
+    if (!lastVisible || !appUser) return;
+    setLoadingMore(true);
+    try {
+      const { collection, query, getDocs, where, limit, startAfter } = await import('firebase/firestore');
+      const eventsRef = collection(db, 'events');
+      let q = query(eventsRef);
+      if (appUser?.role === 'partner') {
+        q = query(eventsRef, where('partnerId', '==', appUser.id || ''));
+      } else if (appUser?.role === 'client') {
+        const targetClientId = appUser?.clientId || appUser?.id || '';
+        q = query(eventsRef, where('clientId', '==', targetClientId));
+      }
+      const qLimited = query(q, startAfter(lastVisible), limit(50));
+      const snapshot = await getDocs(qLimited);
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setEvents(prev => [...prev, ...data]);
+      setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMore(snapshot.docs.length === 50);
+    } catch (error) {
+      console.error("Error loading more events", error);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const handleSaveEvent = async () => {
     if (!appUser) return;
@@ -622,9 +658,11 @@ export default function EventsList() {
           <p className="text-gray-500">No events found. Let's create one!</p>
         </div>
       ) : (
+        
         <div className="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
+
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">No</th>
@@ -691,6 +729,17 @@ export default function EventsList() {
               </tbody>
             </table>
           </div>
+          {hasMore && (
+            <div className="p-4 border-t border-gray-200 flex justify-center">
+              <button
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 font-medium disabled:opacity-50"
+              >
+                {loadingMore ? 'Memuat...' : 'Muat Lebih Banyak'}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

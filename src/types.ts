@@ -12,6 +12,7 @@ export interface User {
   bannerUrl?: string;
   brandingImageUrl?: string;
   phone?: string;
+  fonnteToken?: string;
   eventQuota?: number;
   clientQuota?: number;
   guestQuota?: number;
@@ -37,11 +38,14 @@ export interface Client {
   name: string;
   contactEmail?: string;
   phone?: string;
+  fonnteToken?: string;
   createdAt: any;
   updatedAt: any;
 }
 
 export interface EventRecord {
+  souvenirTypes?: string[];
+  invitationUrl?: string;
   id?: string;
   partnerId: string;
   clientId: string;
@@ -84,6 +88,7 @@ export interface Guest {
   name: string;
   email?: string;
   phone?: string;
+  fonnteToken?: string;
   address?: string;
   category?: string;
   session?: string;
@@ -147,4 +152,17 @@ export interface Testimonial {
   rating: number;
   createdAt: any;
   status: 'pending' | 'approved';
+}
+
+export type AttendanceStatus = 'pending' | 'attending' | 'declined';
+
+export type AppUser = User;
+export type PackageTier = 'trial' | 'lite' | 'standard' | 'pro';
+export interface GuestbookEntry {
+  id?: string;
+  name: string;
+  message: string;
+  attendance: 'hadir' | 'tidak_hadir' | 'ragu_ragu';
+  reply?: string;
+  timestamp: any;
 }

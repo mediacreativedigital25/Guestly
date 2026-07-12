@@ -51,23 +51,55 @@ export default function Scanner() {
   const processTicket = async (decodedText: string) => {
     if (isProcessingRef.current) return;
     
+    // Parse the decodedText to handle URLs or raw codes
+    let code = decodedText.trim();
+    console.log("Scanned QR raw text:", code);
+    
+    try {
+      // If the QR contains a full URL, try to extract the ticket code
+      if (code.startsWith('http')) {
+        const url = new URL(code);
+        // Check for 'ticket' or 'code' params
+        const ticketParam = url.searchParams.get('ticket') || url.searchParams.get('code');
+        if (ticketParam) {
+          code = ticketParam;
+        } else {
+          // Attempt to extract from path (e.g. /rsvp/eventId/TICKETCODE)
+          const pathSegments = url.pathname.split('/').filter(Boolean);
+          if (pathSegments.length > 0) {
+             // Assuming the ticket code is the last segment if no params found
+             code = pathSegments[pathSegments.length - 1];
+          }
+        }
+      } else if (code.includes('/')) {
+        // Fallback for relative paths or similar
+        const segments = code.split('/');
+        code = segments[segments.length - 1];
+      }
+    } catch (e) {
+      console.warn("Failed to parse URL from QR, using raw text", e);
+    }
+    
+    code = code.toUpperCase();
+    console.log("Extracted ticket code:", code);
+    
     // Prevent scanning the same code multiple times within a short duration
-    if (lastScannedCodeRef.current === decodedText) {
+    if (lastScannedCodeRef.current === code) {
        return;
     }
     
     isProcessingRef.current = true;
     setIsProcessing(true);
     setScanResult(null);
-    lastScannedCodeRef.current = decodedText;
+    lastScannedCodeRef.current = code;
 
     try {
       const guestsRef = collection(db, 'events', eventId!, 'guests');
-      const q = query(guestsRef, where('ticketCode', '==', decodedText));
+      const q = query(guestsRef, where('ticketCode', '==', code));
       const snapshot = await getDocs(q);
       
       if (snapshot.empty) {
-        setScanResult({ status: 'error', message: "Tiket tidak valid."});
+        setScanResult({ status: 'error', message: `Tiket tidak valid. (Kode: ${code})`});
       } else {
         const guestDoc = snapshot.docs[0];
         if (guestDoc.data().attended) {
@@ -93,7 +125,7 @@ export default function Scanner() {
       
       // Clear the last scanned code after a delay so it can be scanned again if needed
       setTimeout(() => {
-        if (lastScannedCodeRef.current === decodedText) {
+        if (lastScannedCodeRef.current === code) {
           lastScannedCodeRef.current = null;
         }
       }, 3000);

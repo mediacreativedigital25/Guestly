@@ -15,6 +15,11 @@ export default function ClientsList() {
   const [clients, setClients] = useState<Client[]>([]);
   const [partners, setPartners] = useState<{id: string, name: string, logoUrl?: string}[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [lastVisible, setLastVisible] = useState<any>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const [isAddingClient, setIsAddingClient] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   const [newClientEmail, setNewClientEmail] = useState('');
@@ -69,27 +74,31 @@ export default function ClientsList() {
           }
         }
 
-        unsubscribeClients = onSnapshot(qClients, (clientsSnap) => {
-          const data = clientsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
+                try {
+          const { getDocs, limit } = await import('firebase/firestore');
+          const qLimited = query(qClients, limit(50));
+          const clientsSnap = await getDocs(qLimited);
+          const data = clientsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           setClients(data);
+          setLastVisible(clientsSnap.docs[clientsSnap.docs.length - 1]);
+          setHasMore(clientsSnap.docs.length === 50);
           setLoading(false);
-        }, (error) => {
-           handleFirestoreError(error, OperationType.GET, 'clients');
-           setLoading(false);
-        });
-
-        unsubscribeEvents = onSnapshot(qEvents, (eventsSnap) => {
+          const { getCountFromServer, collection, where } = await import('firebase/firestore');
+          const eventsRef = collection(db, 'events');
           const eventsCount: Record<string, number> = {};
-          eventsSnap.docs.forEach(d => {
-             const ev = d.data();
-             if (ev.clientId) {
-                eventsCount[ev.clientId] = (eventsCount[ev.clientId] || 0) + 1;
-             }
-          });
+          
+          await Promise.all(data.map(async (client: any) => {
+            if (client.id) {
+              const q = query(eventsRef, where('clientId', '==', client.id));
+              const snap = await getCountFromServer(q);
+              eventsCount[client.id] = snap.data().count;
+            }
+          }));
           setClientEventsCount(eventsCount);
-        }, (error) => {
+        } catch(error) {
            console.error("Error fetching events for client list", error);
-        });
+        }
+
 
       } catch (error) {
         handleFirestoreError(error, OperationType.GET, 'clients');
@@ -98,11 +107,48 @@ export default function ClientsList() {
     };
     if (appUser) fetchData();
 
-    return () => {
-      if (unsubscribeClients) unsubscribeClients();
-      if (unsubscribeEvents) unsubscribeEvents();
-    };
+    return () => {};
   }, [appUser]);
+
+  
+  const handleLoadMore = async () => {
+    if (!lastVisible || !appUser) return;
+    setLoadingMore(true);
+    try {
+      const { collection, query, getDocs, where, limit, startAfter, getCountFromServer } = await import('firebase/firestore');
+      const clientsRef = collection(db, 'clients');
+      let qClients = query(clientsRef);
+      
+      if (appUser?.role !== 'superadmin') {
+        const pid = appUser?.role === 'partner' ? appUser.id : appUser?.partnerId;
+        const safePid = pid || '';
+        qClients = query(clientsRef, where('partnerId', '==', safePid));
+      }
+      
+      const qLimited = query(qClients, startAfter(lastVisible), limit(50));
+      const clientsSnap = await getDocs(qLimited);
+      const data = clientsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() as Client }));
+      setClients(prev => [...prev, ...data]);
+      setLastVisible(clientsSnap.docs[clientsSnap.docs.length - 1]);
+      setHasMore(clientsSnap.docs.length === 50);
+
+      // Fetch event counts for new clients
+      const eventsRef = collection(db, 'events');
+      const eventsCount = { ...clientEventsCount };
+      await Promise.all(data.map(async (client) => {
+        if (client.id) {
+          const q = query(eventsRef, where('clientId', '==', client.id));
+          const snap = await getCountFromServer(q);
+          eventsCount[client.id] = snap.data().count;
+        }
+      }));
+      setClientEventsCount(eventsCount);
+    } catch (error) {
+      console.error("Error loading more clients", error);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const handleDeleteClient = async (clientId: string) => {
     const confirmed = await showConfirm('Apakah Anda yakin ingin menghapus client ini?');
@@ -401,6 +447,17 @@ export default function ClientsList() {
               </tbody>
             </table>
           </div>
+          {hasMore && (
+            <div className="p-4 border-t border-gray-200 flex justify-center">
+              <button
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 font-medium disabled:opacity-50"
+              >
+                {loadingMore ? 'Memuat...' : 'Muat Lebih Banyak'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 

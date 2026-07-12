@@ -25,7 +25,7 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { AppUser, EventDetails, PackageTier } from '../types';
+import { User, EventRecord, AppUser } from '../types';
 import { PACKAGES } from '../constants';
 import { toast } from 'sonner';
 import { mediaService } from '../services/media/media.service';
@@ -49,14 +49,15 @@ import {
   CheckCircle2,
   LayoutDashboard,
   Edit3,
-  User,
+  UserIcon,
   X,
   AlertCircle,
   Phone,
   Image,
   Key,
   Upload,
-  Loader2
+  Loader2,
+  RefreshCcw
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
@@ -71,32 +72,38 @@ const getSecondaryAuth = () => {
 };
 
 interface AdminPanelProps {
-  user: AppUser | null;
+  user: User | null;
 }
 
 export default function AdminPanel({ user }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'clients' | 'partners' | 'events' | 'settings'>('dashboard');
-  const [clients, setClients] = useState<AppUser[]>([]);
-  const [resellers, setResellers] = useState<AppUser[]>([]);
-  const [events, setEvents] = useState<EventDetails[]>([]);
+  const [clients, setClients] = useState<User[]>([]);
+  const [resellers, setResellers] = useState<User[]>([]);
+  const [events, setEvents] = useState<EventRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [userSearchTerm, setUserSearchTerm] = useState("");
-  const [clientPackageFilter, setClientPackageFilter] = useState<PackageTier | 'all'>('all');
+  const [clientPackageFilter, setClientPackageFilter] = useState<any | 'all'>('all');
   const [sortConfig, setSortConfig] = useState<{ key: 'date' | 'subscriptionStatus' | 'title', direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
   
   // Confirmation Modals
   const [confirmDelete, setConfirmDelete] = useState<{ id: string, type: 'event' | 'client' } | null>(null);
-  const [managingGuests, setManagingGuests] = useState<EventDetails | null>(null);
+  const [managingGuests, setManagingGuests] = useState<EventRecord | null>(null);
   const [eventGuests, setEventGuests] = useState<any[]>([]);
+  const [isRefreshingGuests, setIsRefreshingGuests] = useState(false);
   const [isAddingGuest, setIsAddingGuest] = useState(false);
+
+  const [lastVisibleGuest, setLastVisibleGuest] = useState<any>(null);
+  const [hasMoreGuests, setHasMoreGuests] = useState(false);
+  const [loadingMoreGuests, setLoadingMoreGuests] = useState(false);
+
   const [newGuest, setNewGuest] = useState({ name: '', attendance: 'hadir' as const, message: '' });
 
   const [allGuests, setAllGuests] = useState<any[]>([]);
   const [totalGuests, setTotalGuests] = useState(0);
   
-  const [editingClient, setEditingClient] = useState<AppUser | null>(null);
-  const [editingEvent, setEditingEvent] = useState<EventDetails | null>(null);
+  const [editingClient, setEditingClient] = useState<User | null>(null);
+  const [editingEvent, setEditingEvent] = useState<EventRecord | null>(null);
 
   // Profile Settings State
   const [profileForm, setProfileForm] = useState({
@@ -143,7 +150,25 @@ export default function AdminPanel({ user }: AdminPanelProps) {
   };
 
   const currentUser = auth.currentUser;
-  const [currentUserData, setCurrentUserData] = useState<AppUser | null>(user);
+  const [currentUserData, setCurrentUserData] = useState<User | null>(user);
+
+
+  const handleLoadMoreGuests = async () => {
+    if (!managingGuests || !lastVisibleGuest) return;
+    setLoadingMoreGuests(true);
+    try {
+      const { startAfter, limit } = await import('firebase/firestore');
+      const q = query(collection(db, 'guests'), where('eventId', '==', managingGuests.id), orderBy('timestamp', 'desc'), startAfter(lastVisibleGuest), limit(50));
+      const snapshot = await getDocs(q);
+      setEventGuests(prev => [...prev, ...snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }))]);
+      setLastVisibleGuest(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMoreGuests(snapshot.docs.length === 50);
+    } catch (error) {
+      console.error("Error loading more guests", error);
+    } finally {
+      setLoadingMoreGuests(false);
+    }
+  };
 
   useEffect(() => {
     if (user) {
@@ -151,16 +176,20 @@ export default function AdminPanel({ user }: AdminPanelProps) {
     }
   }, [user]);
 
+
+
   useEffect(() => {
     if (currentUser) {
       const unsubscribe = onSnapshot(doc(db, 'users', currentUser.uid), (doc) => {
         if (doc.exists()) {
-          setCurrentUserData({ uid: doc.id, ...doc.data() } as AppUser);
+          setCurrentUserData({ uid: doc.id, ...doc.data() as any } as AppUser);
         }
       });
       return () => unsubscribe();
     }
   }, [currentUser]);
+
+
 
   useEffect(() => {
     if (currentUserData) {
@@ -210,6 +239,8 @@ export default function AdminPanel({ user }: AdminPanelProps) {
   const isResellerMode = currentUserData?.role?.toLowerCase() === 'reseller';
   const isAdminMode = currentUserData?.role?.toLowerCase() === 'admin';
 
+
+
   useEffect(() => {
     console.log("AdminPanel - Current User Data:", currentUserData);
     console.log("AdminPanel - Is Admin Mode:", isAdminMode);
@@ -232,7 +263,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
     phone: '',
     role: 'client' as 'client' | 'reseller',
     eventQuota: 5,
-    package: 'trial' as PackageTier,
+    package: 'trial' as any,
     brandName: '',
     brandLogo: ''
   });
@@ -271,7 +302,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
   const sendWA = async (phone: string, message: string) => {
     // Get Fonnte Token from Super Admin (specifically 64.iklas@gmail.com or first admin found)
     try {
-      let adminData: AppUser | undefined;
+      let adminData: User | undefined;
       
       // Try to find the main admin first
       const mainAdminQuery = query(collection(db, 'users'), where('email', '==', '64.iklas@gmail.com'));
@@ -321,6 +352,8 @@ export default function AdminPanel({ user }: AdminPanelProps) {
     maxGuests: 0
   });
 
+
+
   useEffect(() => {
     // Sync form when editing
     if (editingClient) {
@@ -340,6 +373,8 @@ export default function AdminPanel({ user }: AdminPanelProps) {
     }
   }, [editingClient]);
 
+
+
   useEffect(() => {
     if (editingEvent) {
       setNewEvent({
@@ -358,6 +393,8 @@ export default function AdminPanel({ user }: AdminPanelProps) {
     }
   }, [editingEvent]);
 
+
+
   useEffect(() => {
     if (!currentUserData) return;
 
@@ -370,17 +407,24 @@ export default function AdminPanel({ user }: AdminPanelProps) {
 
     let unsubscribeUsers = () => {};
     if (usersQuery) {
-      unsubscribeUsers = onSnapshot(usersQuery as any, (snapshot) => {
-        const userList = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
-        
-        let clientList = userList.filter(u => u.role?.toLowerCase() === 'client');
-        const resellerList = userList.filter(u => u.role?.toLowerCase() === 'reseller');
-        
-        setClients(clientList);
-        setResellers(resellerList);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.GET, 'users');
-      });
+      
+      (async () => {
+        try {
+          const { getDocs } = await import('firebase/firestore');
+          const snapshot = await getDocs(usersQuery as any);
+          const userList = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() as any }));
+          
+          let clientList = userList.filter(u => u.role?.toLowerCase() === 'client');
+          const resellerList = userList.filter(u => u.role?.toLowerCase() === 'reseller');
+          
+          setClients(clientList);
+          setResellers(resellerList);
+        } catch(error) {
+          handleFirestoreError(error, OperationType.GET, 'users');
+        }
+      })();
+      unsubscribeUsers = () => {};
+
     }
 
     // Fetch Events
@@ -390,36 +434,51 @@ export default function AdminPanel({ user }: AdminPanelProps) {
 
     let unsubscribeEvents = () => {};
     if (eventsQuery) {
-      unsubscribeEvents = onSnapshot(eventsQuery, (snapshot) => {
-        const eventList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventDetails));
-        setEvents(eventList);
-        setIsLoading(false);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.GET, 'events');
-      });
+      
+      (async () => {
+        try {
+          const { getDocs } = await import('firebase/firestore');
+          const snapshot = await getDocs(eventsQuery);
+          const eventList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+          setEvents(eventList);
+          setIsLoading(false);
+          
+          if (isResellerMode) {
+             const resellerEventIds = eventList.map(e => e.id);
+             let totalG = 0;
+             const { getCountFromServer } = await import('firebase/firestore');
+             await Promise.all(resellerEventIds.map(async (eid) => {
+                const snap = await getCountFromServer(query(collection(db, 'guests'), where('eventId', '==', eid)));
+                totalG += snap.data().count;
+             }));
+             setTotalGuests(totalG);
+          }
+        } catch(error) {
+          handleFirestoreError(error, OperationType.GET, 'events');
+        }
+      })();
+      unsubscribeEvents = () => {};
+
     }
 
+    
     // Fetch All Guests for aggregation
-    const unsubscribeGuests = onSnapshot(collection(db, 'guests'), (snapshot) => {
-      const guestList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setAllGuests(guestList);
-      
-      if (isResellerMode) {
-        // Filter guests for events belonging to this reseller
-        const resellerEventIds = events.map(e => e.id);
-        const resellerGuests = guestList.filter((g: any) => resellerEventIds.includes(g.eventId));
-        setTotalGuests(resellerGuests.length);
-      } else {
-        setTotalGuests(snapshot.size);
-      }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'guests');
-    });
+    if (!isResellerMode) {
+       (async () => {
+         try {
+           const { getCountFromServer } = await import('firebase/firestore');
+           const snap = await getCountFromServer(collection(db, 'guests'));
+           setTotalGuests(snap.data().count);
+         } catch(error) {
+           handleFirestoreError(error, OperationType.GET, 'guests');
+         }
+       })();
+    }
 
     return () => {
       unsubscribeUsers();
       unsubscribeEvents();
-      unsubscribeGuests();
+      
     };
   }, [isResellerMode, currentUser, currentUserData]);
 
@@ -621,16 +680,56 @@ export default function AdminPanel({ user }: AdminPanelProps) {
     }
   };
 
+  const fetchEventGuests = async (showIndicator = false) => {
+    if (!managingGuests) return;
+    if (showIndicator) setIsRefreshingGuests(true);
+    try {
+      const { limit } = await import('firebase/firestore');
+      const q = query(collection(db, 'guests'), where('eventId', '==', managingGuests.id), orderBy('timestamp', 'desc'), limit(50));
+      const snapshot = await getDocs(q);
+      setEventGuests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any })));
+      setLastVisibleGuest(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMoreGuests(snapshot.docs.length === 50);
+    } catch (error) {
+      console.error('Error fetching guests in admin:', error);
+    } finally {
+      if (showIndicator) setIsRefreshingGuests(false);
+    }
+  };
+
+
+
   useEffect(() => {
     if (!managingGuests) {
       setEventGuests([]);
       return;
     }
-    const q = query(collection(db, 'guests'), where('eventId', '==', managingGuests.id), orderBy('timestamp', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setEventGuests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-    return () => unsubscribe();
+
+    let intervalId: NodeJS.Timeout;
+
+    const setup = async () => {
+      await fetchEventGuests();
+
+      intervalId = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          fetchEventGuests();
+        }
+      }, 30000);
+    };
+
+    setup();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchEventGuests();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [managingGuests]);
 
   const handleAddGuest = async (e: React.FormEvent) => {
@@ -726,7 +825,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
               activeTab === 'clients' ? "bg-olive text-white shadow-md" : "text-gray-400 hover:text-olive"
             )}
           >
-            <User className="w-3.5 h-3.5" /> Clients
+            <UserIcon className="w-3.5 h-3.5" /> Clients
           </button>
           {!isResellerMode && (
             <button 
@@ -815,7 +914,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
               <p className="text-sm text-gray-500">Selamat datang di panel administrasi. Gunakan tab di atas untuk mengelola user dan melihat seluruh event yang terdaftar.</p>
               <div className="mt-8 grid grid-cols-2 md:grid-cols-3 gap-4">
                 <button onClick={() => setActiveTab('clients')} className="p-4 bg-cream/50 rounded-2xl border border-olive/10 text-olive font-bold text-sm hover:bg-cream transition-all flex flex-col items-center gap-2">
-                  <User className="w-6 h-6" /> Kelola Client
+                  <UserIcon className="w-6 h-6" /> Kelola Client
                 </button>
                 {!isResellerMode && (
                   <button onClick={() => setActiveTab('partners')} className="p-4 bg-orange-50 rounded-2xl border border-orange-100 text-orange-600 font-bold text-sm hover:bg-orange-100 transition-all flex flex-col items-center gap-2">
@@ -835,7 +934,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
         <div className="space-y-12">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-cream rounded-2xl flex items-center justify-center text-olive"><User className="w-5 h-5" /></div>
+              <div className="w-10 h-10 bg-cream rounded-2xl flex items-center justify-center text-olive"><UserIcon className="w-5 h-5" /></div>
               <h3 className="text-2xl font-serif font-bold">Manajemen Client</h3>
             </div>
             
@@ -861,7 +960,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
                 >
                   Semua Paket
                 </button>
-                {(Object.keys(PACKAGES) as PackageTier[]).map((pkg) => (
+                {(Object.keys(PACKAGES) as any[]).map((pkg) => (
                   <button 
                     key={pkg}
                     onClick={() => setClientPackageFilter(pkg)}
@@ -914,7 +1013,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
                     <div className="space-y-3">
                       <label className="text-[10px] font-bold text-olive uppercase tracking-widest ml-2">Pilih Paket</label>
                       <div className="grid grid-cols-1 gap-2">
-                        {(Object.keys(PACKAGES) as PackageTier[]).map((pkg) => (
+                        {(Object.keys(PACKAGES) as any[]).map((pkg) => (
                           <button
                             key={pkg}
                             type="button"
@@ -970,7 +1069,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
               <section className="space-y-6">
                 <div className="flex items-center justify-between px-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-cream rounded-xl flex items-center justify-center text-olive"><User className="w-4 h-4" /></div>
+                    <div className="w-8 h-8 bg-cream rounded-xl flex items-center justify-center text-olive"><UserIcon className="w-4 h-4" /></div>
                     <h3 className="text-xl font-serif font-bold">Daftar Client</h3>
                   </div>
                   <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
@@ -1509,7 +1608,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
 
                       <div className="flex items-center gap-4 pt-2">
                         <div className="flex items-center gap-1.5">
-                          <div className="w-6 h-6 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center"><User className="w-3 h-3" /></div>
+                          <div className="w-6 h-6 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center"><UserIcon className="w-3 h-3" /></div>
                           <span className="text-[10px] text-gray-400 font-medium">Owner: {event.clientEmail || 'N/A'}</span>
                         </div>
                         {event.resellerUid && (
@@ -1593,7 +1692,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
           {/* Profile Settings */}
           <div className="bg-white p-8 rounded-[40px] border border-olive/10 shadow-sm space-y-8">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-cream rounded-2xl flex items-center justify-center text-olive"><User className="w-5 h-5" /></div>
+              <div className="w-10 h-10 bg-cream rounded-2xl flex items-center justify-center text-olive"><UserIcon className="w-5 h-5" /></div>
               <h3 className="text-xl font-serif font-bold">Pengaturan Profil</h3>
             </div>
             
@@ -1602,7 +1701,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-olive uppercase tracking-widest ml-2">Nama Lengkap</label>
                   <div className="relative">
-                    <User className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <UserIcon className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input 
                       type="text" value={profileForm.name} 
                       onChange={e => setProfileForm({...profileForm, name: e.target.value})}
@@ -1794,11 +1893,20 @@ export default function AdminPanel({ user }: AdminPanelProps) {
                   <h4 className="font-serif font-bold text-olive flex items-center gap-2">
                     <UserPlus className="w-5 h-5" /> Tambah Tamu Manual
                   </h4>
-                  {!isAddingGuest && (
-                    <button onClick={() => setIsAddingGuest(true)} className="text-xs font-bold text-olive bg-white px-4 py-2 rounded-xl border border-olive/10 shadow-sm hover:bg-olive/5">
-                      Buka Form
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => fetchEventGuests(true)}
+                      disabled={isRefreshingGuests}
+                      className={`text-xs font-bold text-olive bg-white px-4 py-2 rounded-xl border border-olive/10 shadow-sm hover:bg-olive/5 flex items-center gap-1 ${isRefreshingGuests ? 'opacity-70 cursor-not-allowed' : ''}`}
+                    >
+                      <RefreshCcw className={`w-3.5 h-3.5 ${isRefreshingGuests ? 'animate-spin' : ''}`} /> Refresh
                     </button>
-                  )}
+                    {!isAddingGuest && (
+                      <button onClick={() => setIsAddingGuest(true)} className="text-xs font-bold text-olive bg-white px-4 py-2 rounded-xl border border-olive/10 shadow-sm hover:bg-olive/5">
+                        Buka Form
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {isAddingGuest && (

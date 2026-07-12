@@ -186,8 +186,8 @@ service cloud.firestore {
     // --- Collections ---
 
     match /users/{userId} {
-      allow get: if isValidId(userId) && (request.auth.uid == userId || isSuperAdmin() || (isSignedIn() && existing().get('role', '') == 'partner'));
-      allow list: if isSuperAdmin();
+      allow get: if isValidId(userId) && (request.auth.uid == userId || isSuperAdmin() || (isSignedIn() && existing().get('partnerId', '') == request.auth.uid) || (isSignedIn() && existing().get('clientId', '') == request.auth.uid));
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.partnerId == request.auth.uid) || (isSignedIn() && resource.data.clientId == request.auth.uid);
       // Allow user creation by superadmins or if authenticated (but can't set role to superadmin unless done by function)
       allow create: if isSignedIn() && isValidUser(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time &&
         (isSuperAdmin() || 
@@ -212,7 +212,7 @@ service cloud.firestore {
 
     match /clients/{clientId} {
       allow get: if isValidId(clientId) && (isSuperAdmin() || (isSignedIn() && ((existing() != null && isPartnerUser(existing().partnerId)) || isClientUser(clientId))));
-      allow list: if isSignedIn();
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.partnerId == request.auth.uid);
       allow create: if isSignedIn() && isValidClient(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time && (isSuperAdmin() || isPartnerUser(incoming().partnerId));
       allow update: if isValidId(clientId) && isSignedIn() && isValidClient(incoming()) && incoming().updatedAt == request.time &&
         incoming().partnerId == existing().partnerId &&
@@ -222,7 +222,7 @@ service cloud.firestore {
 
     match /events/{eventId} {
       allow get: if isValidId(eventId); // Public can read event details for RSVP
-      allow list: if isSignedIn();
+      allow list: if isSuperAdmin() || isPartnerUser(resource.data.partnerId) || isClientUser(resource.data.clientId);
       // Event must be created by superadmin or partner or client
       allow create: if isSignedIn() && isValidEvent(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time &&
         (isSuperAdmin() || isPartnerUser(incoming().partnerId) || isClientUser(incoming().clientId));
@@ -233,7 +233,7 @@ service cloud.firestore {
     
     match /events/{eventId}/guests/{guestId} {
       allow get: if isValidId(eventId) && isValidId(guestId); // Public could read own guest info if they have ticket code, handled by query?
-      allow list: if isValidId(eventId); // Public can list guests for a known eventId (used for Greeting Screen)
+      allow list: if isValidId(eventId) && (isSuperAdmin() || isPartnerUser(get(/databases/$(database)/documents/events/$(eventId)).data.partnerId) || isClientUser(get(/databases/$(database)/documents/events/$(eventId)).data.clientId));
       allow create: if isValidId(eventId) && isValidGuest(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isValidId(eventId) && isValidId(guestId) && isValidGuest(incoming()) && incoming().updatedAt == request.time &&
         incoming().eventId == existing().eventId &&
@@ -258,7 +258,8 @@ service cloud.firestore {
     }
 
     match /settings/{docId} {
-      allow get, list: if true;
+      allow get: if isSuperAdmin() || docId == 'publicStats';
+      allow list: if isSuperAdmin();
       allow create, update, delete: if isSuperAdmin() || docId == 'publicStats';
     }
 
@@ -269,7 +270,7 @@ service cloud.firestore {
     }
 
     match /invoices/{invoiceId} {
-      allow get, list: if isSignedIn() && (isSuperAdmin() || existing().get('userId', 'none') == request.auth.uid);
+      allow get, list: if isSignedIn() && (isSuperAdmin() || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && isValidInvoice(incoming()) && incoming().userId == request.auth.uid && incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isValidId(invoiceId) && isValidInvoice(incoming()) && incoming().updatedAt == request.time && incoming().userId == existing().userId &&
         (
@@ -287,6 +288,11 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    match /media/{mediaId} {
+      allow read: if isSuperAdmin() || resource.data.uploadedBy == request.auth.uid;
+      allow create: if isSuperAdmin() || incoming().get('uploadedBy', '') == request.auth.uid;
+      allow update, delete: if isSuperAdmin() || resource.data.uploadedBy == request.auth.uid;
+    }
     match /counters/{counterId} {
       allow get: if isSignedIn();
       allow create: if isSignedIn() && isValidCounter(incoming()) && incoming().seq == 1;
@@ -294,8 +300,21 @@ service cloud.firestore {
     }
 
     match /guest_edit_requests/{requestId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn();
+      allow get, list: if isSuperAdmin() || (isSignedIn() && (resource.data.partnerId == request.auth.uid || resource.data.clientId == request.auth.uid));
+      allow create: if isSignedIn() && (isSuperAdmin() || incoming().get('partnerId', '') == request.auth.uid || incoming().get('clientId', '') == request.auth.uid);
+      allow update, delete: if isSuperAdmin() || (isSignedIn() && (resource.data.partnerId == request.auth.uid || resource.data.clientId == request.auth.uid));
+    }
+    match /analytics/{docId} {
+      allow read, write: if isSuperAdmin();
+    }
+    match /notifications/{docId} {
+      allow read, write: if isSuperAdmin();
+    }
+    match /guestbook/{docId} {
+      allow read, write: if isSuperAdmin();
+    }
+    match /salespage/{docId} {
+      allow read, write: if isSuperAdmin();
     }
   }
 }

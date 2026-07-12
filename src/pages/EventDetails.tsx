@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom';
-import { QrCode, Printer, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code, MessageCircle } from 'lucide-react';
+import { QrCode, Printer, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code, MessageCircle, RefreshCcw } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'react-qr-code';
 import * as htmlToImage from 'html-to-image';
@@ -33,7 +33,7 @@ export default function EventDetails() {
   const [searchTerm, setSearchTerm] = useState('');
   const [rsvpFilter, setRsvpFilter] = useState('all');
   const [attendanceFilter, setAttendanceFilter] = useState('all');
-  const [activeTab, setActiveTab] = useState<'guest-list' | 'rsvp'>('guest-list');
+  const [activeTab, setActiveTab] = useState<'guest-list' | 'rsvp' | 'attended'>('guest-list');
   const [isEmbedModalOpen, setIsEmbedModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrRef = useRef<HTMLDivElement>(null);
@@ -52,17 +52,64 @@ export default function EventDetails() {
   const [editGuestPhone, setEditGuestPhone] = useState('');
   const [editGuestCategory, setEditGuestCategory] = useState('');
   const [editGuestSession, setEditGuestSession] = useState('');
+  const [isRefreshingGuests, setIsRefreshingGuests] = useState(false);
+
+  const [lastVisibleGuest, setLastVisibleGuest] = useState<any>(null);
+  const [hasMoreGuests, setHasMoreGuests] = useState(false);
+  const [loadingMoreGuests, setLoadingMoreGuests] = useState(false);
+
 
   // Reset page when filters change
+
+  const handleLoadMoreGuests = async () => {
+    if (!eventId || !lastVisibleGuest) return;
+    setLoadingMoreGuests(true);
+    try {
+      const { startAfter, limit, query, collection, getDocs } = await import('firebase/firestore');
+      const guestsRef = collection(db, 'events', eventId, 'guests');
+      const q = query(guestsRef, startAfter(lastVisibleGuest), limit(50));
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
+      setGuests(prev => [...prev, ...data]);
+      setLastVisibleGuest(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMoreGuests(snapshot.docs.length === 50);
+    } catch (error) {
+      console.error("Error loading more guests", error);
+    } finally {
+      setLoadingMoreGuests(false);
+    }
+  };
+
   useEffect(() => {
-    setCurrentPage(1);
   }, [searchTerm, rsvpFilter, attendanceFilter, activeTab]);
+
+  const fetchGuests = async (showIndicator = false) => {
+    if (!eventId) return;
+    if (showIndicator) setIsRefreshingGuests(true);
+    try {
+      const { limit, orderBy, query, collection, getDocs } = await import('firebase/firestore');
+      const guestsRef = collection(db, 'events', eventId, 'guests');
+      // Using limit to scale, ordered by createdAt or similar if possible. We rely on default sort if not.
+      // Wait, let's use limit(50)
+      const q = query(guestsRef, limit(50));
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
+      setGuests(data);
+      setLastVisibleGuest(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMoreGuests(snapshot.docs.length === 50);
+    } catch (error) {
+      console.error('Error fetching guests:', error);
+    } finally {
+      setLoading(false);
+      if (showIndicator) setIsRefreshingGuests(false);
+    }
+  };
 
   useEffect(() => {
     if (!eventId) return;
 
     let unsubscribeEvent: () => void;
-    let unsubscribeGuests: () => void;
+    let intervalId: NodeJS.Timeout;
 
     const setupListeners = async () => {
       try {
@@ -73,8 +120,6 @@ export default function EventDetails() {
           if (eventDoc.exists()) {
             const eventData = { id: eventDoc.id, ...eventDoc.data() } as EventRecord;
             setEvent(eventData);
-
-            // Fetch client name (one-time fetch is typically okay as client name rarely changes, or listen to it if you prefer. We'll do simple fetch here)
             if (eventData.clientId) {
               try {
                 const clientDoc = await getDoc(doc(db, 'clients', eventData.clientId));
@@ -90,17 +135,15 @@ export default function EventDetails() {
           handleFirestoreError(error, OperationType.GET, `events/${eventId}`);
         });
 
-        // Listen to guests
-        const guestsRef = collection(db, 'events', eventId, 'guests');
-        const q = query(guestsRef);
-        unsubscribeGuests = onSnapshot(q, (snapshot) => {
-          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
-          setGuests(data);
-          setLoading(false); // Only stop loading after guests are initially fetched
-        }, (error) => {
-          handleFirestoreError(error, OperationType.GET, `events/${eventId}/guests`);
-          setLoading(false);
-        });
+        // Initial fetch for guests
+        await fetchGuests();
+
+        // Smart Auto Refresh (30s)
+        intervalId = setInterval(() => {
+          if (document.visibilityState === 'visible') {
+            fetchGuests();
+          }
+        }, 30000);
 
         // Fetch WA Templates
         getDoc(doc(db, 'settings', 'waTemplates')).then(docSnap => {
@@ -128,9 +171,17 @@ export default function EventDetails() {
 
     setupListeners();
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchGuests();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       if (unsubscribeEvent) unsubscribeEvent();
-      if (unsubscribeGuests) unsubscribeGuests();
+      if (intervalId) clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [eventId]);
 
@@ -351,7 +402,7 @@ export default function EventDetails() {
     }
   };
 
-  const baseFilteredGuests = activeTab === 'guest-list' 
+  const baseFilteredGuests = activeTab === 'guest-list' || activeTab === 'attended' 
     ? guests 
     : guests.filter(g => g.hasResponded || g.rsvpStatus !== 'pending' || (g.wishes && g.wishes.trim().length > 0));
   
@@ -364,6 +415,8 @@ export default function EventDetails() {
       if (rsvpFilter !== 'all') {
         matchesStatus = guest.rsvpStatus === rsvpFilter;
       }
+    } else if (activeTab === 'attended') {
+      matchesStatus = guest.attended === true;
     } else {
       // activeTab === 'guest-list'
       if (attendanceFilter !== 'all') {
@@ -376,7 +429,7 @@ export default function EventDetails() {
   });
 
   const totalPages = Math.ceil(filteredGuests.length / itemsPerPage);
-  const paginatedGuests = filteredGuests.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const paginatedGuests = filteredGuests;
 
   const handleExportPDF = () => {
     const doc = new jsPDF();
@@ -954,10 +1007,16 @@ export default function EventDetails() {
           >
             Daftar Tamu
           </button>
+          <button
+            onClick={() => setActiveTab('attended')}
+            className={`whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'attended' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+          >
+            Berhasil Scan
+          </button>
         </nav>
       </div>
 
-      {activeTab === 'guest-list' && (
+      {(activeTab === 'guest-list' || activeTab === 'attended') && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-start gap-3">
           <MessageCircle className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
           <div>
@@ -972,7 +1031,7 @@ export default function EventDetails() {
           {/* Top Row: Title & Action Buttons */}
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 w-full">
             <h2 className="text-lg font-medium text-gray-900 whitespace-nowrap">
-               {activeTab === 'rsvp' ? 'RSVP & Ucapan' : 'Daftar Tamu'} ({filteredGuests.length})
+               {activeTab === 'rsvp' ? 'RSVP & Ucapan' : activeTab === 'attended' ? 'Berhasil Scan' : 'Daftar Tamu'} ({filteredGuests.length})
             </h2>
             
             <div className="flex flex-wrap items-center justify-start lg:justify-end gap-3 w-full lg:w-auto">
@@ -1016,6 +1075,18 @@ export default function EventDetails() {
               </div>
 
               <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => fetchGuests(true)}
+                  disabled={isRefreshingGuests}
+                  className={`justify-center text-sm font-medium flex items-center gap-1.5 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${
+                    isRefreshingGuests 
+                      ? 'text-gray-500 bg-gray-100 cursor-not-allowed opacity-70 border border-gray-200' 
+                      : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 shadow-sm'
+                  }`}
+                  title="Refresh Tamu"
+                >
+                  <RefreshCcw className={`w-4 h-4 text-gray-500 ${isRefreshingGuests ? 'animate-spin' : ''}`}/>
+                </button>
                 <button 
                   onClick={openBlastModal}
                   disabled={isBlasting}
@@ -1069,7 +1140,7 @@ export default function EventDetails() {
                   <option value="declined">Tidak Hadir</option>
                   <option value="pending">Pending</option>
                 </select>
-              ) : (
+              ) : activeTab === 'guest-list' ? (
                 <select
                   value={attendanceFilter}
                   onChange={(e) => setAttendanceFilter(e.target.value)}
@@ -1079,12 +1150,11 @@ export default function EventDetails() {
                   <option value="attended">Sudah Scan</option>
                   <option value="not_attended">Belum Hadir</option>
                 </select>
-              )}
+              ) : null}
               <select
                 value={itemsPerPage}
                 onChange={(e) => {
                   setItemsPerPage(Number(e.target.value));
-                  setCurrentPage(1);
                 }}
                 className="block w-full sm:w-auto pl-3 pr-8 py-2 border border-gray-300 rounded-md leading-5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
               >
@@ -1202,7 +1272,7 @@ export default function EventDetails() {
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama Tamu</th>
-                    {activeTab === 'guest-list' && (
+                    {(activeTab === 'guest-list' || activeTab === 'attended') && (
                       <>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Alamat</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No. Hp</th>
@@ -1236,11 +1306,11 @@ export default function EventDetails() {
                           onChange={(e) => handleSelectGuest(guest.id, e.target.checked)}
                         />
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{(currentPage - 1) * itemsPerPage + index + 1}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{index + 1}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{guest.name}</div>
                       </td>
-                      {activeTab === 'guest-list' && (
+                      {(activeTab === 'guest-list' || activeTab === 'attended') && (
                         <>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{guest.address || '-'}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{guest.phone || '-'}</td>
@@ -1360,65 +1430,32 @@ export default function EventDetails() {
             
             <div className="px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
               <div className="flex-1 flex justify-between sm:hidden">
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                  disabled={currentPage === 1}
-                  className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Previous
-                </button>
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                  disabled={currentPage === totalPages || totalPages === 0}
-                  className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Next
-                </button>
+                {hasMoreGuests && (
+                  <button
+                    onClick={handleLoadMoreGuests}
+                    disabled={loadingMoreGuests}
+                    className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 w-full justify-center"
+                  >
+                    {loadingMoreGuests ? 'Memuat...' : 'Muat Lebih Banyak'}
+                  </button>
+                )}
               </div>
               <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-                <div className="flex flex-wrap items-center gap-4">
+                <div>
                   <p className="text-sm text-gray-700">
-                    Menampilkan <span className="font-medium">{filteredGuests.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0}</span> hingga <span className="font-medium">{Math.min(currentPage * itemsPerPage, filteredGuests.length)}</span> dari <span className="font-medium">{filteredGuests.length}</span> hasil
+                    Total data dimuat: <span className="font-medium">{filteredGuests.length}</span>
                   </p>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-700">Tampilkan:</span>
-                    <select
-                      value={itemsPerPage}
-                      onChange={(e) => {
-                        setItemsPerPage(Number(e.target.value));
-                        setCurrentPage(1);
-                      }}
-                      className="block w-full pl-2 pr-8 py-1 text-sm border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                    >
-                      <option value={10}>10</option>
-                      <option value={25}>25</option>
-                      <option value={50}>50</option>
-                    </select>
-                  </div>
                 </div>
                 <div>
-                  <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                  {hasMoreGuests && (
                     <button
-                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                      disabled={currentPage === 1}
-                      className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={handleLoadMoreGuests}
+                      disabled={loadingMoreGuests}
+                      className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-indigo-600 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50"
                     >
-                      <span className="sr-only">Previous</span>
-                      <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                        <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
+                      {loadingMoreGuests ? 'Memuat...' : 'Muat Lebih Banyak'}
                     </button>
-                    <button
-                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                      disabled={currentPage === totalPages || totalPages === 0}
-                      className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <span className="sr-only">Next</span>
-                      <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                        <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                  </nav>
+                  )}
                 </div>
               </div>
             </div>

@@ -9,7 +9,12 @@ export interface MediaUploadOptions {
 }
 
 export const mediaService = {
-  uploadMedia: (options: MediaUploadOptions): Promise<{ url: string; key: string; sizeBytes: number }> => {
+  uploadMedia: async (options: MediaUploadOptions): Promise<{ url: string; key: string; sizeBytes: number }> => {
+    if (!auth.currentUser) {
+      throw new Error('Unauthorized: User not logged in.');
+    }
+    const token = await auth.currentUser.getIdToken();
+
     return new Promise((resolve, reject) => {
       const { file, category, onProgress, signal } = options;
       const formData = new FormData();
@@ -74,15 +79,22 @@ export const mediaService = {
       });
 
       xhr.open('POST', '/api/media/upload');
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
       xhr.send(formData);
     });
   },
 
   deleteMedia: async (key: string): Promise<void> => {
+    if (!auth.currentUser) {
+      throw new Error('Unauthorized: User not logged in.');
+    }
+    const token = await auth.currentUser.getIdToken();
+
     const response = await fetch('/api/media/delete', {
       method: 'DELETE',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
       },
       body: JSON.stringify({ key })
     });
@@ -94,7 +106,16 @@ export const mediaService = {
   },
 
   getInfo: async (key: string): Promise<any> => {
-    const response = await fetch(`/api/media/info?key=${encodeURIComponent(key)}`);
+    if (!auth.currentUser) {
+      throw new Error('Unauthorized: User not logged in.');
+    }
+    const token = await auth.currentUser.getIdToken();
+
+    const response = await fetch(`/api/media/info?key=${encodeURIComponent(key)}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error?.message || 'Gagal mendapatkan info file dari R2.');

@@ -122,21 +122,22 @@ export default function SalesPage() {
     };
 
     const docRef = doc(db, 'settings', 'publicStats');
-    const unsubStats = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setRealStats({ totalEvents: data.totalEvents || 0, totalGuests: data.totalGuests || 0 });
+    const fetchStats = async () => {
+      try {
+        const { getDoc } = await import('firebase/firestore');
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setRealStats({ totalEvents: data.totalEvents || 0, totalGuests: data.totalGuests || 0 });
+        }
+      } catch(err) {
+        console.warn("Failed to fetch real stats", err);
       }
-    }, (err) => {
-      console.warn("Failed to listen to real stats", err);
-    });
+    };
+    fetchStats();
 
     fetchClientServices();
     fetchTestimonials();
-    
-    return () => {
-      unsubStats();
-    };
   }, []);
 
   const handleSubmitTestimonial = async (e: React.FormEvent) => {

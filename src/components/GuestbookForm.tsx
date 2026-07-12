@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { motion } from 'motion/react';
 import { Send, User, MessageSquare, CheckCircle2, XCircle, HelpCircle, Calendar } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { AttendanceStatus } from '../types';
+import { GuestbookEntry } from '../types';
 
 const guestbookSchema = z.object({
   name: z.string().min(2, 'Nama minimal 2 karakter'),
@@ -97,7 +97,7 @@ export default function GuestbookForm({ onSubmit, isSubmitting }: GuestbookFormP
               <button
                 key={option.id}
                 type="button"
-                onClick={() => setValue('attendance', option.id as AttendanceStatus)}
+                onClick={() => setValue('attendance', option.id as GuestbookEntry['attendance'])}
                 className={cn(
                   "flex flex-col items-center justify-center p-3 rounded-2xl border transition-all gap-1",
                   currentAttendance === option.id 
