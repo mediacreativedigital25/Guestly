@@ -9,6 +9,8 @@ export interface User {
   clientId: string | null;
   businessName?: string;
   logoUrl?: string;
+  bannerUrl?: string;
+  brandingImageUrl?: string;
   phone?: string;
   eventQuota?: number;
   clientQuota?: number;

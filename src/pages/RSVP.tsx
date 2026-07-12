@@ -105,6 +105,20 @@ export default function RSVP() {
     if (eventId && ticketCode) fetchRSVP();
   }, [eventId, ticketCode]);
 
+  useEffect(() => {
+    // Send height to parent window for dynamic iframe resizing
+    const sendHeight = () => {
+      const height = document.documentElement.scrollHeight;
+      window.parent.postMessage({ type: 'guestly-rsvp-resize', height }, '*');
+    };
+
+    sendHeight();
+    const observer = new ResizeObserver(() => sendHeight());
+    observer.observe(document.body);
+    
+    return () => observer.disconnect();
+  }, [guest?.rsvpStatus, wishesInput, sessionInput, submitting]);
+
   const handleUpdateRSVP = async (status: 'attending' | 'declined') => {
     if (!guest?.id) return;
     setSubmitting(true);

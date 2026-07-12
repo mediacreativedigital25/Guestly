@@ -5,6 +5,7 @@ import { db } from '../../lib/firebase';
 import { useSettings } from '../../SettingsContext';
 import { showAlert, showConfirm } from '../../lib/alerts';
 import AdminSalespageSettings from './AdminSalespageSettings';
+import { MediaUploader } from '../../components/media/MediaUploader';
 
 export default function AdminSettings() {
   const [activeTab, setActiveTab] = useState('branding');
@@ -51,28 +52,6 @@ export default function AdminSettings() {
 
   const updateSP = (key: string, value: any) => {
     setSalespageData((prev: any) => ({ ...prev, [key]: value }));
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'favicon') => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (type === 'logo' && file.size > 800 * 1024) {
-      showAlert('Peringatan', 'Logo size must be less than 800KB', 'warning');
-      return;
-    }
-    if (type === 'favicon' && file.size > 200 * 1024) {
-      showAlert('Peringatan', 'Favicon size must be less than 200KB', 'warning');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64String = reader.result as string;
-      if (type === 'logo') setLogoUrl(base64String);
-      if (type === 'favicon') setFaviconUrl(base64String);
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleSave = async (tab: string) => {
@@ -166,19 +145,15 @@ export default function AdminSettings() {
                 </h2>
                 <div className="border border-gray-200 rounded-lg p-5 bg-gray-50">
                   <div className="space-y-4">
-                    <div className="flex items-center gap-4">
-                      <label className="cursor-pointer px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                        <UploadCloud className="w-4 h-4" /> Pilih Logo
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, 'logo')} />
-                      </label>
-                      <span className="text-sm text-gray-500">Maks. 800KB. Ukuran yang disarankan: 365 x 70 piksel.</span>
-                    </div>
-                    {logoUrl && (
-                      <div className="mt-4">
-                        <p className="text-sm font-medium text-gray-700 mb-2">Preview Logo:</p>
-                        <img src={logoUrl} alt="Logo" className="h-auto max-h-20 w-auto max-w-full object-contain" />
-                      </div>
-                    )}
+                    <MediaUploader
+                      category="logo"
+                      maxSize={2 * 1024 * 1024}
+                      allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
+                      defaultValue={logoUrl}
+                      onUploadSuccess={(data) => setLogoUrl(data.url)}
+                      onUploadError={(err) => showAlert('Gagal', `Gagal mengunggah logo: ${err}`, 'error')}
+                    />
+                    <div className="text-sm text-gray-500 mt-2">Ukuran yang disarankan: 365 x 70 piksel.</div>
                   </div>
                 </div>
               </div>
@@ -189,19 +164,15 @@ export default function AdminSettings() {
                 </h2>
                 <div className="border border-gray-200 rounded-lg p-5 bg-gray-50">
                   <div className="space-y-4">
-                    <div className="flex items-center gap-4">
-                      <label className="cursor-pointer px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                        <UploadCloud className="w-4 h-4" /> Pilih Favicon
-                        <input type="file" accept=".ico,.png" className="hidden" onChange={(e) => handleFileUpload(e, 'favicon')} />
-                      </label>
-                      <span className="text-sm text-gray-500">Maks. 200KB (.ico or .png). Ukuran yang disarankan: 256 x 256 piksel.</span>
-                    </div>
-                    {faviconUrl && (
-                      <div className="mt-4">
-                        <p className="text-sm font-medium text-gray-700 mb-2">Preview Favicon:</p>
-                        <img src={faviconUrl} alt="Favicon" className="h-8 w-8 object-contain" />
-                      </div>
-                    )}
+                    <MediaUploader
+                      category="favicon"
+                      maxSize={512 * 1024}
+                      allowedMimeTypes={['image/png', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/webp', '.ico']}
+                      defaultValue={faviconUrl}
+                      onUploadSuccess={(data) => setFaviconUrl(data.url)}
+                      onUploadError={(err) => showAlert('Gagal', `Gagal mengunggah favicon: ${err}`, 'error')}
+                    />
+                    <div className="text-sm text-gray-500 mt-2">Ukuran yang disarankan: 256 x 256 piksel.</div>
                   </div>
                 </div>
               </div>

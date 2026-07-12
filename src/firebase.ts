@@ -6,14 +6,12 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, updatePassword } from 'firebase/auth';
 import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, deleteDoc, doc, getDocFromServer, getDoc, getDocs, setDoc, updateDoc, where } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 export { firebaseConfig };
 
 // Initialize Firebase SDK
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const storage = getStorage(app, firebaseConfig.storageBucket);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
@@ -99,8 +97,5 @@ export {
   setDoc,
   updateDoc,
   where,
-  updatePassword,
-  ref,
-  uploadBytes,
-  getDownloadURL
+  updatePassword
 };

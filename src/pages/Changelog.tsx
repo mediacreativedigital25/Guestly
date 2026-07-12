@@ -1,6 +1,16 @@
 export default function Changelog() {
   const versions = [
     {
+      version: 'V2.0.0',
+      date: '12 Juli 2026',
+      changes: [
+        'Migrasi infrastruktur media dari Firebase Storage ke Cloudflare R2 untuk mempercepat waktu muat (CDN) dan efisiensi.',
+        'Pembaruan mekanisme unggah media terpusat untuk Logo, Banner, dan White Label menggunakan Cloudflare Pages Functions.',
+        'Perbaikan isu thumbnail WhatsApp Blast yang sebelumnya menggunakan format base64, kini menggunakan URL R2 langsung.',
+        'Penghapusan integrasi Firebase Storage secara penuh guna mendukung sistem penyimpanan Cloudflare R2 yang lebih scalable.',
+      ]
+    },
+    {
       version: 'V1.2.2',
       date: '30 Juni 2026',
       changes: [

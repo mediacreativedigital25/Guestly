@@ -30,7 +30,7 @@ export async function sendFonnteMessage(token: string | null | undefined, target
 
     if (response.status === 404 || response.status === 405) {
       console.warn(`Express backend API /api/send-whatsapp not found (${response.status}). Falling back to direct front-end fetch if VITE_FONNTE_TOKEN is set. Pastikan Anda tidak menghosting secara statis saja atau tambahkan VITE_FONNTE_TOKEN dilingkungan.`);
-      if (import.meta.env.VITE_FONNTE_TOKEN) {
+      if ((import.meta as any).env.VITE_FONNTE_TOKEN) {
          try {
            const body = new URLSearchParams({
              "target": target,
@@ -46,7 +46,7 @@ export async function sendFonnteMessage(token: string | null | undefined, target
            const directResponse = await fetch("https://api.fonnte.com/send", {
              method: "POST",
              headers: {
-               "Authorization": import.meta.env.VITE_FONNTE_TOKEN
+               "Authorization": (import.meta as any).env.VITE_FONNTE_TOKEN
              },
              body: body
            });

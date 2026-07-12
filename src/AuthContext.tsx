@@ -77,17 +77,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             }
           }
 
-          if (unsubscribeSnapshot) {
-            unsubscribeSnapshot();
-          }
-          unsubscribeSnapshot = onSnapshot(userDocRef, (docSnap) => {
-            if (docSnap.exists()) {
-              setAppUser({ id: docSnap.id, ...docSnap.data() } as User);
-            }
-          });
-
-        } catch (error) {
+        } catch (error: any) {
           handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+          if (error?.message?.includes('Quota') || String(error).includes('Quota')) {
+             showAlert('Quota Exceeded', 'Database quota exceeded. Please try again later or upgrade your plan.', 'error');
+          }
         }
       } else {
         setAppUser(null);

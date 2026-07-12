@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Building2, UploadCloud, Link as LinkIcon, Phone, Image as ImageIcon, AlertCircle } from 'lucide-react';
+import { Building2, UploadCloud, Link as LinkIcon, Phone, Image as ImageIcon } from 'lucide-react';
+import { MediaUploader } from '../components/media/MediaUploader';
 
 export default function WhiteLabelSettings() {
   const { appUser } = useAuth();
@@ -10,16 +11,19 @@ export default function WhiteLabelSettings() {
   const [businessName, setBusinessName] = useState('');
   const [phone, setPhone] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
+  const [bannerUrl, setBannerUrl] = useState('');
+  const [brandingImageUrl, setBrandingImageUrl] = useState('');
   
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState({ text: '', type: '' });
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (appUser) {
       setBusinessName(appUser.businessName || '');
       setPhone(appUser.phone || '');
       setLogoUrl(appUser.logoUrl || '');
+      setBannerUrl(appUser.bannerUrl || '');
+      setBrandingImageUrl(appUser.brandingImageUrl || '');
     }
   }, [appUser]);
 
@@ -27,15 +31,6 @@ export default function WhiteLabelSettings() {
     e.preventDefault();
     if (!appUser?.id) return;
     
-    // Validate logoUrl length to prevent Firebase permission errors
-    if (logoUrl && logoUrl.length > 500) {
-      setMessage({ 
-        text: 'URL Logo terlalu panjang. Mohon gunakan link gambar biasa (bukan base64/upload langsung). Anda bisa menggunakan imgbb.com lalu meng-copy linknya ke sini.', 
-        type: 'error' 
-      });
-      return;
-    }
-
     setIsSaving(true);
     setMessage({ text: '', type: '' });
     
@@ -45,13 +40,16 @@ export default function WhiteLabelSettings() {
         businessName,
         phone,
         logoUrl,
+        bannerUrl,
+        brandingImageUrl,
         updatedAt: serverTimestamp()
       });
       
-      // Update appUser context manually if needed
       appUser.businessName = businessName;
       appUser.phone = phone;
       appUser.logoUrl = logoUrl;
+      appUser.bannerUrl = bannerUrl;
+      appUser.brandingImageUrl = brandingImageUrl;
       
       setMessage({ text: 'Pengaturan berhasil disimpan.', type: 'success' });
     } catch (error: any) {
@@ -127,40 +125,25 @@ export default function WhiteLabelSettings() {
                 </div>
               </div>
 
+              {/* Logo Section */}
               <div className="border border-gray-200 rounded-lg p-5 bg-gray-50">
                 <label className="block text-sm font-medium text-gray-900 mb-3 flex items-center gap-2">
                   <ImageIcon className="w-4 h-4" /> Logo Usaha
                 </label>
                 
                 <div className="space-y-4">
-                  <div className="flex items-center gap-4">
-                    <button
-                      type="button"
-                      onClick={() => {
-                         const url = prompt("Masukkan Link Logo URL:", logoUrl || "https://example.com/logo.png");
-                         if (url !== null) {
-                           setLogoUrl(url);
-                         }
-                      }}
-                      className="px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 flex items-center gap-2"
-                    >
-                      <LinkIcon className="w-4 h-4" /> Masukkan Link Logo
-                    </button>
-                  </div>
+                  <MediaUploader 
+                    category="logo"
+                    maxSize={2 * 1024 * 1024}
+                    allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
+                    defaultValue={logoUrl}
+                    onUploadSuccess={(data) => setLogoUrl(data.url)}
+                    onUploadError={(err) => setMessage({ text: `Gagal mengunggah logo: ${err}`, type: 'error' })}
+                  />
                   
-                  <div className="flex items-start bg-blue-50 p-3 rounded-md border border-blue-100">
-                    <AlertCircle className="w-5 h-5 text-blue-500 mr-2 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-sm text-blue-800">
-                        Penyimpanan logo saat ini hanya mendukung format Link URL. Upload logo langsung dinonaktifkan.
-                      </p>
-                      <p className="text-xs text-blue-700 mt-1">Anda dapat menggunakan layanan seperti imgbb.com untuk mengupload dan mendapatkan link gambar.</p>
-                    </div>
-                  </div>
-
                   <div className="flex items-center gap-2 py-2">
                     <div className="h-px flex-1 bg-gray-300"></div>
-                    <span className="text-xs text-gray-500 font-medium uppercase">URL Gambar</span>
+                    <span className="text-xs text-gray-500 font-medium uppercase">Atau URL Gambar</span>
                     <div className="h-px flex-1 bg-gray-300"></div>
                   </div>
 
@@ -179,14 +162,79 @@ export default function WhiteLabelSettings() {
                 </div>
               </div>
 
-              {logoUrl && (
-                <div>
-                   <label className="block text-sm font-medium text-gray-700 mb-2">Preview Logo</label>
-                   <div className="p-4 border border-gray-200 bg-white rounded-lg inline-block shadow-sm">
-                     <img src={logoUrl} alt="Preview Logo" className="h-24 object-contain" onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/150?text=Invalid+Image'; }} />
-                   </div>
+              {/* Banner Section */}
+              <div className="border border-gray-200 rounded-lg p-5 bg-gray-50">
+                <label className="block text-sm font-medium text-gray-900 mb-3 flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4" /> Banner Usaha
+                </label>
+                
+                <div className="space-y-4">
+                  <MediaUploader 
+                    category="banner"
+                    maxSize={5 * 1024 * 1024}
+                    allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
+                    defaultValue={bannerUrl}
+                    onUploadSuccess={(data) => setBannerUrl(data.url)}
+                    onUploadError={(err) => setMessage({ text: `Gagal mengunggah banner: ${err}`, type: 'error' })}
+                  />
+                  
+                  <div className="flex items-center gap-2 py-2">
+                    <div className="h-px flex-1 bg-gray-300"></div>
+                    <span className="text-xs text-gray-500 font-medium uppercase">Atau URL Gambar</span>
+                    <div className="h-px flex-1 bg-gray-300"></div>
+                  </div>
+
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <LinkIcon className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <input
+                      type="url"
+                      value={bannerUrl}
+                      onChange={(e) => setBannerUrl(e.target.value)}
+                      className="pl-10 w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                      placeholder="https://example.com/banner.png"
+                    />
+                  </div>
                 </div>
-              )}
+              </div>
+
+              {/* Branding Image Section */}
+              <div className="border border-gray-200 rounded-lg p-5 bg-gray-50">
+                <label className="block text-sm font-medium text-gray-900 mb-3 flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4" /> Branding Image
+                </label>
+                
+                <div className="space-y-4">
+                  <MediaUploader 
+                    category="banner"
+                    maxSize={5 * 1024 * 1024}
+                    allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
+                    defaultValue={brandingImageUrl}
+                    onUploadSuccess={(data) => setBrandingImageUrl(data.url)}
+                    onUploadError={(err) => setMessage({ text: `Gagal mengunggah branding: ${err}`, type: 'error' })}
+                  />
+                  
+                  <div className="flex items-center gap-2 py-2">
+                    <div className="h-px flex-1 bg-gray-300"></div>
+                    <span className="text-xs text-gray-500 font-medium uppercase">Atau URL Gambar</span>
+                    <div className="h-px flex-1 bg-gray-300"></div>
+                  </div>
+
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <LinkIcon className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <input
+                      type="url"
+                      value={brandingImageUrl}
+                      onChange={(e) => setBrandingImageUrl(e.target.value)}
+                      className="pl-10 w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                      placeholder="https://example.com/branding.png"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="pt-4 border-t border-gray-100 flex justify-end">

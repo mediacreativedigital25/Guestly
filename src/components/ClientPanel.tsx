@@ -22,10 +22,6 @@ import {
   handleFirestoreError,
   OperationType,
   firebaseConfig,
-  storage,
-  ref,
-  uploadBytes,
-  getDownloadURL
 } from '../firebase';
 import { 
   getAuth, 

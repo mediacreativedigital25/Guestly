@@ -29,6 +29,7 @@ import AdminInvoice from './pages/admin/AdminInvoice';
 import AdminSettings from './pages/admin/AdminSettings';
 import AdminCalendar from './pages/admin/AdminCalendar';
 import AdminWATemplates from './pages/admin/AdminWATemplates';
+import MediaLibrary from './pages/admin/MediaLibrary';
 import ServicesCatalog from './pages/services/ServicesCatalog';
 import MyServices from './pages/services/MyServices';
 import ServiceCheckout from './pages/services/ServiceCheckout';
@@ -68,6 +69,7 @@ export default function App() {
             <Route path="admin/settings" element={<AdminSettings />} />
             <Route path="admin/calendar" element={<AdminCalendar />} />
             <Route path="admin/wa-templates" element={<AdminWATemplates />} />
+            <Route path="media" element={<MediaLibrary />} />
           </Route>
           {/* Public Route */}
           <Route path="/rsvp/:eventId/:ticketCode" element={<RSVP />} />

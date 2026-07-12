@@ -8,8 +8,6 @@ import dotenv from "dotenv";
 import firebaseConfig from "./firebase-applet-config.json";
 import cron from "node-cron";
 
-dotenv.config();
-
 // Initialize Firebase for server
 const firebaseApp = initializeApp(firebaseConfig);
 const db = initializeFirestore(firebaseApp, { experimentalForceLongPolling: true }, firebaseConfig.firestoreDatabaseId);
@@ -218,36 +216,9 @@ async function startServer() {
     }
   });
 
-  // Endpoint to serve base64 images to clients like WhatsApp crawlers
-  app.get(['/api/thumbnail/:eventId', '/api/thumbnail/:eventId/:filename'], async (req, res) => {
-    try {
-      const eventId = req.params.eventId;
-      if (!eventId) {
-        res.status(400).end();
-        return;
-      }
-      
-      const docRef = doc(db, 'events', eventId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const eventData = docSnap.data();
-        const base64 = eventData.thumbnailUrl || eventData.frameOverlayUrl;
-        if (base64 && typeof base64 === 'string' && base64.startsWith('data:image/')) {
-          const matches = base64.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-          if (matches && matches.length === 3) {
-            const imageBuffer = Buffer.from(matches[2], 'base64');
-            res.set('Content-Type', matches[1]);
-            res.send(imageBuffer);
-            return;
-          }
-        }
-      }
-      res.status(404).end();
-    } catch (e) {
-      console.error("Error serving thumbnail:", e);
-      res.status(500).end();
-    }
-  });
+  // Removed static uploads directory since we are using R2
+
+
 
   // Add a route to inject dynamic metadata for RSVP page
   app.get(['/public/rsvp/:eventId', '/rsvp/:eventId/:ticketCode'], async (req, res, next) => {
@@ -278,12 +249,15 @@ async function startServer() {
         
         let thumb = eventData.thumbnailUrl || eventData.frameOverlayUrl || 'https://queinvite.yulovi.com/wp-content/uploads/2026/06/Tumbnail.webp';
         
-        // WhatsApp requires absolute HTTP(S) URLs for og:image, not base64 data URIs
-        if (thumb.startsWith('data:image/')) {
-          const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-          const host = req.headers['x-forwarded-host'] || req.get('host');
-          const cacheBuster = thumb.length; // Will change if image content changes
-          thumb = `${protocol === 'http' && host && !host.includes('localhost') ? 'https' : protocol}://${host}/api/thumbnail/${eventId}?t=${cacheBuster}`;
+        // Ensure cache buster for images
+        if (thumb.startsWith('http')) {
+          try {
+            const urlObj = new URL(thumb);
+            urlObj.searchParams.set('t', Date.now().toString());
+            thumb = urlObj.toString();
+          } catch (e) {
+            // Ignore if invalid URL
+          }
         }
 
 

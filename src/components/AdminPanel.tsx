@@ -21,10 +21,6 @@ import {
   createUserWithEmailAndPassword,
   handleFirestoreError,
   OperationType,
-  storage,
-  ref,
-  uploadBytes,
-  getDownloadURL
 } from '../firebase';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { initializeApp, getApp, getApps } from 'firebase/app';
@@ -32,6 +28,7 @@ import { getAuth } from 'firebase/auth';
 import { AppUser, EventDetails, PackageTier } from '../types';
 import { PACKAGES } from '../constants';
 import { toast } from 'sonner';
+import { mediaService } from '../services/media/media.service';
 import { 
   Users, 
   Calendar, 
@@ -131,10 +128,11 @@ export default function AdminPanel({ user }: AdminPanelProps) {
 
     setIsUploading(true);
     try {
-      const storageRef = ref(storage, `logos/${auth.currentUser?.uid}_${Date.now()}`);
-      await uploadBytes(storageRef, file);
-      const downloadURL = await getDownloadURL(storageRef);
-      setProfileForm(prev => ({ ...prev, brandLogo: downloadURL }));
+      const result = await mediaService.uploadMedia({
+        file,
+        category: 'logos'
+      });
+      setProfileForm(prev => ({ ...prev, brandLogo: result.url }));
       toast.success("Logo berhasil diunggah.");
     } catch (error) {
       console.error("Error uploading logo:", error);
@@ -256,10 +254,11 @@ export default function AdminPanel({ user }: AdminPanelProps) {
 
     setIsUploadingClientLogo(true);
     try {
-      const storageRef = ref(storage, `logos/client_${Date.now()}`);
-      await uploadBytes(storageRef, file);
-      const downloadURL = await getDownloadURL(storageRef);
-      setNewClient(prev => ({ ...prev, brandLogo: downloadURL }));
+      const result = await mediaService.uploadMedia({
+        file,
+        category: 'logos'
+      });
+      setNewClient(prev => ({ ...prev, brandLogo: result.url }));
       toast.success("Logo berhasil diunggah.");
     } catch (error) {
       console.error("Error uploading logo:", error);
