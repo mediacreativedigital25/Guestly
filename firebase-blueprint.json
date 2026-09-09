@@ -10,6 +10,10 @@
         "email": { "type": "string", "format": "email" },
         "partnerId": { "type": "string", "description": "Null for superadmins, ID reference for partners/clients" },
         "clientId": { "type": "string", "description": "Null for superadmins/partners, ID reference for clients" },
+        "clientCredit": { "type": "number", "description": "Credit client that can only be set by superadmin" },
+        "eventCredit": { "type": "number", "description": "Credit event that can only be set by superadmin" },
+        "allowManualEvent": { "type": "boolean", "description": "Setting allowing manual event creation, superadmin only" },
+        "eventManual": { "type": "boolean", "description": "Alias flag for manual event creation" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

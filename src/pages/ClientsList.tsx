@@ -200,13 +200,20 @@ export default function ClientsList() {
         const userDoc = await transaction.get(userRef);
         if (!userDoc.exists()) throw new Error("User not found");
         
-        const currentQuota = userDoc.data().clientQuota || 0;
+        const userData = userDoc.data();
+        const currentQuota = userData.clientCredit !== undefined 
+          ? userData.clientCredit 
+          : (userData.clientQuota || 0);
         if (appUser.role !== 'superadmin' && currentQuota <= 0) {
           throw new Error("QUOTA_EXCEEDED");
         }
 
         if (appUser.role !== 'superadmin') {
-          transaction.update(userRef, { clientQuota: currentQuota - 1 });
+          transaction.update(userRef, { 
+            clientCredit: Math.max(0, currentQuota - 1),
+            clientQuota: Math.max(0, currentQuota - 1),
+            updatedAt: serverTimestamp()
+          });
         }
 
         const newClientRef = doc(collection(db, 'clients'));
@@ -297,7 +304,8 @@ export default function ClientsList() {
         <h1 className="text-2xl font-bold text-gray-900">Clients</h1>
         <button 
           onClick={() => {
-            if (!isAddingClient && appUser?.role !== 'superadmin' && (!appUser?.clientQuota || appUser.clientQuota <= 0)) {
+            const userCredit = appUser?.clientCredit !== undefined ? appUser.clientCredit : (appUser?.clientQuota || 0);
+            if (!isAddingClient && appUser?.role !== 'superadmin' && userCredit <= 0) {
                showAlert('Akses Ditolak', 'Anda tidak memiliki kuota klien. Silakan beli layanan terlebih dahulu.', 'warning');
                navigate('/auth/login/services/catalog');
                return;

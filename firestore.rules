@@ -47,7 +47,7 @@ service cloud.firestore {
     // --- Validation Helpers ---
 
     function isValidUser(data) {
-      return data.size() >= 5 && data.size() <= 14 &&
+      return data.size() >= 5 && data.size() <= 20 &&
         data.keys().hasAll(['role', 'name', 'email', 'createdAt', 'updatedAt']) &&
         data.role is string && (data.role == 'superadmin' || data.role == 'partner' || data.role == 'client') &&
         data.name is string && data.name.size() <= 150 &&
@@ -60,6 +60,10 @@ service cloud.firestore {
         (!('eventQuota' in data) || data.eventQuota == null || (data.eventQuota is number && data.eventQuota >= 0)) &&
         (!('clientQuota' in data) || data.clientQuota == null || (data.clientQuota is number && data.clientQuota >= 0)) &&
         (!('guestQuota' in data) || data.guestQuota == null || (data.guestQuota is number && data.guestQuota >= 0)) &&
+        (!('clientCredit' in data) || data.clientCredit == null || (data.clientCredit is number && data.clientCredit >= 0)) &&
+        (!('eventCredit' in data) || data.eventCredit == null || (data.eventCredit is number && data.eventCredit >= 0)) &&
+        (!('allowManualEvent' in data) || data.allowManualEvent == null || data.allowManualEvent is bool) &&
+        (!('eventManual' in data) || data.eventManual == null || data.eventManual is bool) &&
         (!('activeUntil' in data) || data.activeUntil == null || data.activeUntil is timestamp || data.activeUntil is string) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -195,9 +199,11 @@ service cloud.firestore {
          (isPartnerUser(incoming().partnerId) && incoming().role == 'client')
         );
       allow update: if isValidId(userId) && isSignedIn() && isValidUser(incoming()) && incoming().updatedAt == request.time &&
-        (isSuperAdmin() || (request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'businessName', 'logoUrl', 'updatedAt', 'eventQuota', 'clientQuota']) &&
+        (isSuperAdmin() || (request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'businessName', 'logoUrl', 'updatedAt', 'eventQuota', 'clientQuota', 'clientCredit', 'eventCredit']) &&
         (incoming().get('eventQuota', 0) <= existing().get('eventQuota', 0)) &&
-        (incoming().get('clientQuota', 0) <= existing().get('clientQuota', 0))));
+        (incoming().get('clientQuota', 0) <= existing().get('clientQuota', 0)) &&
+        (incoming().get('clientCredit', 0) <= existing().get('clientCredit', 0)) &&
+        (incoming().get('eventCredit', 0) <= existing().get('eventCredit', 0))));
       allow delete: if isValidId(userId) && isSuperAdmin();
     }
 

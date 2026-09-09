@@ -385,7 +385,11 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                  {/* Conditionally display "Layanan Saya" based on active status/quotas */}
                  {!!(appUser && (
                     (appUser.eventQuota && appUser.eventQuota > 0) || 
+                    (appUser.eventCredit && appUser.eventCredit > 0) || 
                     (appUser.clientQuota && appUser.clientQuota > 0) || 
+                    (appUser.clientCredit && appUser.clientCredit > 0) ||
+                    appUser.allowManualEvent ||
+                    appUser.eventManual ||
                     (appUser.guestQuota && appUser.guestQuota > 0) ||
                     appUser.activeUntil
                  )) && (

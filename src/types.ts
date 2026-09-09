@@ -17,6 +17,10 @@ export interface User {
   clientQuota?: number;
   guestQuota?: number;
   waBlastQuota?: number;
+  clientCredit?: number;
+  eventCredit?: number;
+  allowManualEvent?: boolean;
+  eventManual?: boolean;
   activeUntil?: any;
   createdAt: any;
   updatedAt: any;

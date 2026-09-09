@@ -25,6 +25,9 @@ export default function UsersList() {
   const [newUserPartnerId, setNewUserPartnerId] = useState('');
   const [newUserClientId, setNewUserClientId] = useState('');
   const [newUserLogoUrl, setNewUserLogoUrl] = useState('');
+  const [newUserClientCredit, setNewUserClientCredit] = useState<number>(0);
+  const [newUserEventCredit, setNewUserEventCredit] = useState<number>(0);
+  const [newUserAllowManualEvent, setNewUserAllowManualEvent] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   
@@ -37,6 +40,9 @@ export default function UsersList() {
   const [editUserBusinessName, setEditUserBusinessName] = useState('');
   const [editUserLogoUrl, setEditUserLogoUrl] = useState('');
   const [editUserRole, setEditUserRole] = useState<Role>('client');
+  const [editUserClientCredit, setEditUserClientCredit] = useState<number>(0);
+  const [editUserEventCredit, setEditUserEventCredit] = useState<number>(0);
+  const [editUserAllowManualEvent, setEditUserAllowManualEvent] = useState<boolean>(false);
 
   const { appUser } = useAuth();
   const { settings } = useSettings();
@@ -127,6 +133,9 @@ export default function UsersList() {
     setEditUserBusinessName(user.businessName || '');
     setEditUserLogoUrl(user.logoUrl || '');
     setEditUserRole(user.role);
+    setEditUserClientCredit(user.clientCredit !== undefined ? user.clientCredit : (user.clientQuota || 0));
+    setEditUserEventCredit(user.eventCredit !== undefined ? user.eventCredit : (user.eventQuota || 0));
+    setEditUserAllowManualEvent(Boolean(user.allowManualEvent ?? user.eventManual));
     setEditUserPassword('');
     setIsEditingUser(true);
   };
@@ -140,6 +149,12 @@ export default function UsersList() {
       const updateData: Partial<User> = {
         name: editUserName,
         phone: editUserPhone,
+        clientCredit: Number(editUserClientCredit) || 0,
+        clientQuota: Number(editUserClientCredit) || 0,
+        eventCredit: Number(editUserEventCredit) || 0,
+        eventQuota: Number(editUserEventCredit) || 0,
+        allowManualEvent: Boolean(editUserAllowManualEvent),
+        eventManual: Boolean(editUserAllowManualEvent),
         updatedAt: serverTimestamp()
       };
 
@@ -188,6 +203,12 @@ export default function UsersList() {
         partnerId: newUserPartnerId || null,
         clientId: newUserClientId || null,
         logoUrl: newUserRole === 'partner' ? newUserLogoUrl : undefined,
+        clientCredit: Number(newUserClientCredit) || 0,
+        clientQuota: Number(newUserClientCredit) || 0,
+        eventCredit: Number(newUserEventCredit) || 0,
+        eventQuota: Number(newUserEventCredit) || 0,
+        allowManualEvent: Boolean(newUserAllowManualEvent),
+        eventManual: Boolean(newUserAllowManualEvent),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };
@@ -239,6 +260,9 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
       setNewUserPartnerId('');
       setNewUserClientId('');
       setNewUserLogoUrl('');
+      setNewUserClientCredit(0);
+      setNewUserEventCredit(0);
+      setNewUserAllowManualEvent(false);
       setIsAddingUser(false);
       showAlert('Berhasil', 'User berhasil ditambahkan!', 'success');
     } catch (err: any) {
@@ -325,6 +349,65 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
             </>
           )}
 
+          {/* Pengaturan Khusus Super Admin: Credit Client & Event Manual */}
+          <div className="bg-indigo-50/50 p-4 rounded-lg border border-indigo-100 space-y-4">
+            <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-indigo-800 flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-indigo-600" />
+                Pengaturan Super Admin
+              </span>
+              <span className="text-[11px] text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded font-medium">Khusus Super Admin</span>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Credit Client</label>
+              <input 
+                type="number" 
+                min="0" 
+                value={newUserClientCredit} 
+                onChange={e => setNewUserClientCredit(Math.max(0, parseInt(e.target.value) || 0))} 
+                className="w-full border border-gray-300 rounded-md px-3 py-2 bg-white" 
+                placeholder="0" 
+              />
+              <p className="text-xs text-gray-500 mt-1">Jumlah kredit / kuota client yang diberikan kepada user ini.</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Credit Event (Manual)</label>
+              <input 
+                type="number" 
+                min="0" 
+                value={newUserEventCredit} 
+                onChange={e => setNewUserEventCredit(Math.max(0, parseInt(e.target.value) || 0))} 
+                className="w-full border border-gray-300 rounded-md px-3 py-2 bg-white" 
+                placeholder="0" 
+              />
+              <p className="text-xs text-gray-500 mt-1">Jumlah kredit / kuota event yang diberikan secara manual. Jika 0, pembuatan event terhalang hak akses.</p>
+            </div>
+
+            <div className="pt-2 border-t border-indigo-100/70">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-sm font-medium text-gray-800 block cursor-pointer">
+                    Event Manual (Bypass Tanpa Batas)
+                  </label>
+                  <p className="text-xs text-gray-500">
+                    Aktifkan jika ingin mengizinkan pembuatan event tanpa batas kuota kredit.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-3">
+                  <input
+                    type="checkbox"
+                    checked={newUserAllowManualEvent}
+                    onChange={e => setNewUserAllowManualEvent(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
+              </div>
+            </div>
+          </div>
+
           <div className="flex justify-end pt-4 mt-6 border-t border-gray-100">
             <button
               type="button"
@@ -370,6 +453,65 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
             </>
           )}
 
+          {/* Pengaturan Khusus Super Admin: Credit Client & Event Manual */}
+          <div className="bg-indigo-50/50 p-4 rounded-lg border border-indigo-100 space-y-4">
+            <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-indigo-800 flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-indigo-600" />
+                Pengaturan Super Admin
+              </span>
+              <span className="text-[11px] text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded font-medium">Khusus Super Admin</span>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Credit Client</label>
+              <input 
+                type="number" 
+                min="0" 
+                value={editUserClientCredit} 
+                onChange={e => setEditUserClientCredit(Math.max(0, parseInt(e.target.value) || 0))} 
+                className="w-full border border-gray-300 rounded-md px-3 py-2 bg-white" 
+                placeholder="0" 
+              />
+              <p className="text-xs text-gray-500 mt-1">Jumlah kredit / kuota client yang diberikan kepada user ini.</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Credit Event (Manual)</label>
+              <input 
+                type="number" 
+                min="0" 
+                value={editUserEventCredit} 
+                onChange={e => setEditUserEventCredit(Math.max(0, parseInt(e.target.value) || 0))} 
+                className="w-full border border-gray-300 rounded-md px-3 py-2 bg-white" 
+                placeholder="0" 
+              />
+              <p className="text-xs text-gray-500 mt-1">Jumlah kredit / kuota event yang diberikan secara manual. Jika 0, pembuatan event terhalang hak akses.</p>
+            </div>
+
+            <div className="pt-2 border-t border-indigo-100/70">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-sm font-medium text-gray-800 block cursor-pointer">
+                    Event Manual (Bypass Tanpa Batas)
+                  </label>
+                  <p className="text-xs text-gray-500">
+                    Aktifkan jika ingin mengizinkan pembuatan event tanpa batas kuota kredit.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-3">
+                  <input
+                    type="checkbox"
+                    checked={editUserAllowManualEvent}
+                    onChange={e => setEditUserAllowManualEvent(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
+              </div>
+            </div>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Password Baru (Opsional)</label>
             <input minLength={6} value={editUserPassword} onChange={e => setEditUserPassword(e.target.value)} type="password" className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="Biarkan kosong jika tidak ingin mengubah password" />
@@ -407,6 +549,9 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Credit Client</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Credit Event</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Event Manual</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Partner/Client ID</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
                 </tr>
@@ -436,6 +581,27 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                          <option value="client">Client</option>
                        </select>
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                        {user.clientCredit !== undefined ? user.clientCredit : (user.clientQuota || 0)} Credit
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                        {user.eventCredit !== undefined ? user.eventCredit : (user.eventQuota || 0)} Credit
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      {user.allowManualEvent || user.eventManual ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          Bypass Aktif
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
+                          Standar (Kuota)
+                        </span>
+                      )}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       <div>Partner: {user.partnerId || '-'}</div>
                       <div>Client: {user.clientId || '-'}</div>
@@ -462,7 +628,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                 ))}
                 {users.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
                       Belum ada user.
                     </td>
                   </tr>

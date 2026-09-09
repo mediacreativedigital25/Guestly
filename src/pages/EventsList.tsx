@@ -64,35 +64,19 @@ export default function EventsList() {
   };
 
   const openCreateModal = () => {
-    let isActive = false;
-    let hasQuota = false;
+    let hasAccess = false;
 
-    if (appUser?.role === 'superadmin') {
-      isActive = true;
-      hasQuota = true;
+    if (appUser?.role === 'superadmin' || appUser?.allowManualEvent || appUser?.eventManual) {
+      hasAccess = true;
     } else {
-      let activeDate: Date | null = null;
-      if (appUser?.activeUntil) {
-         if (appUser.activeUntil.toDate) activeDate = appUser.activeUntil.toDate();
-         else if (typeof appUser.activeUntil === 'string') activeDate = new Date(appUser.activeUntil);
-         else if (appUser.activeUntil.seconds) activeDate = new Date(appUser.activeUntil.seconds * 1000);
-      }
-      if (activeDate && activeDate > new Date()) {
-         isActive = true;
-      }
-      if (appUser?.eventQuota && appUser.eventQuota > 0) {
-         hasQuota = true;
+      const userEventCredit = appUser?.eventCredit !== undefined ? appUser.eventCredit : (appUser?.eventQuota || 0);
+      if (userEventCredit > 0) {
+        hasAccess = true;
       }
     }
 
-    if (!isActive) {
-       showAlert('Akses Ditolak', 'Masa aktif akun Anda telah habis. Silakan beli layanan terlebih dahulu.', 'warning');
-       navigate('/auth/login/services/catalog');
-       return;
-    }
-    
-    if (!hasQuota) {
-       showAlert('Akses Ditolak', 'Anda tidak memiliki kuota acara. Silakan beli layanan terlebih dahulu.', 'warning');
+    if (!hasAccess) {
+       showAlert('Akses Ditolak', 'Anda tidak memiliki kuota acara. Silakan hubungi Super Admin atau beli layanan terlebih dahulu.', 'warning');
        navigate('/auth/login/services/catalog');
        return;
     }
@@ -287,11 +271,13 @@ export default function EventsList() {
         const docRef = await addDoc(collection(db, 'events'), payload);
         newDocId = docRef.id;
 
-        // Deduct quota if not superadmin
-        if (appUser?.role !== 'superadmin') {
-           const newQuota = Math.max(0, (appUser?.eventQuota || 0) - 1);
+        // Deduct quota if not superadmin and manual event is not enabled
+        if (appUser?.role !== 'superadmin' && !appUser?.allowManualEvent && !appUser?.eventManual) {
+           const currentCredit = appUser?.eventCredit !== undefined ? appUser.eventCredit : (appUser?.eventQuota || 0);
+           const newQuota = Math.max(0, currentCredit - 1);
            try {
              await updateDoc(doc(db, 'users', appUser!.id), {
+               eventCredit: newQuota,
                eventQuota: newQuota,
                updatedAt: serverTimestamp()
              });
