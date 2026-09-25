@@ -78,7 +78,7 @@ export default function ClientsList() {
           const { getDocs, limit } = await import('firebase/firestore');
           const qLimited = query(qClients, limit(50));
           const clientsSnap = await getDocs(qLimited);
-          const data = clientsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          const data = clientsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
           setClients(data);
           setLastVisible(clientsSnap.docs[clientsSnap.docs.length - 1]);
           setHasMore(clientsSnap.docs.length === 50);

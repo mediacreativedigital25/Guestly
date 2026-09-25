@@ -38,6 +38,49 @@
         "eventId": { "type": "string" }
       },
       "required": ["name", "message", "attendance", "timestamp", "eventId"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Global application configuration and settings.",
+      "type": "object",
+      "properties": {
+        "logoUrl": { "type": "string" },
+        "faviconUrl": { "type": "string" }
+      }
+    },
+    "Souvenir": {
+      "title": "Souvenir",
+      "description": "Souvenir item inventory per event.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "initialStock": { "type": "number" },
+        "totalDistributed": { "type": "number" },
+        "remainingStock": { "type": "number" },
+        "physicalStockAudit": { "type": "number" },
+        "lastAuditAt": { "type": "string" },
+        "lastAuditBy": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["eventId", "name", "initialStock", "totalDistributed", "remainingStock"]
+    },
+    "SouvenirLog": {
+      "title": "Souvenir Log",
+      "description": "Audit trail log for souvenir distribution, returns, and adjustments.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string" },
+        "souvenirId": { "type": "string" },
+        "souvenirName": { "type": "string" },
+        "guestName": { "type": "string" },
+        "quantity": { "type": "number" },
+        "action": { "type": "string", "enum": ["TAKE", "RETURN", "ADJUSTMENT"] },
+        "notes": { "type": "string" },
+        "performedBy": { "type": "string" }
+      },
+      "required": ["eventId", "souvenirId", "souvenirName", "guestName", "quantity", "action"]
     }
   },
   "firestore": {
@@ -49,9 +92,21 @@
       "schema": "Event",
       "description": "Event details."
     },
+    "/events/{eventId}/souvenirs/{souvenirId}": {
+      "schema": "Souvenir",
+      "description": "Souvenir inventory items for this event."
+    },
+    "/events/{eventId}/souvenir_logs/{logId}": {
+      "schema": "SouvenirLog",
+      "description": "Distribution audit log for event souvenirs."
+    },
     "/guests/{guestId}": {
       "schema": "GuestEntry",
       "description": "Guestbook entries."
+    },
+    "/settings/{docId}": {
+      "schema": "Settings",
+      "description": "System-wide settings documents like global, publicStats, and waTemplates."
     }
   }
 }

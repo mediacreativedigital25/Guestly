@@ -143,7 +143,7 @@ export default function EventsList() {
           const { getDocs, limit } = await import('firebase/firestore');
           const qLimited = query(q, limit(50));
           const snapshot = await getDocs(qLimited);
-          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventRecord));
           setEvents(data);
           setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
           setHasMore(snapshot.docs.length === 50);
@@ -159,7 +159,7 @@ export default function EventsList() {
            try {
              const { getDocs } = await import('firebase/firestore');
              const snapClients = await getDocs(cQuery);
-             const clientsData = snapClients.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+             const clientsData = snapClients.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
              setClients(clientsData);
            } catch(error) {
              console.error("Error fetching clients for events list:", error);
@@ -192,7 +192,7 @@ export default function EventsList() {
       }
       const qLimited = query(q, startAfter(lastVisible), limit(50));
       const snapshot = await getDocs(qLimited);
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventRecord));
       setEvents(prev => [...prev, ...data]);
       setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
       setHasMore(snapshot.docs.length === 50);

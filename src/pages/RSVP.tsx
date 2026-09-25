@@ -1,7 +1,7 @@
 import { useParams } from 'react-router-dom';
 import QRCode from 'react-qr-code';
 import { useState, useEffect } from 'react';
-import { doc, getDocs, updateDoc, serverTimestamp, query, collection, where } from 'firebase/firestore';
+import { doc, getDocs, updateDoc, serverTimestamp, query, collection, where, limit } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Guest, EventRecord } from '../types';
 import { useSettings } from '../SettingsContext';
@@ -69,7 +69,7 @@ export default function RSVP() {
     const fetchRSVP = async () => {
       try {
         const guestsRef = collection(db, 'events', eventId!, 'guests');
-        const q = query(guestsRef, where('ticketCode', '==', ticketCode || ''));
+        const q = query(guestsRef, where('ticketCode', '==', ticketCode || ''), limit(1));
         const snapshot = await getDocs(q);
         
         let currentSession = '';

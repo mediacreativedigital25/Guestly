@@ -533,7 +533,7 @@ export default function SalesPage() {
                   ].map((item, idx) => (
                     <div key={idx} className="flex flex-col items-center text-center gap-3 group">
                       <div className="w-14 h-14 bg-rose-50 rounded-2xl flex items-center justify-center text-[#F46279] group-hover:bg-[#F46279] group-hover:text-white transition-all shadow-sm">
-                        {React.cloneElement(item.icon as React.ReactElement, { size: 24, strokeWidth: 1.5 })}
+                        {React.cloneElement(item.icon as React.ReactElement<any>, { size: 24, strokeWidth: 1.5 })}
                       </div>
                       <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">{item.label}</span>
                     </div>
@@ -551,8 +551,8 @@ export default function SalesPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col lg:flex-row items-center gap-10 lg:gap-16">
             <div className="lg:w-1/3 z-10">
-              <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 mb-4 font-serif">{settings?.salespage?.featuresCarouselTitle || 'Kelola Acara dengan Mudah'}</h2>
-              <p className="text-gray-600 text-lg mb-8 leading-relaxed">{settings?.salespage?.featuresCarouselDesc || 'Semua data tersaji rapi dalam dashboard yang intuitif dan mudah digunakan.'}</p>
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 mb-4 font-serif">{(settings?.salespage as any)?.featuresCarouselTitle || 'Kelola Acara dengan Mudah'}</h2>
+              <p className="text-gray-600 text-lg mb-8 leading-relaxed">{(settings?.salespage as any)?.featuresCarouselDesc || 'Semua data tersaji rapi dalam dashboard yang intuitif dan mudah digunakan.'}</p>
               <div className="flex items-center gap-4">
                 <button onClick={() => navigate('/auth/login')} className="px-6 py-2.5 text-[14px] bg-[#F46279] text-white font-medium rounded-full shadow-lg shadow-rose-200 hover:bg-[#e04f66] transition-all">
                   Lihat Demo
@@ -568,7 +568,7 @@ export default function SalesPage() {
               </div>
             </div>
             <div ref={featuresSliderRef} className="w-full lg:w-2/3 flex gap-4 overflow-x-auto pb-8 snap-x relative lg:-mr-32 pt-8 hide-scrollbar scroll-smooth">
-               {(settings?.salespage?.featuresCarouselData && settings.salespage.featuresCarouselData.length > 0 ? settings.salespage.featuresCarouselData : [
+               {(((settings?.salespage as any)?.featuresCarouselData && (settings.salespage as any).featuresCarouselData.length > 0) ? (settings.salespage as any).featuresCarouselData : [
                  { title: 'Dashboard Utama', img: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80', link: '' },
                  { title: 'Data Tamu', img: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80', link: '' },
                  { title: 'Scan QR', img: 'https://images.unsplash.com/photo-1605810230434-7631ac76ec81?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80', link: '' },
@@ -1012,7 +1012,7 @@ export default function SalesPage() {
                       <summary className="flex justify-between items-center font-medium cursor-pointer list-none p-5 text-gray-900 hover:text-[#F46279] transition-colors">
                         <span>{faq.q}</span>
                         <span className="transition group-open:rotate-180">
-                          <svg fill="none" height="24" shapeRendering="geometricPrecision" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" viewBox="0 0 24 24" w="24"><path d="M6 9l6 6 6-6"></path></svg>
+                          <svg fill="none" height="24" shapeRendering="geometricPrecision" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg>
                         </span>
                       </summary>
                       <div className="text-gray-600 px-5 pb-5 leading-relaxed text-sm">

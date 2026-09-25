@@ -1,9 +1,9 @@
 import { useParams, Link } from 'react-router-dom';
-import { QrCode, Printer, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code, MessageCircle, RefreshCcw } from 'lucide-react';
+import { QrCode, Printer, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code, MessageCircle, RefreshCcw, Users, Loader2, Gift } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'react-qr-code';
 import * as htmlToImage from 'html-to-image';
-import { collection, query, getDocs, addDoc, serverTimestamp, doc, getDoc, deleteDoc, updateDoc, deleteField, onSnapshot } from 'firebase/firestore';
+import { collection, query, getDocs, addDoc, serverTimestamp, doc, getDoc, deleteDoc, updateDoc, deleteField, onSnapshot, writeBatch } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Guest, EventRecord, WATemplate } from '../types';
 import { parseFirestoreDate } from '../lib/utils';
@@ -15,6 +15,8 @@ import { Modal } from '../components/Modal';
 import { useAuth } from '../AuthContext';
 import { showAlert, showConfirm } from '../lib/alerts';
 import { useSettings } from '../SettingsContext';
+import SouvenirManagement from '../components/SouvenirManagement';
+import { souvenirStorage } from '../services/souvenirStorage';
 
 export default function EventDetails() {
   const { eventId } = useParams();
@@ -33,7 +35,7 @@ export default function EventDetails() {
   const [searchTerm, setSearchTerm] = useState('');
   const [rsvpFilter, setRsvpFilter] = useState('all');
   const [attendanceFilter, setAttendanceFilter] = useState('all');
-  const [activeTab, setActiveTab] = useState<'guest-list' | 'rsvp' | 'attended'>('guest-list');
+  const [activeTab, setActiveTab] = useState<'guest-list' | 'rsvp' | 'attended' | 'souvenir'>('guest-list');
   const [isEmbedModalOpen, setIsEmbedModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrRef = useRef<HTMLDivElement>(null);
@@ -43,7 +45,7 @@ export default function EventDetails() {
   const [isBlastModalOpen, setIsBlastModalOpen] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [selectedGuestIds, setSelectedGuestIds] = useState<string[]>([]);
-  const [itemsPerPage, setItemsPerPage] = useState<number>(25);
+  const [itemsPerPage, setItemsPerPage] = useState<number | 'all'>(50);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [isEditingGuest, setIsEditingGuest] = useState(false);
   const [editingGuestId, setEditingGuestId] = useState<string | null>(null);
@@ -54,51 +56,32 @@ export default function EventDetails() {
   const [editGuestSession, setEditGuestSession] = useState('');
   const [isRefreshingGuests, setIsRefreshingGuests] = useState(false);
 
-  const [lastVisibleGuest, setLastVisibleGuest] = useState<any>(null);
-  const [hasMoreGuests, setHasMoreGuests] = useState(false);
-  const [loadingMoreGuests, setLoadingMoreGuests] = useState(false);
-
-
-  // Reset page when filters change
-
-  const handleLoadMoreGuests = async () => {
-    if (!eventId || !lastVisibleGuest) return;
-    setLoadingMoreGuests(true);
-    try {
-      const { startAfter, limit, query, collection, getDocs } = await import('firebase/firestore');
-      const guestsRef = collection(db, 'events', eventId, 'guests');
-      const q = query(guestsRef, startAfter(lastVisibleGuest), limit(50));
-      const snapshot = await getDocs(q);
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
-      setGuests(prev => [...prev, ...data]);
-      setLastVisibleGuest(snapshot.docs[snapshot.docs.length - 1]);
-      setHasMoreGuests(snapshot.docs.length === 50);
-    } catch (error) {
-      console.error("Error loading more guests", error);
-    } finally {
-      setLoadingMoreGuests(false);
-    }
-  };
-
-  useEffect(() => {
-  }, [searchTerm, rsvpFilter, attendanceFilter, activeTab]);
+  // High-performance batch states
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
+  const [isGeneratingSample, setIsGeneratingSample] = useState(false);
+  const [sampleProgress, setSampleProgress] = useState<{ current: number; total: number } | null>(null);
 
   const fetchGuests = async (showIndicator = false) => {
     if (!eventId) return;
     if (showIndicator) setIsRefreshingGuests(true);
     try {
-      const { limit, orderBy, query, collection, getDocs } = await import('firebase/firestore');
       const guestsRef = collection(db, 'events', eventId, 'guests');
-      // Using limit to scale, ordered by createdAt or similar if possible. We rely on default sort if not.
-      // Wait, let's use limit(50)
-      const q = query(guestsRef, limit(50));
-      const snapshot = await getDocs(q);
+      const snapshot = await getDocs(guestsRef);
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
-      setGuests(data);
-      setLastVisibleGuest(snapshot.docs[snapshot.docs.length - 1]);
-      setHasMoreGuests(snapshot.docs.length === 50);
+      
+      // Sort in-memory: newest first, then by name
+      data.sort((a, b) => {
+        const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : 0);
+        const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : 0);
+        if (timeB !== timeA) return timeB - timeA;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+
+      setGuests(souvenirStorage.mergeGuestsWithSouvenirs(eventId, data));
     } catch (error) {
       console.error('Error fetching guests:', error);
+      handleFirestoreError(error, OperationType.GET, `events/${eventId}/guests`);
     } finally {
       setLoading(false);
       if (showIndicator) setIsRefreshingGuests(false);
@@ -407,8 +390,14 @@ export default function EventDetails() {
     : guests.filter(g => g.hasResponded || g.rsvpStatus !== 'pending' || (g.wishes && g.wishes.trim().length > 0));
   
   const filteredGuests = baseFilteredGuests.filter(guest => {
-    const matchesSearch = guest.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          (guest.ticketCode && guest.ticketCode.toLowerCase().includes(searchTerm.toLowerCase()));
+    const q = searchTerm.toLowerCase().trim();
+    const matchesSearch = !q ||
+                          (guest.name && guest.name.toLowerCase().includes(q)) || 
+                          (guest.ticketCode && guest.ticketCode.toLowerCase().includes(q)) ||
+                          (guest.address && guest.address.toLowerCase().includes(q)) ||
+                          (guest.phone && guest.phone.includes(q)) ||
+                          (guest.category && guest.category.toLowerCase().includes(q)) ||
+                          (guest.session && guest.session.toLowerCase().includes(q));
     
     let matchesStatus = true;
     if (activeTab === 'rsvp') {
@@ -428,8 +417,15 @@ export default function EventDetails() {
     return matchesSearch && matchesStatus;
   });
 
-  const totalPages = Math.ceil(filteredGuests.length / itemsPerPage);
-  const paginatedGuests = filteredGuests;
+  const totalPages = itemsPerPage === 'all' ? 1 : Math.max(1, Math.ceil(filteredGuests.length / itemsPerPage));
+  const startIndex = itemsPerPage === 'all' ? 0 : (currentPage - 1) * itemsPerPage;
+  const endIndex = itemsPerPage === 'all' ? filteredGuests.length : Math.min(startIndex + itemsPerPage, filteredGuests.length);
+  const paginatedGuests = itemsPerPage === 'all' ? filteredGuests : filteredGuests.slice(startIndex, endIndex);
+
+  // Reset page to 1 whenever filters or itemsPerPage change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, rsvpFilter, attendanceFilter, activeTab, itemsPerPage]);
 
   const handleExportPDF = () => {
     const doc = new jsPDF();
@@ -689,76 +685,246 @@ export default function EventDetails() {
     const reader = new FileReader();
     reader.onload = async (evt) => {
       try {
+        setIsImporting(true);
+        setImportProgress({ current: 0, total: 0 });
+
         const bstr = evt.target?.result;
         const wb = XLSX.read(bstr, { type: 'binary' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
         const data = XLSX.utils.sheet_to_json(ws);
         
-        let addedCount = 0;
-        const duplicateNames: string[] = [];
-        const newGuests: Guest[] = [];
+        let duplicateNames: string[] = [];
+        const existingNames = new Set(guests.map(g => (g.name || '').toLowerCase().trim()));
+        const validRows: any[] = [];
 
         for (const row of data as any[]) {
-           if (appUser?.role !== 'superadmin' && appUser?.guestQuota !== undefined && (guests.length + addedCount) >= appUser.guestQuota) {
-             showAlert('Peringatan', `Impor dihentikan karena mencapai batas maksimal kuota tamu (${appUser.guestQuota} tamu). Silakan upgrade layanan.`, 'warning');
-             break;
-           }
+          let guestName = row["Nama Tamu"] || row.Nama || row["nama"] || row["Nama Lengkap"];
+          if (!guestName) continue;
+          
+          const cleanedName = String(guestName).trim();
+          if (!cleanedName) continue;
 
-           let guestName = row["Nama Tamu"] || row.Nama;
-           if (guestName) {
-              const cleanedName = String(guestName).trim();
-              if (!cleanedName) continue;
-              
-              if (guests.some(g => g.name.toLowerCase() === cleanedName.toLowerCase()) || newGuests.some(g => g.name.toLowerCase() === cleanedName.toLowerCase())) {
-                  duplicateNames.push(cleanedName);
-                  continue;
-              }
+          if (existingNames.has(cleanedName.toLowerCase())) {
+            duplicateNames.push(cleanedName);
+            continue;
+          }
 
-              const ticketCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-              let phone = row["No. Hp"] || row.Telepon || row.hp || "";
+          existingNames.add(cleanedName.toLowerCase());
 
-              const payload = {
-                eventId: eventId!,
-                name: cleanedName,
-                ticketCode: ticketCode,
-                rsvpStatus: 'pending',
-                attended: false,
-                category: row.Kategori ? String(row.Kategori) : '',
-                session: row.Sesi ? String(row.Sesi) : '',
-                email: row.Email ? String(row.Email) : '',
-                phone: phone ? String(phone) : '',
-                address: row.Alamat ? String(row.Alamat) : '',
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
-              };
-              const docRef = await addDoc(collection(db, 'events', eventId!, 'guests'), payload);
-              newGuests.push({ id: docRef.id, ...payload } as unknown as Guest);
-              addedCount++;
-           }
+          const ticketCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+          const phone = row["No. Hp"] || row.Telepon || row.hp || row.Phone || row["No HP"] || "";
+          const address = row.Alamat || row.address || row.Kota || "";
+          const category = row.Kategori || row.category || "";
+          const session = row.Sesi || row.session || "";
+          const email = row.Email || row.email || "";
+
+          validRows.push({
+            name: cleanedName,
+            ticketCode,
+            phone: String(phone),
+            address: String(address),
+            category: String(category),
+            session: String(session),
+            email: String(email)
+          });
         }
-        
-        if (addedCount > 0 || duplicateNames.length > 0) {
-          let msg = `Berhasil mengimpor ${addedCount} tamu.`;
+
+        if (validRows.length === 0) {
+          setIsImporting(false);
+          setImportProgress(null);
           if (duplicateNames.length > 0) {
-              const duplicatesList = duplicateNames.slice(0, 10).join(', ') + (duplicateNames.length > 10 ? ` dan ${duplicateNames.length - 10} lainnya` : '');
-              msg += `\n\nInfo: Data tamu berikut sudah tersedia (duplikat nama diabaikan):\n${duplicatesList}`;
+            showAlert('Info', `Semua data (${duplicateNames.length} nama) sudah ada di daftar tamu (duplikat).`, 'info');
+          } else {
+            showAlert('Peringatan', 'Tidak ada data tamu yang valid untuk diimpor. Pastikan ada kolom "Nama Tamu".', 'warning');
           }
-          showAlert('Info Import', msg, 'info');
-          if (addedCount > 0) {
-              setGuests(prev => [...prev, ...newGuests]);
-          }
-        } else {
-          showAlert('Peringatan', 'Tidak ada data tamu yang valid untuk diimpor. Pastikan ada baris "Nama Tamu".', 'warning');
+          return;
         }
+
+        setImportProgress({ current: 0, total: validRows.length });
+
+        // Batch write in chunks of 400 (well within Firestore 500 limit)
+        const newlyCreatedGuests: Guest[] = [];
+        const BATCH_SIZE = 400;
+
+        for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
+          const chunk = validRows.slice(i, i + BATCH_SIZE);
+          const batch = writeBatch(db);
+
+          for (const item of chunk) {
+            const guestDocRef = doc(collection(db, 'events', eventId!, 'guests'));
+            const payload: any = {
+              eventId: eventId!,
+              name: item.name,
+              ticketCode: item.ticketCode,
+              rsvpStatus: 'pending',
+              attended: false,
+              category: item.category,
+              session: item.session,
+              email: item.email,
+              phone: item.phone,
+              address: item.address,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            };
+            batch.set(guestDocRef, payload);
+            newlyCreatedGuests.push({ id: guestDocRef.id, ...payload });
+          }
+
+          await batch.commit();
+          setImportProgress({ current: Math.min(i + chunk.length, validRows.length), total: validRows.length });
+        }
+
+        setGuests(prev => [...newlyCreatedGuests, ...prev]);
+
+        let msg = `Berhasil mengimpor ${newlyCreatedGuests.length} tamu sekaligus ke database!`;
+        if (duplicateNames.length > 0) {
+          const duplicatesList = duplicateNames.slice(0, 10).join(', ') + (duplicateNames.length > 10 ? ` dan ${duplicateNames.length - 10} lainnya` : '');
+          msg += `\n\nInfo: ${duplicateNames.length} nama duplikat diabaikan:\n${duplicatesList}`;
+        }
+        showAlert('Sukses Impor', msg, 'success');
 
       } catch (error) {
-        console.error(error);
+        console.error('Error importing Excel:', error);
         showAlert('Error', 'Terjadi kesalahan saat mengimpor file Excel.', 'error');
+      } finally {
+        setIsImporting(false);
+        setImportProgress(null);
       }
     };
     reader.readAsBinaryString(file);
-    if(fileInputRef.current) fileInputRef.current.value = "";
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleGenerateSampleGuests = async (count = 1000) => {
+    if (!eventId) return;
+
+    const confirmed = await showConfirm(
+      `Apakah Anda yakin ingin membuat ${count.toLocaleString('id-ID')} data tamu contoh untuk acara ini?\n\nData akan langsung disimpan ke database dengan kode QR/tiket unik untuk uji coba scan dan kapasitas.`
+    );
+    if (!confirmed) return;
+
+    setIsGeneratingSample(true);
+    setSampleProgress({ current: 0, total: count });
+
+    try {
+      const FIRST_NAMES = ['Ahmad', 'Muhammad', 'Budi', 'Rizky', 'Dian', 'Siti', 'Nur', 'Dewi', 'Wahyu', 'Bayu', 'Eka', 'Hendra', 'Maya', 'Aditya', 'Sri', 'Dimas', 'Indah', 'Agus', 'Putri', 'Bambang', 'Anisa', 'Fajar', 'Tri', 'Rian', 'Lestari', 'Surya', 'Wulan', 'Gilang', 'Rina', 'Yusuf', 'Fitri', 'Doni', 'Ratna', 'Teguh', 'Nadia', 'Ilham', 'Tia', 'Aris', 'Sari', 'Reza'];
+      const LAST_NAMES = ['Santoso', 'Pratama', 'Kusuma', 'Hidayah', 'Wijaya', 'Nugraha', 'Permatasari', 'Saputra', 'Setiawan', 'Gunawan', 'Anggraini', 'Putra', 'Wahyuni', 'Anggara', 'Ramadhan', 'Utami', 'Purnomo', 'Syahputra', 'Wibowo', 'Kurniawan', 'Siregar', 'Lubis', 'Nasution', 'Harahap', 'Ginting', 'Sitorus', 'Simanjuntak', 'Hutapea', 'Sihombing', 'Panjaitan', 'Pasaribu'];
+      const CITIES = ['Jakarta Selatan', 'Jakarta Barat', 'Jakarta Timur', 'Bandung', 'Surabaya', 'Semarang', 'Yogyakarta', 'Solo', 'Malang', 'Denpasar', 'Medan', 'Bekasi', 'Tangerang', 'Depok', 'Bogor'];
+
+      const categories = (event?.guestCategories && event.guestCategories.length > 0) ? event.guestCategories : ['VIP', 'Keluarga', 'Reguler'];
+      const sessions = (event?.sessions && event.sessions.length > 0) ? event.sessions : ['Akad Nikah', 'Resepsi'];
+
+      const existingNames = new Set(guests.map(g => (g.name || '').toLowerCase().trim()));
+      const generatedList: any[] = [];
+
+      for (let i = 1; i <= count; i++) {
+        const fn = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
+        const ln = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
+        let candidateName = `${fn} ${ln}`;
+        if (existingNames.has(candidateName.toLowerCase())) {
+          candidateName = `${fn} ${ln} ${i}`;
+        }
+        existingNames.add(candidateName.toLowerCase());
+
+        const ticketCode = 'TKT' + Math.random().toString(36).substring(2, 8).toUpperCase() + String(i).padStart(3, '0');
+        const phone = `0812${Math.floor(10000000 + Math.random() * 90000000)}`;
+        const city = CITIES[Math.floor(Math.random() * CITIES.length)];
+        const cat = categories[Math.floor(Math.random() * categories.length)];
+        const ses = sessions[Math.floor(Math.random() * sessions.length)];
+
+        generatedList.push({
+          name: candidateName,
+          ticketCode,
+          phone,
+          address: city,
+          category: cat,
+          session: ses
+        });
+      }
+
+      // Write in batches of 400
+      const newlyCreatedGuests: Guest[] = [];
+      const BATCH_SIZE = 400;
+
+      for (let i = 0; i < generatedList.length; i += BATCH_SIZE) {
+        const chunk = generatedList.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+
+        for (const item of chunk) {
+          const guestDocRef = doc(collection(db, 'events', eventId, 'guests'));
+          const payload: any = {
+            eventId,
+            name: item.name,
+            ticketCode: item.ticketCode,
+            rsvpStatus: 'pending',
+            attended: false,
+            category: item.category,
+            session: item.session,
+            phone: item.phone,
+            address: item.address,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          };
+          batch.set(guestDocRef, payload);
+          newlyCreatedGuests.push({ id: guestDocRef.id, ...payload });
+        }
+
+        await batch.commit();
+        setSampleProgress({ current: Math.min(i + chunk.length, generatedList.length), total: generatedList.length });
+      }
+
+      setGuests(prev => [...newlyCreatedGuests, ...prev]);
+      showAlert(
+        'Berhasil!',
+        `Sukses membuat ${count.toLocaleString('id-ID')} data tamu contoh! Sekarang semua data tamu tampil lengkap di tabel dengan kode tiket dan siap untuk dites scan.`,
+        'success'
+      );
+    } catch (error) {
+      console.error('Error generating sample guests:', error);
+      showAlert('Error', 'Gagal membuat data tamu contoh. Cek koneksi.', 'error');
+    } finally {
+      setIsGeneratingSample(false);
+      setSampleProgress(null);
+    }
+  };
+
+  const handleClearAllGuests = async () => {
+    if (!eventId || guests.length === 0) return;
+
+    if (appUser?.role !== 'superadmin' && appUser?.role !== 'partner') {
+      showAlert('Ditolak', 'Hanya Admin atau Partner yang dapat menghapus semua tamu.', 'error');
+      return;
+    }
+
+    const confirmed = await showConfirm(
+      `PERINGATAN: Apakah Anda yakin ingin MENGHAPUS SEMUA (${guests.length}) tamu pada acara ini?\n\nTindakan ini tidak dapat dibatalkan.`
+    );
+    if (!confirmed) return;
+
+    setLoading(true);
+    try {
+      const BATCH_SIZE = 400;
+      for (let i = 0; i < guests.length; i += BATCH_SIZE) {
+        const chunk = guests.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+        for (const g of chunk) {
+          if (g.id) {
+            batch.delete(doc(db, 'events', eventId, 'guests', g.id));
+          }
+        }
+        await batch.commit();
+      }
+
+      setGuests([]);
+      setSelectedGuestIds([]);
+      showAlert('Berhasil', 'Semua data tamu berhasil dihapus.', 'success');
+    } catch (error) {
+      console.error('Error clearing guests:', error);
+      showAlert('Error', 'Gagal menghapus semua data tamu.', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1013,26 +1179,49 @@ export default function EventDetails() {
           >
             Berhasil Scan
           </button>
+          <button
+            onClick={() => setActiveTab('souvenir')}
+            className={`whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-1.5 ${activeTab === 'souvenir' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+          >
+            <Gift className="w-4 h-4" />
+            <span>Souvenir & Logistik</span>
+          </button>
         </nav>
       </div>
 
-      {(activeTab === 'guest-list' || activeTab === 'attended') && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-start gap-3">
-          <MessageCircle className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
-          <div>
-            <h4 className="text-sm font-semibold text-blue-800">Kuota WA Blast Otomatis: {Math.max(0, 50 - (event?.waBlastCount || 0)) + (appUser?.waBlastQuota || 0)} Pesan Tersedia</h4>
-            <p className="text-xs text-blue-700 mt-1">Setiap acara mendapatkan <strong>50 kuota gratis</strong> (Terpakai: {Math.min(50, event?.waBlastCount || 0)}/50). Jika habis, sistem akan menggunakan kuota add-on Anda (Sisa: {appUser?.waBlastQuota || 0}). Anda dapat membeli add-on di menu Layanan. Pengiriman WA secara manual tidak mengurangi kuota.</p>
-          </div>
-        </div>
-      )}
+      {activeTab === 'souvenir' ? (
+        <SouvenirManagement
+          eventId={eventId!}
+          event={event}
+          guests={guests}
+          onGuestsUpdated={() => fetchGuests(false)}
+          currentUserEmail={appUser?.email}
+          currentUserName={appUser?.name}
+        />
+      ) : (
+        <>
+          {(activeTab === 'guest-list' || activeTab === 'attended') && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-start gap-3">
+              <MessageCircle className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
+              <div>
+                <h4 className="text-sm font-semibold text-blue-800">Kuota WA Blast Otomatis: {Math.max(0, 50 - (event?.waBlastCount || 0)) + (appUser?.waBlastQuota || 0)} Pesan Tersedia</h4>
+                <p className="text-xs text-blue-700 mt-1">Setiap acara mendapatkan <strong>50 kuota gratis</strong> (Terpakai: {Math.min(50, event?.waBlastCount || 0)}/50). Jika habis, sistem akan menggunakan kuota add-on Anda (Sisa: {appUser?.waBlastQuota || 0}). Anda dapat membeli add-on di menu Layanan. Pengiriman WA secara manual tidak mengurangi kuota.</p>
+              </div>
+            </div>
+          )}
 
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-4 sm:px-6 py-4 flex flex-col gap-4 border-b border-gray-100 bg-gray-50">
           {/* Top Row: Title & Action Buttons */}
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 w-full">
-            <h2 className="text-lg font-medium text-gray-900 whitespace-nowrap">
-               {activeTab === 'rsvp' ? 'RSVP & Ucapan' : activeTab === 'attended' ? 'Berhasil Scan' : 'Daftar Tamu'} ({filteredGuests.length})
-            </h2>
+            <div>
+              <h2 className="text-lg font-medium text-gray-900 whitespace-nowrap">
+                {activeTab === 'rsvp' ? 'RSVP & Ucapan' : activeTab === 'attended' ? 'Berhasil Scan' : 'Daftar Tamu'} ({filteredGuests.length})
+              </h2>
+              {guests.length > 0 && filteredGuests.length !== guests.length && (
+                <p className="text-xs text-gray-500 mt-0.5">Dari total {guests.length} tamu terdaftar</p>
+              )}
+            </div>
             
             <div className="flex flex-wrap items-center justify-start lg:justify-end gap-3 w-full lg:w-auto">
               <input 
@@ -1047,46 +1236,62 @@ export default function EventDetails() {
                 <button 
                   onClick={handleDownloadTemplate}
                   className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-1.5 border-r border-gray-200 transition-colors whitespace-nowrap"
-                  title="Download Template"
+                  title="Download Template Excel"
                 >
                   <DownloadIcon className="w-4 h-4 text-gray-500" /> <span className="hidden sm:inline">Template</span>
                 </button>
                 <button 
                   onClick={handleImportClick}
-                  className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-1.5 border-r border-gray-200 transition-colors whitespace-nowrap"
-                  title="Import Excel"
+                  disabled={isImporting || isGeneratingSample}
+                  className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-1.5 border-r border-gray-200 transition-colors whitespace-nowrap disabled:opacity-50"
+                  title="Import Excel (Mendukung > 1.000 Tamu Cepat)"
                 >
                   <FileSpreadsheet className="w-4 h-4 text-green-600"/> <span className="hidden sm:inline">Import</span>
                 </button>
                 <button 
                   onClick={handleExportPDF}
                   className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-1.5 border-r border-gray-200 transition-colors whitespace-nowrap"
-                  title="Export PDF"
+                  title="Export PDF Semua Tamu Sesuai Filter"
                 >
                   <FileText className="w-4 h-4 text-red-500"/> <span className="hidden sm:inline">PDF</span>
                 </button>
                 <button 
                   onClick={handleExportExcel}
                   className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap"
-                  title="Export Excel"
+                  title="Export Excel Semua Tamu Sesuai Filter"
                 >
                   <FileSpreadsheet className="w-4 h-4 text-green-600"/> <span className="hidden sm:inline">Excel</span>
                 </button>
               </div>
 
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleGenerateSampleGuests(1000)}
+                  disabled={isGeneratingSample || isImporting}
+                  className="justify-center text-sm font-medium flex items-center gap-1.5 px-3.5 py-2 rounded-md transition-colors whitespace-nowrap bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 shadow-sm disabled:opacity-50"
+                  title="Buat 1.000 data tamu contoh untuk uji coba kapasitas dan scanner"
+                >
+                  {isGeneratingSample ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-purple-600" />
+                  ) : (
+                    <Users className="w-4 h-4 text-purple-600" />
+                  )}
+                  <span>+ 1.000 Tamu Contoh</span>
+                </button>
+
                 <button 
                   onClick={() => fetchGuests(true)}
                   disabled={isRefreshingGuests}
-                  className={`justify-center text-sm font-medium flex items-center gap-1.5 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${
+                  className={`justify-center text-sm font-medium flex items-center gap-1.5 px-3 py-2 rounded-md transition-colors whitespace-nowrap ${
                     isRefreshingGuests 
                       ? 'text-gray-500 bg-gray-100 cursor-not-allowed opacity-70 border border-gray-200' 
                       : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 shadow-sm'
                   }`}
-                  title="Refresh Tamu"
+                  title="Refresh Seluruh Data Tamu"
                 >
                   <RefreshCcw className={`w-4 h-4 text-gray-500 ${isRefreshingGuests ? 'animate-spin' : ''}`}/>
                 </button>
+
                 <button 
                   onClick={openBlastModal}
                   disabled={isBlasting}
@@ -1099,6 +1304,7 @@ export default function EventDetails() {
                 >
                   <MessageCircle className="w-4 h-4 text-green-600"/> {isBlasting ? 'Memproses...' : 'Blast WA'}
                 </button>
+
                 <button 
                   onClick={() => setIsAddingGuest(!isAddingGuest)}
                   className={`justify-center text-sm font-medium flex items-center gap-1.5 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${
@@ -1109,9 +1315,36 @@ export default function EventDetails() {
                 >
                   <Plus className="w-4 h-4"/> {isAddingGuest ? 'Batal' : 'Tambah Tamu'}
                 </button>
+
+                {(appUser?.role === 'superadmin' || appUser?.role === 'partner') && guests.length > 0 && (
+                  <button
+                    onClick={handleClearAllGuests}
+                    disabled={isGeneratingSample || isImporting}
+                    className="justify-center text-xs font-medium flex items-center gap-1 px-2.5 py-2 rounded-md text-red-600 hover:bg-red-50 border border-red-200 transition-colors whitespace-nowrap"
+                    title="Kosongkan Semua Tamu (Reset Acara)"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           </div>
+
+          {/* Progress Indicators for Batch Operations */}
+          {(isImporting || isGeneratingSample) && (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 flex items-center justify-between animate-pulse">
+              <div className="flex items-center gap-3">
+                <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />
+                <span className="text-sm font-medium text-indigo-900">
+                  {isImporting ? 'Sedang menulis data Excel ke Firestore database...' : 'Sedang membuat 1.000 tamu contoh ke database...'}
+                </span>
+              </div>
+              <span className="text-xs font-bold text-indigo-700 bg-white px-2 py-1 rounded shadow-sm">
+                {isImporting && importProgress ? `${importProgress.current} / ${importProgress.total} tamu` : ''}
+                {isGeneratingSample && sampleProgress ? `${sampleProgress.current} / ${sampleProgress.total} tamu` : ''}
+              </span>
+            </div>
+          )}
 
           {/* Bottom Row: Search & Filters */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full">
@@ -1121,7 +1354,7 @@ export default function EventDetails() {
               </div>
               <input
                 type="text"
-                placeholder="Cari nama atau tiket..."
+                placeholder="Cari nama, tiket, kota, no hp..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
@@ -1151,16 +1384,22 @@ export default function EventDetails() {
                   <option value="not_attended">Belum Hadir</option>
                 </select>
               ) : null}
+
               <select
                 value={itemsPerPage}
                 onChange={(e) => {
-                  setItemsPerPage(Number(e.target.value));
+                  const val = e.target.value === 'all' ? 'all' : Number(e.target.value);
+                  setItemsPerPage(val);
                 }}
-                className="block w-full sm:w-auto pl-3 pr-8 py-2 border border-gray-300 rounded-md leading-5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
+                className="block w-full sm:w-auto pl-3 pr-8 py-2 border border-gray-300 rounded-md leading-5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm font-medium text-gray-700"
               >
-                <option value={10}>Tampilkan 10</option>
                 <option value={25}>Tampilkan 25</option>
                 <option value={50}>Tampilkan 50</option>
+                <option value={100}>Tampilkan 100</option>
+                <option value={250}>Tampilkan 250</option>
+                <option value={500}>Tampilkan 500</option>
+                <option value={1000}>Tampilkan 1.000</option>
+                <option value="all">Tampilkan Semua ({filteredGuests.length})</option>
               </select>
             </div>
           </div>
@@ -1290,6 +1529,7 @@ export default function EventDetails() {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status RSVP</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status Scan</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Waktu Kehadiran</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Souvenir</th>
                       </>
                     )}
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky right-0 bg-white shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)] z-10">Aksi</th>
@@ -1306,7 +1546,7 @@ export default function EventDetails() {
                           onChange={(e) => handleSelectGuest(guest.id, e.target.checked)}
                         />
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{index + 1}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono text-xs">{startIndex + index + 1}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{guest.name}</div>
                       </td>
@@ -1362,6 +1602,15 @@ export default function EventDetails() {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {guest.attendedAt && parseFirestoreDate(guest.attendedAt) ? parseFirestoreDate(guest.attendedAt)!.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '-'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            {guest.souvenirTaken ? (
+                              <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-800">
+                                <Gift className="w-3 h-3 text-emerald-600" /> {guest.souvenirName || 'Diambil'}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-gray-400">Belum</span>
+                            )}
                           </td>
                         </>
                       )}
@@ -1428,41 +1677,60 @@ export default function EventDetails() {
               </table>
             </div>
             
-            <div className="px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
-              <div className="flex-1 flex justify-between sm:hidden">
-                {hasMoreGuests && (
+            {/* Pagination Controls */}
+            <div className="px-4 py-3.5 flex flex-col sm:flex-row items-center justify-between border-t border-gray-200 sm:px-6 gap-3 bg-gray-50/50">
+              <div>
+                <p className="text-sm text-gray-700">
+                  Menampilkan <span className="font-semibold text-gray-900">{filteredGuests.length === 0 ? 0 : startIndex + 1}</span> - <span className="font-semibold text-gray-900">{endIndex}</span> dari <span className="font-semibold text-indigo-600">{filteredGuests.length}</span> total tamu
+                </p>
+              </div>
+
+              {itemsPerPage !== 'all' && totalPages > 1 && (
+                <div className="flex items-center gap-1.5">
                   <button
-                    onClick={handleLoadMoreGuests}
-                    disabled={loadingMoreGuests}
-                    className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 w-full justify-center"
+                    onClick={() => setCurrentPage(1)}
+                    disabled={currentPage === 1}
+                    className="px-2.5 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title="Halaman Pertama"
                   >
-                    {loadingMoreGuests ? 'Memuat...' : 'Muat Lebih Banyak'}
+                    «
                   </button>
-                )}
-              </div>
-              <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm text-gray-700">
-                    Total data dimuat: <span className="font-medium">{filteredGuests.length}</span>
-                  </p>
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Sebelumnya
+                  </button>
+                  
+                  <span className="px-3 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md">
+                    Halaman <span className="text-indigo-600 font-bold">{currentPage}</span> dari {totalPages}
+                  </span>
+                  
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Selanjutnya
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage(totalPages)}
+                    disabled={currentPage === totalPages}
+                    className="px-2.5 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title="Halaman Terakhir"
+                  >
+                    »
+                  </button>
                 </div>
-                <div>
-                  {hasMoreGuests && (
-                    <button
-                      onClick={handleLoadMoreGuests}
-                      disabled={loadingMoreGuests}
-                      className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-indigo-600 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50"
-                    >
-                      {loadingMoreGuests ? 'Memuat...' : 'Muat Lebih Banyak'}
-                    </button>
-                  )}
-                </div>
-              </div>
+              )}
             </div>
             </>
           )}
         </div>
       </div>
+      </>
+      )}
 
       <Modal isOpen={isBlastModalOpen} onClose={() => setIsBlastModalOpen(false)} title="Blast WhatsApp">
         <div className="space-y-4">

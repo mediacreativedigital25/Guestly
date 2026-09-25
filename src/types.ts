@@ -1,13 +1,17 @@
-export type Role = 'superadmin' | 'partner' | 'client';
+export type Role = 'superadmin' | 'partner' | 'client' | 'reseller' | 'staff' | 'admin';
 
 export interface User {
   id?: string;
+  uid?: string;
   role: Role;
   name: string;
   email: string;
+  package?: string;
   partnerId: string | null;
   clientId: string | null;
   businessName?: string;
+  brandName?: string;
+  brandLogo?: string;
   logoUrl?: string;
   bannerUrl?: string;
   brandingImageUrl?: string;
@@ -19,6 +23,8 @@ export interface User {
   waBlastQuota?: number;
   clientCredit?: number;
   eventCredit?: number;
+  eventsCreated?: number;
+  belongsToReseller?: string;
   allowManualEvent?: boolean;
   eventManual?: boolean;
   activeUntil?: any;
@@ -53,6 +59,10 @@ export interface EventRecord {
   id?: string;
   partnerId: string;
   clientId: string;
+  clientUid?: string;
+  clientEmail?: string;
+  resellerUid?: string;
+  activeDays?: number;
   title: string;
   coupleName?: string;
   description?: string;
@@ -68,6 +78,10 @@ export interface EventRecord {
   fontFamily?: string;
   rsvpTheme?: string;
   status: 'draft' | 'published' | 'completed';
+  subscriptionStatus?: 'active' | 'expired';
+  slug?: string;
+  maxGuests?: number;
+  maxStaff?: number;
   activeUntil?: string;
   eventQuota?: number;
   guestQuota?: number;
@@ -96,15 +110,60 @@ export interface Guest {
   address?: string;
   category?: string;
   session?: string;
+  tableNumber?: string;
+  pax?: number;
   ticketCode: string;
   rsvpStatus: 'pending' | 'attending' | 'declined';
   wishes?: string;
   stickerUrl?: string;
   attended: boolean;
   attendedAt?: any;
+  attendance?: string;
+  message?: string;
+  reply?: string;
+  timestamp?: any;
+  checkInTime?: any;
   hasResponded?: boolean;
+  souvenirTaken?: boolean;
+  souvenirClaimed?: boolean;
+  souvenirTakenAt?: any;
+  souvenirId?: string;
+  souvenirName?: string;
+  souvenirQuantity?: number;
+  souvenirTakenBy?: string;
   createdAt: any;
   updatedAt: any;
+}
+
+export interface SouvenirItem {
+  id?: string;
+  eventId: string;
+  name: string;
+  category?: string;
+  initialStock: number;
+  totalDistributed: number;
+  remainingStock: number;
+  physicalStockAudit?: number;
+  lastAuditAt?: any;
+  lastAuditBy?: string;
+  notes?: string;
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface SouvenirLog {
+  id?: string;
+  eventId: string;
+  souvenirId: string;
+  souvenirName: string;
+  guestId?: string;
+  guestName: string;
+  ticketCode?: string;
+  quantity: number;
+  action: 'TAKE' | 'RETURN' | 'ADJUSTMENT';
+  notes?: string;
+  performedBy?: string;
+  timestamp: any;
 }
 
 export interface GuestEditRequest {

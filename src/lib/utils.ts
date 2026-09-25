@@ -24,17 +24,20 @@ export function parseFirestoreDate(timestamp: any): Date | null {
   return null;
 }
 
-export function getExpirationDate(dateString: string): Date {
+export function getExpirationDate(input: string | { date?: string; activeUntil?: string }): Date {
+  const dateString = typeof input === 'string' ? input : (input?.activeUntil || input?.date || new Date().toISOString());
   const date = new Date(dateString);
+  if (isNaN(date.getTime())) return new Date();
   date.setDate(date.getDate() + 30); // Or whatever default
   return date;
 }
 
-export function getDaysRemaining(dateString: string): number {
-  const diff = getExpirationDate(dateString).getTime() - new Date().getTime();
+export function getDaysRemaining(input: string | { date?: string; activeUntil?: string }): number {
+  if (!input) return 0;
+  const diff = getExpirationDate(input).getTime() - new Date().getTime();
   return Math.max(0, Math.ceil(diff / (1000 * 3600 * 24)));
 }
 
-export function isEventExpired(dateString: string): boolean {
-  return getDaysRemaining(dateString) <= 0;
+export function isEventExpired(input: string | { date?: string; activeUntil?: string }): boolean {
+  return getDaysRemaining(input) <= 0;
 }

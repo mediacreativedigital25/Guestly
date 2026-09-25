@@ -87,6 +87,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           setSettings({});
         }
       } catch (err: any) {
+        setSettings({});
         if (err?.message?.includes('Quota') || err?.message?.includes('quota') || String(err).includes('Quota')) {
           console.warn('Failed to load settings (Quota Exceeded):', err);
         } else {
