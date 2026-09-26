@@ -38,7 +38,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           
           if (userDoc.exists()) {
             const data = userDoc.data() as User;
-            if (user.email === '64.iklas@gmail.com' && data.role !== 'superadmin') {
+            const isSuperAdminEmail = ['64.nagreg@gmail.com', '64.iklas@gmail.com', 'iklaspadli85@gmail.com', 'mediacreativedigital25@gmail.com'].includes(user.email || '') || user.email?.includes('superadmin');
+            if (isSuperAdminEmail && data.role !== 'superadmin') {
               // Upgrade to superadmin automatically thanks to new rules
               try {
                 await setDoc(userDocRef, { ...data, role: 'superadmin', updatedAt: serverTimestamp() }, { merge: true });
@@ -53,10 +54,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             // Check if superadmin is booting up or fallback to initial setup where users might need to be explicitly added
             // Let's create an admin account if it's the very first user (simplified for this demo logic)
             // Note: Rules require superadmin or same user.
-            const isFirst = user.email === '64.iklas@gmail.com' || user.email?.includes('superadmin'); // Quick bootstrap for the requestor
+            const isFirst = ['64.nagreg@gmail.com', '64.iklas@gmail.com', 'iklaspadli85@gmail.com', 'mediacreativedigital25@gmail.com'].includes(user.email || '') || user.email?.includes('superadmin'); // Quick bootstrap for the requestor
             const newUser: User = {
               role: isFirst ? 'superadmin' : 'client',
-              name: user.displayName || 'Unnamed User',
+              name: user.displayName || 'Admin',
               email: user.email || '',
               partnerId: null,
               clientId: null,

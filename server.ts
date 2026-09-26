@@ -7,6 +7,48 @@ import { initializeFirestore, doc, getDoc, collection, query, where, getDocs } f
 import dotenv from "dotenv";
 import firebaseConfig from "./firebase-applet-config.json";
 import cron from "node-cron";
+import multer from "multer";
+import { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+
+const uploadsBaseDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadsBaseDir)) {
+  fs.mkdirSync(uploadsBaseDir, { recursive: true });
+}
+
+// Cloudflare R2 Credentials
+const r2AccountId = process.env.R2_ACCOUNT_ID || 'c6361627ef5eeb873424c706ca72c0e2';
+const r2AccessKeyId = process.env.R2_ACCESS_KEY_ID || 'e3610ce08924866d3bd8611dcdba6cdf';
+const r2SecretAccessKey = process.env.R2_SECRET_ACCESS_KEY || 'ec8dcd365af55a3f08006e72d5f3eb06dd7582ffbb22ec7943f6e15cec55bb64';
+const r2BucketName = process.env.R2_BUCKET_NAME || 'guestly-storage';
+const r2PublicUrl = process.env.R2_PUBLIC_URL || 'https://cdn.guestly.yulovi.com';
+
+function getR2Client() {
+  if (!r2SecretAccessKey) return null;
+  return new S3Client({
+    region: 'auto',
+    endpoint: `https://${r2AccountId}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: r2AccessKeyId,
+      secretAccessKey: r2SecretAccessKey,
+    },
+  });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsBaseDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || '';
+    const safeName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}${ext}`;
+    cb(null, safeName);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 15 * 1024 * 1024 }
+});
 
 // Initialize Firebase for server
 const firebaseApp = initializeApp(firebaseConfig);
@@ -179,11 +221,28 @@ async function startServer() {
         return res.status(403).json({ success: false, error: 'Unauthorized: Invalid token' });
       }
 
-      const { target, message, url } = req.body;
-      const token = process.env.FONNTE_TOKEN || process.env.VITE_FONNTE_TOKEN;
+      const { target, message, url, token: customToken } = req.body;
+      let token = process.env.FONNTE_TOKEN || process.env.VITE_FONNTE_TOKEN || customToken;
+      
+      // If not in env or request, attempt to read from settings document
+      if (!token) {
+        try {
+          const settingsSnap = await getDoc(doc(db, 'settings', 'global'));
+          if (settingsSnap.exists() && settingsSnap.data()?.fonnteToken) {
+            token = settingsSnap.data().fonnteToken;
+          }
+        } catch (e) {
+          // Firestore might be unreadable or on backup DB, ignore
+        }
+      }
       
       if (!token) {
-        return res.status(500).json({ success: false, error: 'FONNTE_TOKEN (atau VITE_FONNTE_TOKEN) environment variable is not configured di server hosting.' });
+        console.warn('WhatsApp proxy: FONNTE_TOKEN is not configured yet. Skipping message dispatch.');
+        return res.json({ 
+          success: false, 
+          notConfigured: true, 
+          error: 'Pemberitahuan WhatsApp dilewati karena FONNTE_TOKEN belum diatur di menu Pengaturan.' 
+        });
       }
 
       const body = new URLSearchParams({
@@ -216,7 +275,106 @@ async function startServer() {
     }
   });
 
-  // Removed static uploads directory since we are using R2
+  // Serve uploaded media statically
+  app.use('/uploads', express.static(uploadsBaseDir));
+
+  // Media upload endpoint
+  app.post('/api/media/upload', upload.single('file'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ success: false, error: { message: 'File tidak ditemukan untuk diunggah.' } });
+      }
+
+      const category = (req.body.category || 'attachment').replace(/[^a-zA-Z0-9_-]/g, '');
+      const key = `${category}/${req.file.filename}`;
+      let finalUrl = `/uploads/${req.file.filename}`;
+
+      const r2Client = getR2Client();
+      if (r2Client) {
+        try {
+          const fileContent = fs.readFileSync(req.file.path);
+          await r2Client.send(new PutObjectCommand({
+            Bucket: r2BucketName,
+            Key: key,
+            Body: fileContent,
+            ContentType: req.file.mimetype,
+          }));
+          finalUrl = `${r2PublicUrl.replace(/\/+$/, '')}/${key}`;
+          console.log(`Uploaded successfully to Cloudflare R2: ${finalUrl}`);
+        } catch (r2Error: any) {
+          console.warn('R2 upload failed, falling back to local server storage:', r2Error.message);
+        }
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          url: finalUrl,
+          key: key,
+          sizeBytes: req.file.size
+        }
+      });
+    } catch (err: any) {
+      console.error('Error in /api/media/upload:', err);
+      return res.status(500).json({ success: false, error: { message: err.message || 'Gagal memproses file' } });
+    }
+  });
+
+  // Media delete endpoint
+  app.delete('/api/media/delete', async (req, res) => {
+    try {
+      const { key } = req.body;
+      if (key) {
+        const localFileName = path.basename(key);
+        const filePath = path.join(uploadsBaseDir, localFileName);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+
+        const r2Client = getR2Client();
+        if (r2Client) {
+          try {
+            await r2Client.send(new DeleteObjectCommand({
+              Bucket: r2BucketName,
+              Key: key,
+            }));
+            console.log(`Deleted from Cloudflare R2: ${key}`);
+          } catch (r2Error: any) {
+            console.warn('R2 delete failed:', r2Error.message);
+          }
+        }
+      }
+      return res.json({ success: true });
+    } catch (err: any) {
+      console.error('Error in /api/media/delete:', err);
+      return res.status(500).json({ success: false, error: { message: err.message || 'Gagal menghapus file' } });
+    }
+  });
+
+  // Media info endpoint
+  app.get('/api/media/info', (req, res) => {
+    try {
+      const key = req.query.key as string;
+      if (!key) {
+        return res.status(400).json({ success: false, error: { message: 'Key file diperlukan' } });
+      }
+      const filePath = path.join(uploadsBaseDir, key);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ success: false, error: { message: 'File tidak ditemukan' } });
+      }
+      const stat = fs.statSync(filePath);
+      return res.json({
+        success: true,
+        data: {
+          key,
+          size: stat.size,
+          uploaded: stat.mtime
+        }
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: { message: err.message } });
+    }
+  });
 
 
 

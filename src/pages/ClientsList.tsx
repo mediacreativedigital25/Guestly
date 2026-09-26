@@ -254,7 +254,7 @@ export default function ClientsList() {
 
   const getPartnerName = (partnerId: string) => {
     const partner = partners.find(p => p.id === partnerId);
-    return partner ? partner.name : partnerId;
+    return (partner && partner.name) ? partner.name : (partnerId || '-');
   };
 
   const openEditModal = (client: Client) => {

@@ -43,9 +43,12 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({ onFileSelect, disa
       <p className="text-sm text-gray-700 font-medium mb-1">
         Tarik & lepas file di sini atau klik untuk memilih
       </p>
-      {allowedMimeTypes && (
+      {allowedMimeTypes && allowedMimeTypes.length > 0 && (
         <p className="text-xs text-gray-500">
-          Format: {allowedMimeTypes.map(t => t.split('/')[1].toUpperCase()).join(', ')}
+          Format: {allowedMimeTypes.map(t => {
+            const ext = t.includes('/') ? t.split('/')[1] : t;
+            return (ext || '').replace(/^\./, '').toUpperCase();
+          }).filter(Boolean).join(', ')}
         </p>
       )}
       <input 

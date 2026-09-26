@@ -483,7 +483,7 @@ export default function PublicRSVP() {
                 {guestsWithWishes.map((guest, idx) => (
                   <div key={guest.id || idx} className={`${isDark ? 'bg-neutral-800 border-neutral-700' : 'bg-gray-50 border-gray-100'} ${isEmbed ? 'rounded-lg p-3' : 'rounded-xl p-5'} border flex items-start gap-3`}>
                     <div className={`${isEmbed ? 'h-8 w-8 text-sm' : 'h-10 w-10 text-lg'} flex-shrink-0 rounded-full flex items-center justify-center font-bold ${theme.avatarBg}`}>
-                      {guest.name.charAt(0).toUpperCase()}
+                      {(guest.name || '?').charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1 flex-wrap">

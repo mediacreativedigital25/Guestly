@@ -271,7 +271,7 @@ export default function Scanner() {
       console.warn("Failed to parse URL from QR, using raw text", e);
     }
     
-    code = code.toUpperCase();
+    code = (code || '').toUpperCase();
     console.log("Extracted ticket code:", code);
     
     if (lastScannedCodeRef.current === code) {

@@ -25,6 +25,7 @@ export async function sendFonnteMessage(token: string | null | undefined, target
         target,
         message,
         url,
+        token: token || undefined
       }),
     });
 
@@ -74,12 +75,15 @@ export async function sendFonnteMessage(token: string | null | undefined, target
     if (response.ok && data.success) {
       console.log("WhatsApp message sent successfully via proxy:", data);
       return { success: true };
+    } else if (data?.notConfigured) {
+      console.warn("Pemberitahuan WhatsApp dilewati (Token Fonnte belum diatur di menu Pengaturan).");
+      return { success: false, error: data.error };
     } else {
-      console.error("WhatsApp proxy error:", data);
+      console.warn("WhatsApp proxy notice:", data);
       return { success: false, error: data.error || data.reason || "Terjadi kesalahan pada server WhatsApp" };
     }
   } catch (error: any) {
-    console.error("WhatsApp connection error:", error);
+    console.warn("WhatsApp connection notice:", error);
     return { success: false, error: error.message || "Gagal menghubungi server WhatsApp" };
   }
 }

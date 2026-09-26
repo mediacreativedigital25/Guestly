@@ -88,10 +88,12 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
       } catch (err: any) {
         setSettings({});
-        if (err?.message?.includes('Quota') || err?.message?.includes('quota') || String(err).includes('Quota')) {
+        if (err?.message?.includes('Missing or insufficient permissions') || err?.code === 'permission-denied') {
+          console.warn('Settings not accessible (using default settings):', err?.message || err);
+        } else if (err?.message?.includes('Quota') || err?.message?.includes('quota') || String(err).includes('Quota')) {
           console.warn('Failed to load settings (Quota Exceeded):', err);
         } else {
-          console.error('Failed to load settings:', err);
+          console.warn('Could not load custom settings, falling back to defaults:', err);
         }
       } finally {
         setLoading(false);

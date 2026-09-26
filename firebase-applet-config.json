@@ -1,10 +1,11 @@
 {
-  "projectId": "gen-lang-client-0056261589",
-  "appId": "1:809140942521:web:da7e2c28d84b687fa60d68",
-  "apiKey": "AIzaSyCMVIUC1icTzPkAka22dxp1WQnUrjuixA0",
-  "authDomain": "gen-lang-client-0056261589.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-070ca58a-03bd-401d-816a-71b36c0bffd9",
-  "storageBucket": "gen-lang-client-0056261589.firebasestorage.app",
-  "messagingSenderId": "809140942521",
-  "measurementId": ""
+  "projectId": "backup-guestly",
+  "appId": "1:1066523393874:web:f5b47d954b917355dc448b",
+  "apiKey": "AIzaSyAwiA6Oj1JDPIl3wv_8yMEnpfZl-CKNrxo",
+  "authDomain": "backup-guestly.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "backup-guestly.firebasestorage.app",
+  "messagingSenderId": "1066523393874",
+  "measurementId": "G-DQ5CSH9F1F"
 }
+

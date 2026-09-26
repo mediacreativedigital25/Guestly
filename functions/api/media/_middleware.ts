@@ -21,7 +21,7 @@ export async function onRequest(context: any) {
 
   const token = authHeader.substring(7);
   try {
-    const projectId = env.FIREBASE_PROJECT_ID || 'ai-studio-070ca58a-03bd-401d-816a-71b36c0bffd9';
+    const projectId = env.FIREBASE_PROJECT_ID || 'backup-guestly';
     
     const { payload } = await jwtVerify(token, JWKS, {
       issuer: `https://securetoken.google.com/${projectId}`,
