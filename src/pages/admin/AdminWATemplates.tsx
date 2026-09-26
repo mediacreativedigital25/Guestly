@@ -3,7 +3,11 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
 import { WATemplate } from '../../types';
 import { Plus, Edit2, Trash2, X, Check, Search, FileText } from 'lucide-react';
-import { v4 as uuidv4 } from 'uuid';
+
+const generateId = () =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 9);
 
 export default function AdminWATemplates() {
   const [templates, setTemplates] = useState<WATemplate[]>([]);
@@ -111,7 +115,7 @@ export default function AdminWATemplates() {
         showAlert('Template berhasil diperbarui', 'success');
       } else {
         const newTemplate: WATemplate = {
-          id: uuidv4(),
+          id: generateId(),
           name: formData.name,
           content: formData.content,
           createdAt: new Date().toISOString(),
