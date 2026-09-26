@@ -31,7 +31,7 @@ export default function ServicesDashboard() {
         let activeSvc = 0;
         servicesSnapshot.forEach(doc => {
           totalSvc++;
-          if (doc.data().status === 'active') activeSvc++;
+          if (doc.data().isActive || doc.data().status === 'active') activeSvc++;
         });
 
         // Fetch Invoices (Paid only for revenue)
@@ -64,7 +64,16 @@ export default function ServicesDashboard() {
   }
 
   const isSuperAdmin = appUser.role === 'superadmin';
-  const activeUntilDate = appUser.activeUntil ? new Date(appUser.activeUntil.seconds * 1000).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }) : null;
+  const parsedActiveDate = appUser.activeUntil?.toDate
+    ? appUser.activeUntil.toDate()
+    : appUser.activeUntil?.seconds
+    ? new Date(appUser.activeUntil.seconds * 1000)
+    : appUser.activeUntil
+    ? new Date(appUser.activeUntil)
+    : null;
+  const activeUntilDate = parsedActiveDate && !isNaN(parsedActiveDate.getTime())
+    ? parsedActiveDate.toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })
+    : null;
 
   return (
     <div className="space-y-6">
@@ -171,7 +180,7 @@ export default function ServicesDashboard() {
                 <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Kuota Klien</p>
                 <div className="mt-2 flex items-baseline gap-2">
                   <span className="text-4xl font-bold text-gray-900">
-                    {appUser.clientQuota || 0}
+                    {appUser.clientCredit !== undefined ? appUser.clientCredit : (appUser.clientQuota || 0)}
                   </span>
                   <span className="text-sm text-gray-500">tersisa</span>
                 </div>
@@ -188,7 +197,7 @@ export default function ServicesDashboard() {
                 <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Kuota Acara</p>
                 <div className="mt-2 flex items-baseline gap-2">
                   <span className="text-4xl font-bold text-gray-900">
-                    {appUser.eventQuota || 0}
+                    {appUser.eventCredit !== undefined ? appUser.eventCredit : (appUser.eventQuota || 0)}
                   </span>
                   <span className="text-sm text-gray-500">tersisa</span>
                 </div>

@@ -4,6 +4,8 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../AuthContext';
 import { GuestEditRequest } from '../types';
 import { Check, X, Clock, AlertCircle } from 'lucide-react';
+import { canUserAccessEvent } from '../lib/utils';
+import { showAlert } from '../lib/alerts';
 
 export default function Approvals() {
   const { appUser } = useAuth();
@@ -14,7 +16,7 @@ export default function Approvals() {
     if (!appUser) return;
 
     let q;
-    if (appUser.role === 'superadmin') {
+    if (appUser.role === 'superadmin' || appUser.role === 'owner' || appUser.role === 'admin') {
       q = query(collection(db, 'guest_edit_requests'), where('status', '==', 'pending'));
     } else if (appUser.role === 'partner') {
       q = query(collection(db, 'guest_edit_requests'), where('partnerId', '==', appUser.id || ''), where('status', '==', 'pending'));
@@ -29,7 +31,8 @@ export default function Approvals() {
       try {
         const { getDocs } = await import('firebase/firestore');
         const snapshot = await getDocs(q);
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+        const rawData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+        const data = rawData.filter(req => canUserAccessEvent(appUser, req.eventId));
         setRequests(data);
       } catch (err) {
         console.error('Approvals getDocs error:', err);
@@ -59,15 +62,17 @@ export default function Approvals() {
         });
       }
 
-      // 2. Mark request as approved (or just delete it)
+      // 2. Mark request as approved
       await updateDoc(doc(db, 'guest_edit_requests', request.id), {
         status: 'approved',
         resolvedAt: serverTimestamp()
       });
 
+      setRequests(prev => prev.filter(r => r.id !== request.id));
+      showAlert('Berhasil', 'Permintaan perubahan data tamu telah disetujui.', 'success');
     } catch (error) {
       console.error('Error approving request:', error);
-      alert('Gagal menyetujui permintaan.');
+      showAlert('Gagal', 'Gagal menyetujui permintaan.', 'error');
     }
   };
 
@@ -78,9 +83,11 @@ export default function Approvals() {
         status: 'rejected',
         resolvedAt: serverTimestamp()
       });
+      setRequests(prev => prev.filter(r => r.id !== request.id));
+      showAlert('Ditolak', 'Permintaan perubahan data tamu telah ditolak.', 'info');
     } catch (error) {
       console.error('Error rejecting request:', error);
-      alert('Gagal menolak permintaan.');
+      showAlert('Gagal', 'Gagal menolak permintaan.', 'error');
     }
   };
 
@@ -152,7 +159,9 @@ export default function Approvals() {
                              {req.originalData.phone && <p><span className="text-gray-400">HP:</span> {req.originalData.phone}</p>}
                              {req.originalData.address && <p><span className="text-gray-400">Alamat:</span> {req.originalData.address}</p>}
                              {req.originalData.category && <p><span className="text-gray-400">Kategori:</span> {req.originalData.category}</p>}
+                             {req.originalData.invitationType && <p><span className="text-gray-400">Tipe Undangan:</span> {req.originalData.invitationType}</p>}
                              {req.originalData.session && <p><span className="text-gray-400">Sesi:</span> {req.originalData.session}</p>}
+                             <p><span className="text-gray-400">Jumlah Pax:</span> {req.originalData.pax ?? 1} Orang</p>
                           </div>
                         </div>
                       )}
@@ -163,7 +172,9 @@ export default function Approvals() {
                            <p className={req.type !== 'add' && req.originalData.phone !== req.requestedData.phone ? 'font-medium text-indigo-700' : ''}><span className="text-gray-400">HP:</span> {req.requestedData.phone || '-'}</p>
                            <p className={req.type !== 'add' && req.originalData.address !== req.requestedData.address ? 'font-medium text-indigo-700' : ''}><span className="text-gray-400">Alamat:</span> {req.requestedData.address || '-'}</p>
                            <p className={req.type !== 'add' && req.originalData.category !== req.requestedData.category ? 'font-medium text-indigo-700' : ''}><span className="text-gray-400">Kategori:</span> {req.requestedData.category || '-'}</p>
+                           <p className={req.type !== 'add' && req.originalData.invitationType !== req.requestedData.invitationType ? 'font-medium text-indigo-700' : ''}><span className="text-gray-400">Tipe Undangan:</span> {req.requestedData.invitationType || '-'}</p>
                            <p className={req.type !== 'add' && req.originalData.session !== req.requestedData.session ? 'font-medium text-indigo-700' : ''}><span className="text-gray-400">Sesi:</span> {req.requestedData.session || '-'}</p>
+                           <p className={req.type !== 'add' && req.originalData.pax !== req.requestedData.pax ? 'font-medium text-indigo-700' : ''}><span className="text-gray-400">Jumlah Pax:</span> {req.requestedData.pax ?? 1} Orang</p>
                         </div>
                       </div>
                     </div>

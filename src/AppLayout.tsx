@@ -3,7 +3,7 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { useSettings } from './SettingsContext';
 import { LayoutDashboard, Users, CalendarDays, Settings, LogOut, FileText, ChevronDown, ChevronRight, ChevronLeft, UserCog, Menu, X, Shield, User, Briefcase, CreditCard, ShoppingBag, Package, Receipt, PanelLeftClose, PanelLeftOpen, Image as ImageIcon } from 'lucide-react';
-import { cn } from './lib/utils';
+import { cn, getRoleLabel } from './lib/utils';
 import { auth, db } from './lib/firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -246,13 +246,14 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
     );
   }
 
+  const isStaff = appUser.role === 'staff';
   const navItems = [
-    { name: 'Dashboard', path: '/auth/login', icon: LayoutDashboard },
-    { name: 'Clients', path: '/auth/login/clients', icon: Users, role: ['superadmin', 'partner'] },
-    { name: 'Events', path: '/auth/login/events', icon: CalendarDays },
-    { name: 'Approvals', path: '/auth/login/approvals', icon: FileText },
+    { name: isStaff ? 'Workspace Petugas' : 'Dashboard', path: '/auth/login', icon: LayoutDashboard },
+    { name: 'Clients', path: '/auth/login/clients', icon: Users, role: ['superadmin', 'owner', 'partner'] },
+    { name: isStaff ? 'Acara Ditugaskan' : 'Events', path: '/auth/login/events', icon: CalendarDays },
+    { name: 'Approvals', path: '/auth/login/approvals', icon: FileText, role: ['superadmin', 'owner', 'admin', 'partner', 'client'] },
     { name: 'Media', path: '/auth/login/media', icon: ImageIcon, role: ['superadmin'] },
-    { name: 'White Label', path: '/auth/login/settings', icon: Settings, role: ['superadmin', 'partner'] },
+    { name: 'White Label', path: '/auth/login/settings', icon: Settings, role: ['superadmin', 'owner', 'partner'] },
   ];
 
   return (
@@ -323,7 +324,8 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
             </Link>
           ))}
 
-           {/* Informasi Layanan Dropdown */}
+           {/* Informasi Layanan Dropdown - Hidden for Staff & Admin */}
+          {!['staff', 'admin'].includes(appUser.role) && (
           <div className="mt-2">
             <button 
               onClick={() => {
@@ -409,9 +411,10 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
               </div>
             )}
           </div>
+          )}
 
 
-          {appUser.role === 'superadmin' && (
+          {['superadmin', 'owner', 'admin'].includes(appUser.role) && (
              <>
                <div className="mt-2">
                <button 
@@ -441,17 +444,19 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                         location.pathname === '/auth/login/users' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                       )}
                     >
-                      User
+                      User & Petugas
                     </Link>
-                    <Link
-                      to="/auth/login/roles"
-                      className={cn(
-                        "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        location.pathname === '/auth/login/roles' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                      )}
-                    >
-                      Role / Hak akses Custom
-                    </Link>
+                    {['superadmin', 'owner'].includes(appUser.role) && (
+                      <Link
+                        to="/auth/login/roles"
+                        className={cn(
+                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                          location.pathname === '/auth/login/roles' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        )}
+                      >
+                        Role / Hak Akses
+                      </Link>
+                    )}
                  </div>
                )}
              </div>
@@ -477,42 +482,48 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                </button>
                {!isSidebarCollapsed && isAdminPanelMenuOpen && (
                  <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
-                    <Link
-                      to="/auth/login/admin/services"
-                      className={cn(
-                        "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        location.pathname === '/auth/login/admin/services' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Briefcase className="h-4 w-4" />
-                        Layanan
-                      </div>
-                    </Link>
-                    <Link
-                      to="/auth/login/admin/invoice"
-                      className={cn(
-                        "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        location.pathname === '/auth/login/admin/invoice' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <CreditCard className="h-4 w-4" />
-                        Invoice
-                      </div>
-                    </Link>
-                    <Link
-                      to="/auth/login/admin/settings"
-                      className={cn(
-                        "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        location.pathname === '/auth/login/admin/settings' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Settings className="h-4 w-4" />
-                        Admin Setting
-                      </div>
-                    </Link>
+                    {appUser.role === 'superadmin' && (
+                      <Link
+                        to="/auth/login/admin/services"
+                        className={cn(
+                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                          location.pathname === '/auth/login/admin/services' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Briefcase className="h-4 w-4" />
+                          Layanan
+                        </div>
+                      </Link>
+                    )}
+                    {['superadmin', 'owner'].includes(appUser.role) && (
+                      <Link
+                        to="/auth/login/admin/invoice"
+                        className={cn(
+                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                          location.pathname === '/auth/login/admin/invoice' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <CreditCard className="h-4 w-4" />
+                          Invoice
+                        </div>
+                      </Link>
+                    )}
+                    {appUser.role === 'superadmin' && (
+                      <Link
+                        to="/auth/login/admin/settings"
+                        className={cn(
+                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                          location.pathname === '/auth/login/admin/settings' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Settings className="h-4 w-4" />
+                          Admin Setting
+                        </div>
+                      </Link>
+                    )}
                     <Link
                       to="/auth/login/admin/calendar"
                       className={cn(
@@ -545,19 +556,27 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
 
         </nav>
         <div className="p-4 border-t border-gray-200">
-          <Link
-            to="/auth/login/changelog"
-            onClick={() => setIsMobileMenuOpen(false)}
-            title={isSidebarCollapsed ? "Changelog" : undefined}
-            className={cn(
-              "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium mb-1 transition-colors",
-              isSidebarCollapsed ? "justify-center px-0" : "",
-              location.pathname === '/auth/login/changelog' ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
-            )}
-          >
-            <FileText className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
-            {!isSidebarCollapsed && <span>Changelog</span>}
-          </Link>
+          {!isSidebarCollapsed && (
+            <div className="mb-3 px-3 py-2 bg-indigo-50/70 rounded-lg border border-indigo-100">
+              <div className="text-xs font-semibold text-gray-900 truncate">{appUser.name || appUser.email}</div>
+              <div className="text-[11px] font-medium text-indigo-700 mt-0.5">{getRoleLabel(appUser.role, appUser.staffType)}</div>
+            </div>
+          )}
+          {!isStaff && (
+            <Link
+              to="/auth/login/changelog"
+              onClick={() => setIsMobileMenuOpen(false)}
+              title={isSidebarCollapsed ? "Changelog" : undefined}
+              className={cn(
+                "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium mb-1 transition-colors",
+                isSidebarCollapsed ? "justify-center px-0" : "",
+                location.pathname === '/auth/login/changelog' ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+              )}
+            >
+              <FileText className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+              {!isSidebarCollapsed && <span>Changelog</span>}
+            </Link>
+          )}
           <Link
             to="/auth/login/profile"
             title={isSidebarCollapsed ? "Profil Saya" : undefined}

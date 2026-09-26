@@ -50,7 +50,8 @@ export default function ClientsList() {
         let qClients = query(clientsRef);
         let qEvents = query(eventsRef);
         
-        if (appUser?.role !== 'superadmin') {
+        const isFullManagement = appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'admin';
+        if (!isFullManagement) {
           if (!appUser?.partnerId && appUser?.role !== 'partner') {
             setClients([]);
             return;
@@ -63,7 +64,7 @@ export default function ClientsList() {
           qClients = query(clientsRef, where('partnerId', '==', safePid));
           qEvents = query(eventsRef, where('partnerId', '==', safePid));
         } else {
-          // Fetch partners for superadmin
+          // Fetch partners for superadmin/owner/admin
           const usersRef = collection(db, 'users');
           const qPartners = query(usersRef, where('role', '==', 'partner'));
           const partnersSnap = await getDocs(qPartners);
@@ -119,7 +120,7 @@ export default function ClientsList() {
       const clientsRef = collection(db, 'clients');
       let qClients = query(clientsRef);
       
-      if (appUser?.role !== 'superadmin') {
+      if (appUser?.role !== 'superadmin' && appUser?.role !== 'owner' && appUser?.role !== 'admin') {
         const pid = appUser?.role === 'partner' ? appUser.id : appUser?.partnerId;
         const safePid = pid || '';
         qClients = query(clientsRef, where('partnerId', '==', safePid));
@@ -174,7 +175,8 @@ export default function ClientsList() {
     setIsSubmitting(true);
     setError('');
 
-    const partnerId = appUser.role === 'superadmin' ? selectedPartnerId : (appUser.role === 'partner' ? appUser.id : appUser.partnerId || 'default-partner');
+    const isFullManagement = appUser.role === 'superadmin' || appUser.role === 'owner' || appUser.role === 'admin';
+    const partnerId = isFullManagement ? (selectedPartnerId || appUser.id || 'default-partner') : (appUser.role === 'partner' ? appUser.id : appUser.partnerId || 'default-partner');
 
     try {
       if (createAccount) {
@@ -204,11 +206,11 @@ export default function ClientsList() {
         const currentQuota = userData.clientCredit !== undefined 
           ? userData.clientCredit 
           : (userData.clientQuota || 0);
-        if (appUser.role !== 'superadmin' && currentQuota <= 0) {
+        if (!isFullManagement && currentQuota <= 0) {
           throw new Error("QUOTA_EXCEEDED");
         }
 
-        if (appUser.role !== 'superadmin') {
+        if (!isFullManagement) {
           transaction.update(userRef, { 
             clientCredit: Math.max(0, currentQuota - 1),
             clientQuota: Math.max(0, currentQuota - 1),

@@ -3,11 +3,12 @@ import { useAuth } from '../AuthContext';
 import { collection, query, getDocs, where, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, deleteField, runTransaction, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { EventRecord, Client } from '../types';
-import { parseFirestoreDate } from '../lib/utils';
+import { parseFirestoreDate, canUserAccessEvent, getRoleLabel } from '../lib/utils';
 import { format } from 'date-fns';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Image as ImageIcon, Trash2, Edit, ScanLine, Eye } from 'lucide-react';
+import { Plus, Image as ImageIcon, Trash2, Edit, ScanLine, Eye, ArrowUp, ArrowDown, Gift } from 'lucide-react';
 import { Modal } from '../components/Modal';
+import { MediaUploader } from '../components/media/MediaUploader';
 import { showAlert, showConfirm } from '../lib/alerts';
 
 export default function EventsList() {
@@ -38,6 +39,8 @@ export default function EventsList() {
   const [newEventActiveUntil, setNewEventActiveUntil] = useState('');
   const [guestCategories, setGuestCategories] = useState<string[]>(['VIP', 'Keluarga', 'Reguler']);
   const [newCategory, setNewCategory] = useState('');
+  const [invitationTypes, setInvitationTypes] = useState<string[]>(['Undangan Fisik', 'Undangan Cetak', 'Undangan Digital']);
+  const [newInvitationType, setNewInvitationType] = useState('');
   const [sessions, setSessions] = useState<string[]>(['Akad Nikah', 'Resepsi']);
   const [newSession, setNewSession] = useState('');
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
@@ -57,6 +60,8 @@ export default function EventsList() {
     setNewEventActiveUntil('');
     setGuestCategories(['VIP', 'Keluarga', 'Reguler']);
     setNewCategory('');
+    setInvitationTypes(['Undangan Fisik', 'Undangan Cetak', 'Undangan Digital']);
+    setNewInvitationType('');
     setSessions(['Akad Nikah', 'Resepsi']);
     setNewSession('');
     setEditingEventId(null);
@@ -64,9 +69,13 @@ export default function EventsList() {
   };
 
   const openCreateModal = () => {
+    if (appUser?.role === 'staff') {
+      showAlert('Akses Ditolak', 'Staff hanya dapat mengakses acara yang telah ditugaskan.', 'warning');
+      return;
+    }
     let hasAccess = false;
 
-    if (appUser?.role === 'superadmin' || appUser?.allowManualEvent || appUser?.eventManual) {
+    if (appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'admin' || appUser?.allowManualEvent || appUser?.eventManual) {
       hasAccess = true;
     } else {
       const userEventCredit = appUser?.eventCredit !== undefined ? appUser.eventCredit : (appUser?.eventQuota || 0);
@@ -106,6 +115,8 @@ export default function EventsList() {
     setNewEventActiveUntil(event.activeUntil || '');
     setGuestCategories(event.guestCategories || []);
     setNewCategory('');
+    setInvitationTypes(event.invitationTypes && event.invitationTypes.length > 0 ? event.invitationTypes : ['Undangan Fisik', 'Undangan Cetak', 'Undangan Digital']);
+    setNewInvitationType('');
     setSessions(event.sessions || []);
     setNewSession('');
     setActiveTab('info');
@@ -139,11 +150,12 @@ export default function EventsList() {
           // No need to fetch all clients for a client user, just their own record if needed, but we don't necessarily need the list for the dropdown since they can't create events.
         }
 
-                try {
+        try {
           const { getDocs, limit } = await import('firebase/firestore');
           const qLimited = query(q, limit(50));
           const snapshot = await getDocs(qLimited);
-          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventRecord));
+          const rawData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventRecord));
+          const data = rawData.filter(ev => canUserAccessEvent(appUser, ev.id));
           setEvents(data);
           setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
           setHasMore(snapshot.docs.length === 50);
@@ -153,7 +165,7 @@ export default function EventsList() {
           setLoading(false);
         }
 
-        if (appUser?.role === 'client') {
+        if (appUser?.role === 'client' || appUser?.role === 'staff') {
            setClients([]);
         } else {
            try {
@@ -192,7 +204,8 @@ export default function EventsList() {
       }
       const qLimited = query(q, startAfter(lastVisible), limit(50));
       const snapshot = await getDocs(qLimited);
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventRecord));
+      const rawData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventRecord));
+      const data = rawData.filter(ev => canUserAccessEvent(appUser, ev.id));
       setEvents(prev => [...prev, ...data]);
       setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
       setHasMore(snapshot.docs.length === 50);
@@ -251,6 +264,9 @@ export default function EventsList() {
       if (guestCategories && guestCategories.length > 0) payload.guestCategories = guestCategories;
       else if (editingEventId) payload.guestCategories = deleteField();
 
+      if (invitationTypes && invitationTypes.length > 0) payload.invitationTypes = invitationTypes;
+      else if (editingEventId) payload.invitationTypes = deleteField();
+
       if (sessions && sessions.length > 0) payload.sessions = sessions;
       else if (editingEventId) payload.sessions = deleteField();
 
@@ -271,8 +287,8 @@ export default function EventsList() {
         const docRef = await addDoc(collection(db, 'events'), payload);
         newDocId = docRef.id;
 
-        // Deduct quota if not superadmin and manual event is not enabled
-        if (appUser?.role !== 'superadmin' && !appUser?.allowManualEvent && !appUser?.eventManual) {
+        // Deduct quota if not superadmin/owner/admin and manual event is not enabled
+        if (appUser?.role !== 'superadmin' && appUser?.role !== 'owner' && appUser?.role !== 'admin' && !appUser?.allowManualEvent && !appUser?.eventManual) {
            const currentCredit = appUser?.eventCredit !== undefined ? appUser.eventCredit : (appUser?.eventQuota || 0);
            const newQuota = Math.max(0, currentCredit - 1);
            try {
@@ -304,6 +320,26 @@ export default function EventsList() {
 
   const handleRemoveCategory = (category: string) => {
     setGuestCategories(guestCategories.filter(c => c !== category));
+  };
+
+  const handleMoveCategory = (index: number, direction: 'up' | 'down') => {
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= guestCategories.length) return;
+    const updated = [...guestCategories];
+    const [moved] = updated.splice(index, 1);
+    updated.splice(newIndex, 0, moved);
+    setGuestCategories(updated);
+  };
+
+  const handleAddInvitationType = () => {
+    if (newInvitationType.trim() && !invitationTypes.includes(newInvitationType.trim())) {
+      setInvitationTypes([...invitationTypes, newInvitationType.trim()]);
+      setNewInvitationType('');
+    }
+  };
+
+  const handleRemoveInvitationType = (invType: string) => {
+    setInvitationTypes(invitationTypes.filter(t => t !== invType));
   };
 
   const handleAddSession = () => {
@@ -341,15 +377,26 @@ export default function EventsList() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Events</h1>
-        <button 
-          onClick={openCreateModal}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium"
-        >
-          <Plus className="w-4 h-4" />
-          Create Event
-        </button>
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {appUser?.role === 'staff' ? 'Acara Tugas Anda' : 'Events'}
+          </h1>
+          {appUser?.role === 'staff' && (
+            <p className="text-sm text-gray-500 mt-1">
+              Anda masuk sebagai <span className="font-semibold text-indigo-600">{getRoleLabel(appUser.role, appUser.staffType)}</span>. Hanya menampilkan acara yang ditugaskan kepada Anda.
+            </p>
+          )}
+        </div>
+        {appUser?.role !== 'staff' && (
+          <button 
+            onClick={openCreateModal}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium self-start sm:self-auto"
+          >
+            <Plus className="w-4 h-4" />
+            Create Event
+          </button>
+        )}
       </div>
 
       <Modal isOpen={isCreating} onClose={() => setIsCreating(false)} title={editingEventId ? "Edit Acara" : "Buat Acara Baru"}>
@@ -422,33 +469,65 @@ export default function EventsList() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Link Undangan Digital</label>
                 <input value={newEventDigitalInviteLink} onChange={e => setNewEventDigitalInviteLink(e.target.value)} type="url" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: https://undangan.com/john-jane" />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Link Thumbnail WA (Opsional)</label>
-                <div className="mt-1 flex rounded-md shadow-sm">
+              <div className="border border-gray-200 rounded-lg p-4 bg-gray-50/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-medium text-gray-800 flex items-center gap-1.5">
+                    <ImageIcon className="w-4 h-4 text-indigo-600" />
+                    <span>Thumbnail WA / Foto Mempelai (Opsional)</span>
+                  </label>
+                  {newEventThumbnail && (
+                    <button
+                      type="button"
+                      onClick={() => setNewEventThumbnail('')}
+                      className="text-xs font-medium text-rose-600 hover:text-rose-700"
+                    >
+                      Reset Default
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500">
+                  Gambar ini akan muncul sebagai <strong>thumbnail preview link WhatsApp</strong> dan <strong>foto utama di halaman tiket/undangan RSVP</strong> (menggantikan logo default Guestly).
+                </p>
+
+                <MediaUploader
+                  category="thumbnail"
+                  maxSize={15 * 1024 * 1024}
+                  allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
+                  defaultValue={newEventThumbnail || undefined}
+                  onUploadSuccess={(data) => setNewEventThumbnail(data.url)}
+                  onUploadError={(err) => showAlert('Gagal Upload', err, 'error')}
+                />
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Atau tempel URL gambar secara langsung:
+                  </label>
                   <input
-                    type="url"
+                    type="text"
                     value={newEventThumbnail}
                     onChange={e => setNewEventThumbnail(e.target.value)}
-                    className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-l-md border border-gray-300 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                    placeholder="Kosongkan untuk default, atau masukkan link gambar"
+                    className="block w-full px-3 py-2 rounded-md border border-gray-300 bg-white focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="https://contoh.com/foto-mempelai.jpg"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setNewEventThumbnail('')}
-                    className="inline-flex items-center px-3 py-2 border border-l-0 border-gray-300 rounded-r-md bg-gray-50 text-gray-500 hover:bg-gray-100 text-sm font-medium"
-                  >
-                    Reset Default
-                  </button>
                 </div>
-                {newEventThumbnail && (
-                   <div className="mt-2 text-xs text-indigo-600 truncate">
-                      Menggunakan link kustom
-                   </div>
-                )}
-                {!newEventThumbnail && (
-                   <div className="mt-2 text-xs text-gray-500 italic">
-                      Menggunakan thumbnail default sistem
-                   </div>
+
+                {newEventThumbnail ? (
+                  <div className="flex items-center gap-3 pt-1">
+                    <img
+                      src={newEventThumbnail}
+                      alt="Preview Thumbnail"
+                      className="w-14 h-14 rounded-lg object-cover border border-indigo-200 shadow-xs shrink-0 bg-white"
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-emerald-700">✓ Thumbnail kustom aktif</p>
+                      <p className="text-[11px] text-gray-500 truncate">{newEventThumbnail}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-500 italic">
+                    Belum diatur — menggunakan thumbnail default sistem.
+                  </div>
                 )}
               </div>
               <div className="flex items-start bg-indigo-50/50 p-4 rounded-lg border border-indigo-100">
@@ -542,15 +621,73 @@ export default function EventsList() {
               </div>
 
               <div className="mt-4">
-                <h4 className="text-sm font-medium text-gray-700 mb-2">Daftar Kategori:</h4>
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Daftar Kategori (Urutan Prioritas Sort):</h4>
                 {guestCategories.length === 0 ? (
                   <p className="text-sm text-gray-500 italic">Belum ada kategori ditambahkan.</p>
                 ) : (
                   <ul className="space-y-2">
-                    {guestCategories.map(category => (
+                    {guestCategories.map((category, idx) => (
                       <li key={category} className="flex justify-between items-center bg-gray-50 px-3 py-2 rounded-md border border-gray-100">
-                        <span className="text-sm font-medium text-gray-800">{category}</span>
-                        <button onClick={() => handleRemoveCategory(category)} className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono text-gray-400 w-5">{idx + 1}.</span>
+                          <span className="text-sm font-medium text-gray-800">{category}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleMoveCategory(idx, 'up')}
+                            disabled={idx === 0}
+                            className="p-1 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded disabled:opacity-30"
+                            title="Naikkan Urutan"
+                          >
+                            <ArrowUp className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMoveCategory(idx, 'down')}
+                            disabled={idx === guestCategories.length - 1}
+                            className="p-1 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded disabled:opacity-30"
+                            title="Turunkan Urutan"
+                          >
+                            <ArrowDown className="w-4 h-4" />
+                          </button>
+                          <button type="button" onClick={() => handleRemoveCategory(category)} className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="pt-6 border-t border-gray-100 mt-6">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tambah Tipe Undangan</label>
+                <div className="flex gap-2">
+                  <input 
+                    value={newInvitationType} 
+                    onChange={e => setNewInvitationType(e.target.value)} 
+                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleAddInvitationType())}
+                    type="text" 
+                    className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" 
+                    placeholder="Contoh: Undangan Fisik, Undangan Cetak, Undangan Digital..." 
+                  />
+                  <button onClick={handleAddInvitationType} type="button" className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 font-medium">
+                    Tambah
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Daftar Tipe Undangan:</h4>
+                {invitationTypes.length === 0 ? (
+                  <p className="text-sm text-gray-500 italic">Belum ada tipe undangan ditambahkan.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {invitationTypes.map(invType => (
+                      <li key={invType} className="flex justify-between items-center bg-gray-50 px-3 py-2 rounded-md border border-gray-100">
+                        <span className="text-sm font-medium text-gray-800">{invType}</span>
+                        <button onClick={() => handleRemoveInvitationType(invType)} type="button" className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded">
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </li>
@@ -641,7 +778,11 @@ export default function EventsList() {
         <p>Loading events...</p>
       ) : events.length === 0 ? (
         <div className="bg-white p-12 text-center rounded-lg shadow-sm border border-gray-200">
-          <p className="text-gray-500">No events found. Let's create one!</p>
+          <p className="text-gray-500">
+            {appUser?.role === 'staff'
+              ? 'Belum ada acara yang ditugaskan kepada akun Anda. Silakan hubungi Admin atau Owner untuk penugasan acara.'
+              : 'No events found. Let\'s create one!'}
+          </p>
         </div>
       ) : (
         
@@ -679,10 +820,16 @@ export default function EventsList() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex space-x-3">
-                         <Link to={`/auth/login/events/${event.id}`} className="text-indigo-600 hover:text-indigo-900 flex items-center justify-center p-1 rounded-full hover:bg-indigo-50 transition-colors" title="Detail Acara">
-                           <Eye className="w-4 h-4" />
-                         </Link>
-                         {appUser?.role !== 'client' && (
+                         {appUser?.role === 'staff' && appUser?.staffType === 'souvenir' ? (
+                           <Link to={`/auth/login/events/${event.id}?tab=souvenir`} className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-full text-xs font-semibold transition-colors" title="Kelola Souvenir">
+                             <Gift className="w-3.5 h-3.5" /> Kelola Souvenir
+                           </Link>
+                         ) : (
+                           <Link to={`/auth/login/events/${event.id}`} className="text-indigo-600 hover:text-indigo-900 flex items-center justify-center p-1 rounded-full hover:bg-indigo-50 transition-colors" title="Detail Acara">
+                             <Eye className="w-4 h-4" />
+                           </Link>
+                         )}
+                         {appUser?.role !== 'client' && appUser?.role !== 'staff' && (
                            <>
                              <button 
                                  onClick={() => openEditModal(event)} 
@@ -703,12 +850,30 @@ export default function EventsList() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
-                       <Link 
-                         to={`/auth/login/events/${event.id}/scan`} 
-                         className="inline-flex items-center gap-1 px-3 py-1 bg-green-50 text-green-700 hover:bg-green-100 rounded-full transition-colors"
-                       >
-                         <ScanLine className="w-4 h-4" /> Scan
-                       </Link>
+                       <div className="flex items-center justify-center gap-2">
+                         {appUser?.role === 'staff' && appUser?.staffType === 'souvenir' ? (
+                           <Link 
+                             to={`/auth/login/events/${event.id}/scan?mode=souvenir`} 
+                             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white hover:bg-purple-700 rounded-full text-xs font-semibold transition-colors shadow-sm"
+                           >
+                             <Gift className="w-3.5 h-3.5" /> Scan Souvenir
+                           </Link>
+                         ) : appUser?.role === 'staff' && appUser?.staffType === 'checkin' ? (
+                           <Link 
+                             to={`/auth/login/events/${event.id}/scan?mode=checkin`} 
+                             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white hover:bg-emerald-700 rounded-full text-xs font-semibold transition-colors shadow-sm"
+                           >
+                             <ScanLine className="w-3.5 h-3.5" /> Scan Kehadiran
+                           </Link>
+                         ) : (
+                           <Link 
+                             to={`/auth/login/events/${event.id}/scan`} 
+                             className="inline-flex items-center gap-1 px-3 py-1 bg-green-50 text-green-700 hover:bg-green-100 rounded-full transition-colors"
+                           >
+                             <ScanLine className="w-4 h-4" /> Scan
+                           </Link>
+                         )}
+                       </div>
                     </td>
                   </tr>
                 ))}

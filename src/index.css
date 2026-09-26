@@ -59,6 +59,17 @@
 }
 
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
   body * {
     visibility: hidden;
   }
@@ -71,6 +82,25 @@
     left: 0;
     top: 0;
     width: 100%;
+    margin: 0 !important;
+    padding: 0 !important;
     background-color: white;
+  }
+  .a4-qr-page {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-rows: repeat(5, 52mm);
+    gap: 3mm;
+    page-break-after: always;
+    break-after: page;
+  }
+  .a4-qr-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+  .a4-qr-card {
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
 }

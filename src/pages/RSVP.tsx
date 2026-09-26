@@ -5,7 +5,7 @@ import { doc, getDocs, updateDoc, serverTimestamp, query, collection, where, lim
 import { db } from '../lib/firebase';
 import { Guest, EventRecord } from '../types';
 import { useSettings } from '../SettingsContext';
-import { Heart, Ticket, Calendar, Clock, MapPin, MessageCircle, Loader2 } from 'lucide-react';
+import { Heart, Ticket, Calendar, Clock, MapPin, MessageCircle, Loader2, Users } from 'lucide-react';
 
 export default function RSVP() {
   const { eventId, ticketCode } = useParams();
@@ -16,6 +16,7 @@ export default function RSVP() {
   const [submitting, setSubmitting] = useState(false);
   const [wishesInput, setWishesInput] = useState('');
   const [sessionInput, setSessionInput] = useState('');
+  const [paxInput, setPaxInput] = useState<number>(1);
   const [timeLeft, setTimeLeft] = useState<{ days: number, hours: number, minutes: number, seconds: number } | null>(null);
 
   useEffect(() => {
@@ -78,6 +79,7 @@ export default function RSVP() {
            const guestData = { id: guestDoc.id, ...guestDoc.data() } as Guest;
            setGuest(guestData);
            if (guestData.wishes) setWishesInput(guestData.wishes);
+           if (guestData.pax && guestData.pax > 0) setPaxInput(Number(guestData.pax));
            if (guestData.session) {
              setSessionInput(guestData.session);
              currentSession = guestData.session;
@@ -89,9 +91,30 @@ export default function RSVP() {
         if (eventSnap.exists()) {
            const eventData = eventSnap.data() as EventRecord;
            if (eventData) {
-        document.title = eventData.title || (eventData.coupleName ? `The Wedding Of ${eventData.coupleName}` : 'Undangan Acara');
-      }
-      setEventData(eventData);
+             const pageTitle = eventData.title || (eventData.coupleName ? `The Wedding Of ${eventData.coupleName}` : 'Undangan Acara');
+             document.title = pageTitle;
+             const thumbUrl = eventData.thumbnailUrl || eventData.frameOverlayUrl;
+             if (thumbUrl) {
+               const absThumb = thumbUrl.startsWith('/') ? `${window.location.origin}${thumbUrl}` : thumbUrl;
+               const setMeta = (selector: string, attr: string, val: string) => {
+                 let el = document.querySelector(selector) as HTMLMetaElement | null;
+                 if (!el) {
+                   el = document.createElement('meta');
+                   if (selector.includes('property=')) {
+                     el.setAttribute('property', selector.match(/property="([^"]+)"/)?.[1] || '');
+                   } else if (selector.includes('name=')) {
+                     el.setAttribute('name', selector.match(/name="([^"]+)"/)?.[1] || '');
+                   }
+                   document.head.appendChild(el);
+                 }
+                 el.setAttribute(attr, val);
+               };
+               setMeta('meta[property="og:title"]', 'content', pageTitle);
+               setMeta('meta[property="og:image"]', 'content', absThumb);
+               setMeta('meta[name="twitter:image"]', 'content', absThumb);
+             }
+           }
+           setEventData(eventData);
            if (eventData.sessions && eventData.sessions.length > 0 && !currentSession) {
              setSessionInput(eventData.sessions[0]);
            }
@@ -122,14 +145,16 @@ export default function RSVP() {
   const handleUpdateRSVP = async (status: 'attending' | 'declined') => {
     if (!guest?.id) return;
     setSubmitting(true);
+    const updatedPax = status === 'declined' ? 0 : Math.max(1, Number(paxInput) || 1);
     try {
       await updateDoc(doc(db, 'events', eventId!, 'guests', guest.id), {
         rsvpStatus: status,
+        pax: updatedPax,
         wishes: wishesInput,
         session: sessionInput,
         updatedAt: serverTimestamp()
       });
-      setGuest({ ...guest, rsvpStatus: status, wishes: wishesInput, session: sessionInput });
+      setGuest({ ...guest, rsvpStatus: status, pax: updatedPax, wishes: wishesInput, session: sessionInput });
     } catch (error) {
        console.error("RSVP update failed. ", error);
     } finally {
@@ -165,11 +190,11 @@ export default function RSVP() {
         {/* Header Section */}
         <div className="bg-gradient-to-b from-[#fdf2f4] to-[#fce4e8] pt-12 pb-24 relative text-center flex-shrink-0 z-0">
           
-          {/* Subtle floral background layer */}
+          {/* Subtle background layer (uses couple thumbnail if set, otherwise floral) */}
           <div 
             className="absolute top-0 left-0 w-full h-full opacity-15 pointer-events-none mix-blend-multiply" 
             style={{ 
-              backgroundImage: "url('https://images.unsplash.com/photo-1543851502-0e9bd28af756?auto=format&fit=crop&w=800&q=80')", 
+              backgroundImage: `url('${eventData?.thumbnailUrl || "https://images.unsplash.com/photo-1543851502-0e9bd28af756?auto=format&fit=crop&w=800&q=80"}')`, 
               backgroundSize: 'cover',
               backgroundPosition: 'center 30%',
               maskImage: 'linear-gradient(to bottom, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 100%)',
@@ -178,11 +203,21 @@ export default function RSVP() {
           />
 
           <div className="relative z-10 px-6">
-            {settings?.logoUrl && (
-               <img src={settings.logoUrl} alt="Logo" className="h-auto max-h-12 w-auto max-w-[180px] object-contain mx-auto opacity-80 mix-blend-multiply" />
+            {eventData?.thumbnailUrl ? (
+              <div className="mx-auto mb-6 w-28 h-28 sm:w-32 sm:h-32 rounded-full p-1 bg-white/90 shadow-md ring-1 ring-rose-200/80 overflow-hidden">
+                <img
+                  src={eventData.thumbnailUrl}
+                  alt={eventData.coupleName || eventData.title || 'Foto Mempelai'}
+                  className="w-full h-full object-cover rounded-full"
+                />
+              </div>
+            ) : (
+              settings?.logoUrl && (
+                <img src={settings.logoUrl} alt="Logo" className="h-auto max-h-12 w-auto max-w-[180px] object-contain mx-auto opacity-80 mix-blend-multiply mb-6" />
+              )
             )}
             
-            <h2 className="text-[11px] font-bold tracking-[0.2em] uppercase mt-10 mb-2 text-[#C47E88]">Anda Diundang</h2>
+            <h2 className="text-[11px] font-bold tracking-[0.2em] uppercase mt-4 mb-2 text-[#C47E88]">Anda Diundang</h2>
             <h1 className="text-4xl sm:text-[42px] leading-[1.1] font-playfair italic font-bold text-[#A13444] mb-4">
               {eventData?.coupleName ? (
                 <>
@@ -241,6 +276,14 @@ export default function RSVP() {
                  <p className="text-[11px] font-bold text-rose-400 tracking-[0.2em] uppercase">Kode Tiket</p>
                </div>
                <p className="font-mono text-[22px] text-[#A13444] font-bold tracking-[0.25em]">{guest.ticketCode}</p>
+               <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-rose-100 text-[#A13444] text-xs font-semibold shadow-2xs">
+                 <Users size={13} className="text-rose-400" />
+                 <span>
+                   {guest.rsvpStatus === 'declined'
+                     ? 'Tidak Hadir (0 Orang)'
+                     : `Berlaku untuk ${guest.pax || 1} Orang (Pax)`}
+                 </span>
+               </div>
              </div>
           </div>
 
@@ -314,8 +357,28 @@ export default function RSVP() {
 
           {!eventData?.disableTicketRsvpForm && (
             <div className="space-y-4">
+              <div className="text-left">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-[#A13444] mb-1.5 pl-1">
+                  Jumlah Orang yang Akan Hadir (Pax)
+                </label>
+                <select
+                  value={paxInput}
+                  onChange={(e) => setPaxInput(Number(e.target.value))}
+                  className="w-full bg-[#fdf2f4] border border-rose-200 rounded-2xl px-4 py-3.5 focus:ring-rose-300 focus:border-rose-300 text-sm text-[#A13444] font-semibold"
+                >
+                  <option value={1}>1 Orang (Sendiri)</option>
+                  <option value={2}>2 Orang (Berdua / Pasangan)</option>
+                  <option value={3}>3 Orang</option>
+                  <option value={4}>4 Orang</option>
+                  <option value={5}>5 Orang (Keluarga)</option>
+                </select>
+              </div>
+
               {eventData?.sessions && eventData.sessions.length > 0 && (
                  <div className="text-left">
+                   <label className="block text-[11px] font-bold uppercase tracking-wider text-[#A13444] mb-1.5 pl-1">
+                     Sesi Kehadiran
+                   </label>
                    <select 
                      value={sessionInput}
                      onChange={(e) => setSessionInput(e.target.value)}
@@ -370,7 +433,7 @@ export default function RSVP() {
                 
                 {guest.rsvpStatus !== 'pending' && (
                   <div className={`text-center text-[13px] font-medium mt-4 p-3 rounded-xl ${guest.rsvpStatus === 'attending' ? 'bg-[#fdf2f4] text-[#A13444]' : 'bg-gray-50 text-gray-600'}`}>
-                    ✓ Anda telah {guest.rsvpStatus === 'attending' ? 'menerima' : 'menolak'} undangan ini
+                    ✓ Anda telah mengonfirmasi: {guest.rsvpStatus === 'attending' ? `Hadir (${guest.pax || 1} Orang)` : 'Tidak Hadir'}
                   </div>
                 )}
               </div>

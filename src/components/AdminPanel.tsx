@@ -21,8 +21,8 @@ import {
   createUserWithEmailAndPassword,
   handleFirestoreError,
   OperationType,
+  firebaseConfig,
 } from '../firebase';
-import firebaseConfig from '../../firebase-applet-config.json';
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { User, EventRecord, AppUser } from '../types';

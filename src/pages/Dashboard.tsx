@@ -7,11 +7,17 @@ import { EventRecord, Guest } from '../types';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import { format, isSameDay } from 'date-fns';
-import { parseFirestoreDate } from '../lib/utils';
+import { parseFirestoreDate, getRoleLabel, canUserAccessEvent } from '../lib/utils';
 
 export default function Dashboard() {
   const { appUser } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (appUser?.role === 'staff') {
+      navigate('/auth/login/events', { replace: true });
+    }
+  }, [appUser, navigate]);
   
   // Parse activeUntil safely
   let isTrial = false;
@@ -33,7 +39,13 @@ export default function Dashboard() {
     draftEvents: 0,
     publishedEvents: 0,
     expectedGuests: 0,
-    attendedGuests: 0
+    expectedPax: 0,
+    rsvpAttendingGuests: 0,
+    rsvpAttendingPax: 0,
+    rsvpPendingGuests: 0,
+    rsvpDeclinedGuests: 0,
+    attendedGuests: 0,
+    attendedPax: 0
   });
   const [superMetrics, setSuperMetrics] = useState({
     totalUsers: 0,
@@ -47,9 +59,10 @@ export default function Dashboard() {
   useEffect(() => {
     let unsubscribeGuestsList: (() => void)[] = [];
 
-    const setupListeners = async () => {
+    const setupListeners = async (showLoading = true) => {
       try {
-        setLoading(true);
+        if (appUser?.role === 'staff') return;
+        if (showLoading) setLoading(true);
         
         let eventsRef = collection(db, 'events');
         let q = query(eventsRef);
@@ -66,7 +79,7 @@ export default function Dashboard() {
           q = query(eventsRef, where('clientId', '==', targetClientId));
         }
 
-        if (appUser?.role === 'superadmin') {
+        if (appUser?.role === 'superadmin' || appUser?.role === 'owner') {
           try {
              const { getCountFromServer } = await import('firebase/firestore');
              const usersRef = collection(db, 'users');
@@ -91,6 +104,7 @@ export default function Dashboard() {
           let published = 0;
               
           eventsSnapshot.forEach(doc => {
+            if (!canUserAccessEvent(appUser, doc.id)) return;
             const data = doc.data() as EventRecord;
             eventsList.push({ ...data, id: doc.id });
             if (data.status === 'draft') drafts++;
@@ -111,24 +125,49 @@ export default function Dashboard() {
               draftEvents: drafts,
               publishedEvents: published,
               expectedGuests: 0,
-              attendedGuests: 0
+              expectedPax: 0,
+              rsvpAttendingGuests: 0,
+              rsvpAttendingPax: 0,
+              rsvpPendingGuests: 0,
+              rsvpDeclinedGuests: 0,
+              attendedGuests: 0,
+              attendedPax: 0
             });
             setLoading(false);
             return;
           }
 
           let currentExpected = 0;
+          let currentExpectedPax = 0;
+          let currentRsvpAttendingGuests = 0;
+          let currentRsvpAttendingPax = 0;
+          let currentRsvpPendingGuests = 0;
+          let currentRsvpDeclinedGuests = 0;
           let currentAttended = 0;
+          let currentAttendedPax = 0;
 
           await Promise.all(publishedEvents.map(async (event) => {
              try {
                 const guestsRef = collection(db, 'events', event.id!, 'guests');
-                // Use getCountFromServer to avoid document reads (Sprint 5A)
-                const { getCountFromServer } = await import('firebase/firestore');
-                const totalSnap = await getCountFromServer(guestsRef);
-                const attendedSnap = await getCountFromServer(query(guestsRef, where('attended', '==', true)));
-                currentExpected += totalSnap.data().count;
-                currentAttended += attendedSnap.data().count;
+                const guestsSnap = await getDocs(guestsRef);
+                guestsSnap.forEach((gDoc) => {
+                  const g = gDoc.data() as Guest;
+                  const guestPax = g.rsvpStatus === 'declined' ? 0 : Math.max(1, Number(g.pax) || 1);
+                  currentExpected += 1;
+                  currentExpectedPax += guestPax;
+                  if (g.rsvpStatus === 'attending') {
+                    currentRsvpAttendingGuests += 1;
+                    currentRsvpAttendingPax += Math.max(1, Number(g.pax) || 1);
+                  } else if (g.rsvpStatus === 'declined') {
+                    currentRsvpDeclinedGuests += 1;
+                  } else {
+                    currentRsvpPendingGuests += 1;
+                  }
+                  if (g.attended) {
+                    currentAttended += 1;
+                    currentAttendedPax += Math.max(1, Number(g.pax) || 1);
+                  }
+                });
              } catch (e) {
                 console.error("Error fetching guest counts for event", event.id, e);
              }
@@ -139,7 +178,13 @@ export default function Dashboard() {
              draftEvents: drafts,
              publishedEvents: published,
              expectedGuests: currentExpected,
-             attendedGuests: currentAttended
+             expectedPax: currentExpectedPax,
+             rsvpAttendingGuests: currentRsvpAttendingGuests,
+             rsvpAttendingPax: currentRsvpAttendingPax,
+             rsvpPendingGuests: currentRsvpPendingGuests,
+             rsvpDeclinedGuests: currentRsvpDeclinedGuests,
+             attendedGuests: currentAttended,
+             attendedPax: currentAttendedPax
           });
           setLoading(false);
         } catch (error: any) {
@@ -154,10 +199,35 @@ export default function Dashboard() {
     };
 
     if (appUser) {
-      setupListeners();
+      setupListeners(true);
     }
 
+    const handleCompatChange = (e: any) => {
+      const col = e.detail?.collectionName;
+      if (!col || col === 'guests' || col === 'events') {
+        setupListeners(false);
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        setupListeners(false);
+      }
+    };
+
+    window.addEventListener('supabase-compat-change', handleCompatChange);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    const liveInterval = setInterval(() => {
+      if (document.visibilityState === 'visible' && appUser) {
+        setupListeners(false);
+      }
+    }, 5000);
+
     return () => {
+      clearInterval(liveInterval);
+      window.removeEventListener('supabase-compat-change', handleCompatChange);
+      document.removeEventListener('visibilitychange', handleVisibility);
       unsubscribeGuestsList.forEach(unsub => unsub());
     };
   }, [appUser]);
@@ -199,7 +269,7 @@ export default function Dashboard() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
       <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-        <p className="text-gray-600">Selamat datang, {appUser?.name}! Anda login sebagai <span className="font-medium text-indigo-600">{appUser?.role}</span>.</p>
+        <p className="text-gray-600">Selamat datang, {appUser?.name}! Anda login sebagai <span className="font-medium text-indigo-600">{getRoleLabel(appUser?.role, appUser?.staffType)}</span>.</p>
         
         {isTrial && (
           <div className="mt-4 p-4 bg-indigo-50 border border-indigo-100 rounded-lg flex items-start gap-3">
@@ -223,9 +293,9 @@ export default function Dashboard() {
         <div className="text-gray-500">Memuat data dashboard...</div>
       ) : (
         <div className="space-y-6">
-          {appUser?.role === 'superadmin' && (
+          {(appUser?.role === 'superadmin' || appUser?.role === 'owner') && (
             <div>
-               <h2 className="text-lg font-medium text-gray-900 mb-4">Statistik Super Admin</h2>
+               <h2 className="text-lg font-medium text-gray-900 mb-4">Statistik Global Sistem</h2>
                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                  <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 border-l-4 border-l-purple-500">
                    <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Total User</h3>
@@ -248,37 +318,59 @@ export default function Dashboard() {
           )}
 
           <div>
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Ringkasan Acara</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 border-l-4 border-l-blue-500">
-                <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Total Acara</h3>
-                <p className="text-3xl font-bold text-gray-900 mt-2">{metrics.totalEvents}</p>
+            <h2 className="text-lg font-medium text-gray-900 mb-4">Ringkasan Acara & Estimasi Kehadiran (Pra Check-In)</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+              <div className="bg-white p-5 rounded-lg shadow-2xs border border-gray-200 border-l-4 border-l-blue-500 flex flex-col justify-between">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Total Acara</h3>
+                <p className="text-3xl font-bold text-gray-900 mt-2 font-mono tabular-nums">{metrics.totalEvents}</p>
+                <div className="mt-3 pt-2.5 border-t border-gray-100 flex items-center justify-between text-xs">
+                  <span className="font-semibold text-indigo-600">{metrics.publishedEvents} Aktif</span>
+                  <span className="text-gray-500">{metrics.draftEvents} Draft</span>
+                </div>
               </div>
-              <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 border-l-4 border-l-yellow-400">
-                <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Draft</h3>
-                <p className="text-3xl font-bold text-gray-900 mt-2">{metrics.draftEvents}</p>
-              </div>
-              <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 border-l-4 border-l-indigo-500">
-                <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Acara Aktif</h3>
-                <p className="text-3xl font-bold text-gray-900 mt-2">{metrics.publishedEvents}</p>
-              </div>
-              <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 border-l-4 border-l-green-500">
-                <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Tamu Hadir</h3>
+              <div className="bg-white p-5 rounded-lg shadow-2xs border border-gray-200 border-l-4 border-l-indigo-500 flex flex-col justify-between">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Total Undangan</h3>
                 <div className="mt-2 flex items-baseline gap-2">
-                  <p className="text-3xl font-bold text-gray-900">{metrics.attendedGuests}</p>
-                  <p className="text-sm text-gray-500 font-medium">/ {metrics.expectedGuests} Tamu</p>
+                  <p className="text-3xl font-bold text-gray-900 font-mono tabular-nums">{metrics.expectedGuests.toLocaleString('id-ID')}</p>
+                  <p className="text-xs text-gray-500 font-medium">Undangan</p>
+                </div>
+                <div className="mt-3 pt-2.5 border-t border-gray-100 flex items-center justify-between text-xs">
+                  <span className="text-gray-500">Total Alokasi:</span>
+                  <span className="font-semibold text-indigo-600 font-mono tabular-nums">{metrics.expectedPax.toLocaleString('id-ID')} Orang</span>
+                </div>
+              </div>
+              <div className="bg-emerald-50/25 p-5 rounded-lg shadow-2xs border border-emerald-200 border-l-4 border-l-emerald-600 flex flex-col justify-between">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xs font-bold text-emerald-800 uppercase tracking-wider whitespace-nowrap">Estimasi Hadir (RSVP)</h3>
+                  <span className="px-2 py-0.5 text-[10px] font-semibold bg-emerald-100 text-emerald-800 rounded whitespace-nowrap">Pra Check-In</span>
+                </div>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <p className="text-3xl font-bold text-emerald-700 font-mono tabular-nums">{metrics.rsvpAttendingPax.toLocaleString('id-ID')}</p>
+                  <p className="text-xs text-emerald-800 font-semibold">Orang (Pax)</p>
+                </div>
+                <div className="mt-3 pt-2.5 border-t border-emerald-100 flex items-center justify-between text-xs font-mono tabular-nums">
+                  <span className="text-emerald-900 font-medium">{metrics.rsvpAttendingGuests} hadir</span>
+                  <span className="text-amber-600 font-medium">{metrics.rsvpPendingGuests} pending</span>
+                  <span className="text-rose-600 font-medium">{metrics.rsvpDeclinedGuests} absen</span>
+                </div>
+              </div>
+              <div className="bg-white p-5 rounded-lg shadow-2xs border border-gray-200 border-l-4 border-l-green-500 flex flex-col justify-between">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Realisasi Check-In</h3>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <p className="text-3xl font-bold text-gray-900 font-mono tabular-nums">{metrics.attendedPax.toLocaleString('id-ID')}</p>
+                  <p className="text-xs text-gray-600 font-semibold">Orang Masuk</p>
                </div>
-               <div className="mt-3 w-full bg-gray-200 rounded-full h-1.5">
-                 <div 
-                   className="bg-green-500 h-1.5 rounded-full" 
-                   style={{ width: metrics.expectedGuests > 0 ? `${(metrics.attendedGuests / metrics.expectedGuests) * 100}%` : '0%' }}
-                 ></div>
+               <div className="mt-3 pt-2.5 border-t border-gray-100 flex items-center justify-between text-xs">
+                 <span className="text-gray-500">{metrics.attendedGuests} / {metrics.expectedGuests} scan</span>
+                 <span className="font-mono tabular-nums font-semibold text-green-600">
+                   {metrics.expectedGuests > 0 ? Math.round((metrics.attendedGuests / metrics.expectedGuests) * 100) : 0}%
+                 </span>
                </div>
               </div>
             </div>
           </div>
 
-          {(appUser?.role === 'partner' || appUser?.role === 'client') && (
+          {(appUser?.role === 'partner' || appUser?.role === 'client' || appUser?.role === 'admin' || appUser?.role === 'owner' || appUser?.role === 'superadmin') && (
             <div>
               <h2 className="text-lg font-medium text-gray-900 mb-4">Pengingat Kalender Acara</h2>
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

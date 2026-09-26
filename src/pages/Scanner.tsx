@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { doc, serverTimestamp, collection, query, where, getDocs, limit, runTransaction, onSnapshot, orderBy, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { supabaseDb } from '../lib/supabaseDb';
-import { parseFirestoreDate } from '../lib/utils';
+import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel } from '../lib/utils';
+import { useAuth } from '../AuthContext';
 import { Guest, SouvenirItem, SouvenirLog } from '../types';
 import { 
   CheckCircle, 
@@ -120,12 +121,19 @@ const playErrorBuzz = () => {
 
 export default function Scanner() {
   const { eventId } = useParams();
+  const [searchParams] = useSearchParams();
+  const { appUser } = useAuth();
+  const currentOperator = getOperatorLabel(appUser);
+  const isStaffCheckinOnly = appUser?.role === 'staff' && appUser?.staffType === 'checkin';
+  const isStaffSouvenirOnly = appUser?.role === 'staff' && appUser?.staffType === 'souvenir';
+
   const [scanResult, setScanResult] = useState<{
     status: 'success' | 'error';
     message: string;
     guestName?: string;
     category?: string;
     souvenirNotice?: string;
+    operatorName?: string;
   } | null>(null);
   const [scanMode, setScanMode] = useState<'camera' | 'tool'>('camera');
   const [manualInput, setManualInput] = useState('');
@@ -140,9 +148,26 @@ export default function Scanner() {
   const [isStressTestOpen, setIsStressTestOpen] = useState(false);
   
   // Souvenir Station Integration
-  const [stationMode, setStationMode] = useState<'checkin' | 'checkin_souvenir' | 'souvenir_only'>('checkin');
+  const [stationMode, setStationMode] = useState<'checkin' | 'checkin_souvenir' | 'souvenir_only'>(() => {
+    const modeParam = searchParams.get('mode');
+    if (modeParam === 'souvenir') return 'souvenir_only';
+    if (modeParam === 'checkin') return 'checkin';
+    return 'checkin';
+  });
   const [souvenirs, setSouvenirs] = useState<SouvenirItem[]>([]);
   const [selectedSouvenirId, setSelectedSouvenirId] = useState<string>('');
+
+  useEffect(() => {
+    if (isStaffSouvenirOnly) {
+      setStationMode('souvenir_only');
+    } else if (isStaffCheckinOnly) {
+      setStationMode('checkin');
+    } else {
+      const modeParam = searchParams.get('mode');
+      if (modeParam === 'souvenir') setStationMode('souvenir_only');
+      else if (modeParam === 'checkin') setStationMode('checkin');
+    }
+  }, [isStaffSouvenirOnly, isStaffCheckinOnly, searchParams]);
 
   // Waiting Guests Search & Manual Handout
   const [waitingSearch, setWaitingSearch] = useState('');
@@ -151,47 +176,41 @@ export default function Scanner() {
   const isProcessingRef = useRef(false);
   const lastScannedCodeRef = useRef<string | null>(null);
 
-  const fetchStats = async () => {
+  const applyGuestsListToState = (rawList: Guest[]) => {
     if (!eventId) return;
-    try {
-      const supaList = await supabaseDb.getGuests(eventId);
-      if (supaList && supaList.length > 0) {
-        setStats({
-          total: supaList.length,
-          attended: supaList.filter(g => g.attended).length,
-          souvenirTaken: supaList.filter(g => g.souvenirTaken).length
-        });
-        return;
-      }
-    } catch (supaErr) {
-      console.warn("Supabase fetchStats fallback:", supaErr);
-    }
+    const merged = souvenirStorage.mergeGuestsWithSouvenirs(eventId, rawList);
+    setAllGuests(merged);
+    setStats({
+      total: merged.length,
+      attended: merged.filter(g => g.attended).length,
+      souvenirTaken: merged.filter(g => g.souvenirTaken).length
+    });
 
-    try {
-      const { getCountFromServer } = await import('firebase/firestore');
-      const guestsRef = collection(db, 'events', eventId, 'guests');
-      const [totalSnap, attendedSnap, souvenirSnap] = await Promise.all([
-        getCountFromServer(guestsRef),
-        getCountFromServer(query(guestsRef, where('attended', '==', true))),
-        getCountFromServer(query(guestsRef, where('souvenirTaken', '==', true)))
-      ]);
-      setStats({
-        total: totalSnap.data().count,
-        attended: attendedSnap.data().count,
-        souvenirTaken: souvenirSnap.data().count
-      });
-    } catch (e) {
-      console.warn("Failed to fetch initial stats", e);
+    const attendedOrSouvenir = merged
+      .filter(g => g.attended || g.souvenirTaken)
+      .sort((a, b) => {
+        const dA = parseFirestoreDate(a.attendedAt || a.souvenirTakenAt || a.updatedAt)?.getTime() || 0;
+        const dB = parseFirestoreDate(b.attendedAt || b.souvenirTakenAt || b.updatedAt)?.getTime() || 0;
+        return dB - dA;
+      })
+      .slice(0, 15);
+    setRecentScans(attendedOrSouvenir);
+
+    const updatedSouvenirs = souvenirStorage.getSouvenirs(eventId, merged);
+    setSouvenirs(updatedSouvenirs);
+    if (updatedSouvenirs.length > 0) {
+      setSelectedSouvenirId(prev => prev || updatedSouvenirs[0].id!);
     }
+    setSouvenirLogs(souvenirStorage.getLogs(eventId));
   };
 
   const loadAllGuests = async () => {
     if (!eventId) return;
+    souvenirStorage.hydrateFromSupabase(eventId, true);
     try {
       const supaList = await supabaseDb.getGuests(eventId);
-      if (supaList && supaList.length > 0) {
-        const merged = souvenirStorage.mergeGuestsWithSouvenirs(eventId, supaList);
-        setAllGuests(merged);
+      if (supaList) {
+        applyGuestsListToState(supaList);
         return;
       }
     } catch (supaErr) {
@@ -202,63 +221,73 @@ export default function Scanner() {
       const guestsRef = collection(db, 'events', eventId, 'guests');
       const snap = await getDocs(guestsRef);
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Guest));
-      const merged = souvenirStorage.mergeGuestsWithSouvenirs(eventId, list);
-      setAllGuests(merged);
+      applyGuestsListToState(list);
     } catch (e) {
       console.warn("Failed to load guests list (falling back gracefully):", e);
     }
   };
 
-  // Subscribe to real-time recent check-ins and souvenirs
+  const fetchStats = async () => {
+    await loadAllGuests();
+  };
+
+  // Subscribe to real-time check-ins, souvenirs, and live monitoring heartbeat
   useEffect(() => {
     if (!eventId) return;
 
-    // Listen to recent attended guests
-    const qRecent = query(
-      collection(db, 'events', eventId, 'guests'),
-      orderBy('attendedAt', 'desc'),
-      limit(10)
-    );
+    // Initial load
+    loadAllGuests();
 
-    const unsubRecent = onSnapshot(qRecent, (snapshot) => {
-      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Guest));
-      const merged = souvenirStorage.mergeGuestsWithSouvenirs(eventId, docs);
-      setRecentScans(merged.filter(g => g.attended || g.souvenirTaken));
-    }, (error) => {
-      console.warn("Recent scans listener warning:", error);
+    // 1. Subscribe via Supabase Realtime (Broadcast + Postgres Changes)
+    const unsubRealtime = supabaseDb.subscribeToGuests(eventId, () => {
+      loadAllGuests();
     });
 
-    // Load souvenirs & logs from souvenirStorage
-    const sList = souvenirStorage.getSouvenirs(eventId);
-    setSouvenirs(sList);
-    if (sList.length > 0) {
-      setSelectedSouvenirId(prev => prev || sList[0].id!);
-    }
-    setSouvenirLogs(souvenirStorage.getLogs(eventId));
+    // 2. Listen to local & cross-device compat changes
+    const handleCompatChange = (e: any) => {
+      const col = e.detail?.collectionName;
+      if (!col || col === 'guests' || col === 'settings' || col === 'events') {
+        loadAllGuests();
+      }
+    };
 
     const handleSouvenirsChanged = (e: any) => {
-      if (e.detail?.eventId === eventId) {
-        const updated = souvenirStorage.getSouvenirs(eventId, allGuests);
-        setSouvenirs(updated);
+      if (!e.detail?.eventId || e.detail?.eventId === eventId) {
+        loadAllGuests();
       }
     };
 
     const handleLogsChanged = (e: any) => {
-      if (e.detail?.eventId === eventId) {
+      if (!e.detail?.eventId || e.detail?.eventId === eventId) {
         setSouvenirLogs(souvenirStorage.getLogs(eventId));
       }
     };
 
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadAllGuests();
+      }
+    };
+
+    window.addEventListener('supabase-compat-change', handleCompatChange);
     window.addEventListener('guestly_souvenirs_changed', handleSouvenirsChanged);
     window.addEventListener('guestly_souvenir_logs_changed', handleLogsChanged);
+    document.addEventListener('visibilitychange', handleVisibility);
 
-    fetchStats();
-    loadAllGuests();
+    // 3. Guaranteed 3-second real-time monitoring heartbeat when tab is visible
+    const liveInterval = setInterval(() => {
+      if (document.visibilityState === 'visible' && !isProcessingRef.current) {
+        loadAllGuests();
+      }
+    }, 3000);
 
     return () => {
-      unsubRecent();
+      unsubRealtime();
+      clearInterval(liveInterval);
+      window.removeEventListener('supabase-compat-change', handleCompatChange);
       window.removeEventListener('guestly_souvenirs_changed', handleSouvenirsChanged);
       window.removeEventListener('guestly_souvenir_logs_changed', handleLogsChanged);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [eventId]);
 
@@ -339,6 +368,7 @@ export default function Scanner() {
               (error as any).souvenirTakenAt = guestData.souvenirTakenAt || localTaken?.takenAt;
               (error as any).guestName = guestData.name;
               (error as any).souvenirName = guestData.souvenirName || localTaken?.souvenirName || 'Souvenir';
+              (error as any).souvenirTakenBy = guestData.souvenirTakenBy || localTaken?.takenBy;
               throw error;
             }
 
@@ -357,9 +387,10 @@ export default function Scanner() {
               souvenirId: activeSouvenir.id,
               souvenirName: activeSouvenir.name,
               souvenirQuantity: 1,
-              souvenirTakenBy: 'Loket Souvenir (Scan)',
+              souvenirTakenBy: currentOperator,
               attended: true,
               attendedAt: guestData.attendedAt || serverTimestamp(),
+              checkInStaff: guestData.checkInStaff || currentOperator,
               updatedAt: serverTimestamp()
             });
 
@@ -381,6 +412,7 @@ export default function Scanner() {
               (error as any).attendedAt = guestData.attendedAt;
               (error as any).guestName = guestData.name;
               (error as any).category = guestData.category;
+              (error as any).checkInStaff = guestData.checkInStaff;
               (error as any).souvenirTaken = guestData.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
               throw error;
             }
@@ -388,6 +420,7 @@ export default function Scanner() {
             const guestUpdate: any = {
               attended: true,
               attendedAt: serverTimestamp(),
+              checkInStaff: currentOperator,
               updatedAt: serverTimestamp()
             };
 
@@ -401,7 +434,7 @@ export default function Scanner() {
               guestUpdate.souvenirId = activeSouvenir.id;
               guestUpdate.souvenirName = activeSouvenir.name;
               guestUpdate.souvenirQuantity = 1;
-              guestUpdate.souvenirTakenBy = 'Meja Resepsionis (Scan)';
+              guestUpdate.souvenirTakenBy = currentOperator;
               souvenirGiven = true;
               targetSouvenirName = activeSouvenir.name;
             }
@@ -426,12 +459,14 @@ export default function Scanner() {
               (error as any).attendedAt = guestData.attendedAt;
               (error as any).guestName = guestData.name;
               (error as any).category = guestData.category;
+              (error as any).checkInStaff = guestData.checkInStaff;
               throw error;
             }
 
             transaction.update(guestDocRef, {
               attended: true,
               attendedAt: serverTimestamp(),
+              checkInStaff: currentOperator,
               updatedAt: serverTimestamp()
             });
 
@@ -453,9 +488,7 @@ export default function Scanner() {
             souvenirId: activeSouvenir.id!,
             souvenirName: activeSouvenir.name,
             takenAt: new Date().toISOString(),
-            takenBy: transactionResult.mode === 'souvenir_only' 
-              ? 'Loket Souvenir (Scan)' 
-              : 'Meja Resepsionis (Scan)'
+            takenBy: currentOperator
           });
 
           souvenirStorage.addLog(eventId!, {
@@ -470,9 +503,7 @@ export default function Scanner() {
             notes: transactionResult.mode === 'souvenir_only' 
               ? 'Scan penukaran di loket souvenir' 
               : 'Scan check-in sekaligus serah souvenir',
-            performedBy: transactionResult.mode === 'souvenir_only' 
-              ? 'Loket Souvenir (Scan)' 
-              : 'Meja Resepsionis (Scan)'
+            performedBy: currentOperator
           });
 
           // Refresh inventory & logs state
@@ -521,7 +552,8 @@ export default function Scanner() {
           message: successMessage,
           guestName: transactionResult.name,
           category: transactionResult.category,
-          souvenirNotice: transactionResult.souvenirGiven ? `Souvenir: ${transactionResult.souvenirName}` : undefined
+          souvenirNotice: transactionResult.souvenirGiven ? `Souvenir: ${transactionResult.souvenirName}` : undefined,
+          operatorName: currentOperator
         });
 
         // Supabase Realtime Broadcast to Greeting Screen & database update
@@ -540,8 +572,10 @@ export default function Scanner() {
             supabaseDb.updateGuest(found.id, {
               attended: true,
               attendedAt: new Date().toISOString(),
+              checkInStaff: found.checkInStaff || currentOperator,
               souvenirTaken: Boolean(transactionResult.souvenirGiven),
-              souvenirName: transactionResult.souvenirName || undefined
+              souvenirName: transactionResult.souvenirName || undefined,
+              souvenirTakenBy: transactionResult.souvenirGiven ? currentOperator : undefined
             });
           }
         }).catch(e => console.warn('Supabase guest sync error:', e));
@@ -555,10 +589,12 @@ export default function Scanner() {
         const timeFormatted = takenDate 
           ? takenDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
           : '-';
+        const byInfo = error.souvenirTakenBy ? ` (Petugas: ${error.souvenirTakenBy})` : '';
         setScanResult({ 
           status: 'error', 
-          message: `⚠️ PERINGATAN: Tamu ${error.guestName ? `atas nama "${error.guestName}" ` : ''}SUDAH PERNAH mengambil souvenir "${error.souvenirName}" pada jam ${timeFormatted}! Penyerahan ditolak untuk mencegah klaim ganda.`,
-          guestName: error.guestName
+          message: `⚠️ PERINGATAN: Tamu ${error.guestName ? `atas nama "${error.guestName}" ` : ''}SUDAH PERNAH mengambil souvenir "${error.souvenirName}" pada jam ${timeFormatted}${byInfo}! Penyerahan ditolak untuk mencegah klaim ganda.`,
+          guestName: error.guestName,
+          operatorName: error.souvenirTakenBy
         });
       } else if (error?.message === 'OUT_OF_STOCK') {
         setScanResult({ 
@@ -576,10 +612,12 @@ export default function Scanner() {
         const dateFormatted = attendedDate 
           ? attendedDate.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })
           : '-';
+        const byInfo = error.checkInStaff ? ` oleh petugas ${error.checkInStaff}` : '';
         setScanResult({ 
           status: 'error', 
-          message: `Tiket ${error.guestName ? `atas nama "${error.guestName}" ` : ''}sudah pernah check-in pada ${dateFormatted}${error.souvenirTaken ? ' (Souvenir sudah diambil)' : ''}.`,
-          guestName: error.guestName
+          message: `Tiket ${error.guestName ? `atas nama "${error.guestName}" ` : ''}sudah pernah check-in pada ${dateFormatted}${byInfo}${error.souvenirTaken ? ' (Souvenir sudah diambil)' : ''}.`,
+          guestName: error.guestName,
+          operatorName: error.checkInStaff
         });
       } else if (error?.message === 'GUEST_NOT_FOUND') {
         setScanResult({ status: 'error', message: `Data tiket tidak ditemukan di database acara.` });
@@ -622,9 +660,10 @@ export default function Scanner() {
         souvenirId: activeSouvenir.id,
         souvenirName: activeSouvenir.name,
         souvenirQuantity: 1,
-        souvenirTakenBy: 'Loket Souvenir (1-Klik)',
+        souvenirTakenBy: currentOperator,
         attended: true,
         attendedAt: guest.attendedAt || serverTimestamp(),
+        checkInStaff: guest.checkInStaff || currentOperator,
         updatedAt: serverTimestamp()
       });
 
@@ -632,7 +671,7 @@ export default function Scanner() {
         souvenirId: activeSouvenir.id,
         souvenirName: activeSouvenir.name,
         takenAt: new Date().toISOString(),
-        takenBy: 'Loket Souvenir (1-Klik)'
+        takenBy: currentOperator
       });
 
       souvenirStorage.addLog(eventId, {
@@ -645,7 +684,7 @@ export default function Scanner() {
         quantity: 1,
         action: 'TAKE',
         notes: 'Penyerahan langsung 1-klik via daftar antrean meja souvenir',
-        performedBy: 'Loket Souvenir (1-Klik)'
+        performedBy: currentOperator
       });
 
       playSouvenirChime();
@@ -654,7 +693,8 @@ export default function Scanner() {
         message: `🎁 Souvenir "${activeSouvenir.name}" berhasil diserahkan kepada ${guest.name}!`,
         guestName: guest.name,
         category: guest.category,
-        souvenirNotice: `Souvenir: ${activeSouvenir.name}`
+        souvenirNotice: `Souvenir: ${activeSouvenir.name}`,
+        operatorName: currentOperator
       });
 
       setStats(prev => ({
@@ -674,7 +714,7 @@ export default function Scanner() {
         souvenirId: activeSouvenir.id,
         souvenirName: activeSouvenir.name,
         takenAt: new Date().toISOString(),
-        takenBy: 'Loket Souvenir (Lokal)'
+        takenBy: currentOperator
       });
       souvenirStorage.addLog(eventId, {
         eventId,
@@ -686,13 +726,14 @@ export default function Scanner() {
         quantity: 1,
         action: 'TAKE',
         notes: 'Penyerahan dicatat secara lokal',
-        performedBy: 'Loket Souvenir'
+        performedBy: currentOperator
       });
       playSouvenirChime();
       setScanResult({
         status: 'success',
         message: `🎁 Souvenir "${activeSouvenir.name}" berhasil dicatat untuk ${guest.name}!`,
-        guestName: guest.name
+        guestName: guest.name,
+        operatorName: currentOperator
       });
       setStats(prev => ({
         ...prev,
@@ -778,24 +819,50 @@ export default function Scanner() {
     );
   });
 
+  if (appUser && !canUserAccessEvent(appUser, eventId)) {
+    return (
+      <div className="max-w-lg mx-auto mt-12 bg-white p-8 rounded-2xl shadow-sm border border-red-200 text-center space-y-4">
+        <div className="w-12 h-12 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto">
+          <AlertCircle className="w-6 h-6" />
+        </div>
+        <h2 className="text-lg font-bold text-gray-900">Akses Acara Ditolak</h2>
+        <p className="text-sm text-gray-600">
+          Akun Anda ({getRoleLabel(appUser.role, appUser.staffType)}) belum ditugaskan pada acara ini. Anda hanya dapat membuka scanner untuk acara yang telah ditugaskan kepada Anda.
+        </p>
+        <Link
+          to="/auth/login/events"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" /> Kembali ke Daftar Acara
+        </Link>
+      </div>
+    );
+  }
+
   return (
-    <div className="w-full max-w-[1600px] mx-auto space-y-6 pb-12">
+    <div className="w-full max-w-[1600px] mx-auto space-y-4 pb-12">
       {/* Top Header & Navigation */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100 gap-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-lg shadow-2xs border border-slate-200 gap-4">
         <div className="flex items-center gap-3">
           <Link
-            to={`/auth/login/events/${eventId}`}
-            className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-            title="Kembali ke Detail Acara"
+            to={appUser?.role === 'staff' ? '/auth/login/events' : `/auth/login/events/${eventId}`}
+            className="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors border border-transparent hover:border-slate-200"
+            title={appUser?.role === 'staff' ? 'Kembali ke Acara Tugas' : 'Kembali ke Detail Acara'}
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="w-4 h-4" />
           </Link>
           <div>
-            <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-              <ScanLine className="w-6 h-6 text-indigo-600" />
-              Sistem Scanner & POS Meja
+            <h1 className="text-lg sm:text-xl font-bold text-slate-900 flex items-center gap-2">
+              <ScanLine className="w-5 h-5 text-indigo-600" />
+              {isStaffCheckinOnly
+                ? 'Scanner Kehadiran Tamu (Gate Masuk)'
+                : isStaffSouvenirOnly
+                ? 'Scanner Loket Penukaran Souvenir'
+                : 'Sistem Scanner & POS Meja'}
             </h1>
-            <p className="text-xs text-gray-500 mt-0.5">Operasional gerbang masuk dan logistik penukaran souvenir secara atomik</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Petugas Aktif: <span className="font-semibold text-indigo-600">{currentOperator}</span>
+            </p>
           </div>
         </div>
 
@@ -803,43 +870,47 @@ export default function Scanner() {
           {/* Quick Sound Test */}
           <button
             onClick={() => { playBeep(); }}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg transition-colors cursor-pointer"
+            className="h-8.5 flex items-center gap-1.5 px-3 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-md transition-colors cursor-pointer"
             title="Tes Suara Beep Sukses"
           >
-            <Volume2 className="w-3.5 h-3.5 text-green-600" /> Tes Beep
+            <Volume2 className="w-3.5 h-3.5 text-emerald-600" /> Tes Beep
           </button>
 
-          {/* Stress Test Tool */}
-          <button
-            onClick={() => setIsStressTestOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition-colors cursor-pointer shadow-2xs"
-            title="Buka Alat Uji Ketahanan & Stress Test Scanner"
-          >
-            <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500" /> Uji Ketahanan
-          </button>
+          {/* Stress Test Tool - Only for SuperAdmin / Owner / Admin */}
+          {appUser?.role !== 'staff' && (
+            <button
+              onClick={() => setIsStressTestOpen(true)}
+              className="h-8.5 flex items-center gap-1.5 px-3 text-xs font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-md transition-colors cursor-pointer"
+              title="Buka Alat Uji Ketahanan & Stress Test Scanner"
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500" /> Uji Ketahanan
+            </button>
+          )}
 
           {/* Open Greeting Screen */}
-          <a
-            href={`/events/${eventId}/greeting`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors"
-            title="Buka Layar Sapa untuk TV/Monitor"
-          >
-            <ExternalLink className="w-3.5 h-3.5" /> Layar Sapa TV
-          </a>
+          {!isStaffSouvenirOnly && (
+            <a
+              href={`/events/${eventId}/greeting`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="h-8.5 flex items-center gap-1.5 px-3 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-md transition-colors"
+              title="Buka Layar Sapa untuk TV/Monitor"
+            >
+              <ExternalLink className="w-3.5 h-3.5" /> Layar Sapa TV
+            </a>
+          )}
 
           {/* Mode Switcher */}
-          <div className="flex items-center p-1 bg-gray-100 rounded-lg">
+          <div className="flex items-center p-0.5 bg-slate-100 border border-slate-200 rounded-md">
             <button
               onClick={() => setScanMode('camera')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium text-xs transition-colors cursor-pointer ${scanMode === 'camera' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${scanMode === 'camera' ? 'bg-white text-indigo-700 shadow-2xs border border-slate-200/80' : 'text-slate-600 hover:text-slate-900'}`}
             >
               <Camera className="w-3.5 h-3.5" /> Kamera
             </button>
             <button
               onClick={() => setScanMode('tool')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium text-xs transition-colors cursor-pointer ${scanMode === 'tool' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${scanMode === 'tool' ? 'bg-white text-indigo-700 shadow-2xs border border-slate-200/80' : 'text-slate-600 hover:text-slate-900'}`}
             >
               <Keyboard className="w-3.5 h-3.5" /> Alat Scanner
             </button>
@@ -848,47 +919,53 @@ export default function Scanner() {
       </div>
 
       {/* POS Station Mode Selector */}
-      <div className="bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-gray-200 space-y-3">
+      <div className="bg-white p-3.5 sm:p-4 rounded-lg shadow-2xs border border-slate-200 space-y-3">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1.5 mr-1">
+            <span className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5 mr-1">
               <Sliders className="w-3.5 h-3.5 text-indigo-600" />
               Mode POS:
             </span>
-            <div className="flex items-center p-1 bg-gray-100 rounded-xl">
-              <button
-                onClick={() => setStationMode('checkin')}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  stationMode === 'checkin'
-                    ? 'bg-white text-blue-700 shadow-sm border border-blue-100 ring-2 ring-blue-500/20'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <Users className="w-4 h-4 text-blue-600" />
-                <span>Check-In Saja</span>
-              </button>
-              <button
-                onClick={() => setStationMode('checkin_souvenir')}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  stationMode === 'checkin_souvenir'
-                    ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-500/30'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <Gift className="w-4 h-4 text-amber-300" />
-                <span>Check-In + Souvenir</span>
-              </button>
-              <button
-                onClick={() => setStationMode('souvenir_only')}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  stationMode === 'souvenir_only'
-                    ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-500/30'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <PackageCheck className="w-4 h-4 text-emerald-200" />
-                <span>Khusus Meja Souvenir</span>
-              </button>
+            <div className="flex items-center p-0.5 bg-slate-100 border border-slate-200 rounded-md">
+              {!isStaffSouvenirOnly && (
+                <button
+                  onClick={() => setStationMode('checkin')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all cursor-pointer ${
+                    stationMode === 'checkin'
+                      ? 'bg-white text-blue-700 shadow-2xs border border-slate-200/80'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Check-In Saja</span>
+                </button>
+              )}
+              {!isStaffCheckinOnly && !isStaffSouvenirOnly && (
+                <button
+                  onClick={() => setStationMode('checkin_souvenir')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all cursor-pointer ${
+                    stationMode === 'checkin_souvenir'
+                      ? 'bg-indigo-600 text-white shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Gift className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Check-In + Souvenir</span>
+                </button>
+              )}
+              {!isStaffCheckinOnly && (
+                <button
+                  onClick={() => setStationMode('souvenir_only')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all cursor-pointer ${
+                    stationMode === 'souvenir_only'
+                      ? 'bg-emerald-600 text-white shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <PackageCheck className="w-3.5 h-3.5 text-emerald-100" />
+                  <span>Khusus Meja Souvenir</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -897,11 +974,11 @@ export default function Scanner() {
             <div className="flex items-center gap-2 w-full md:w-auto justify-end">
               {souvenirs.length > 1 ? (
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-gray-500 font-medium">Souvenir:</span>
+                  <span className="text-xs text-slate-500 font-medium">Souvenir:</span>
                   <select
                     value={selectedSouvenirId}
                     onChange={(e) => setSelectedSouvenirId(e.target.value)}
-                    className="text-xs font-semibold border border-gray-200 rounded-lg px-2.5 py-1.5 bg-gray-50 text-gray-800 focus:ring-indigo-500 focus:border-indigo-500"
+                    className="text-xs font-semibold border border-slate-200 rounded-md px-2.5 py-1.5 bg-slate-50 text-slate-800 focus:ring-indigo-500 focus:border-indigo-500"
                   >
                     {souvenirs.map(s => (
                       <option key={s.id} value={s.id}>
@@ -911,7 +988,7 @@ export default function Scanner() {
                   </select>
                 </div>
               ) : (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 font-medium">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-md text-xs text-emerald-900 font-medium">
                   <Gift className="w-3.5 h-3.5 text-emerald-600" />
                   <span>{souvenirs[0].name}: <strong>{souvenirs[0].remainingStock}</strong> / {souvenirs[0].initialStock} pcs</span>
                 </div>
@@ -922,178 +999,178 @@ export default function Scanner() {
 
         {/* Operational Context Banner */}
         {stationMode === 'checkin' && (
-          <div className="bg-blue-50/80 border border-blue-200/80 rounded-xl p-2.5 px-3.5 flex items-center justify-between text-xs text-blue-900">
+          <div className="bg-blue-50/70 border border-blue-200/80 rounded-md p-2.5 px-3 flex items-center justify-between text-xs text-blue-900">
             <div className="flex items-center gap-2">
               <Users className="w-4 h-4 text-blue-600 shrink-0" />
               <span><strong>Pos Resepsionis Masuk:</strong> Khusus verifikasi tiket kedatangan tamu. Souvenir dibagikan di loket terpisah.</span>
             </div>
-            <span className="font-semibold px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md text-[10px] shrink-0 hidden sm:inline-block">Gate Masuk</span>
+            <span className="font-semibold px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-[10px] shrink-0 hidden sm:inline-block">Gate Masuk</span>
           </div>
         )}
 
         {stationMode === 'checkin_souvenir' && (
-          <div className="bg-purple-50/80 border border-purple-200/80 rounded-xl p-2.5 px-3.5 flex items-center justify-between text-xs text-purple-900">
+          <div className="bg-purple-50/70 border border-purple-200/80 rounded-md p-2.5 px-3 flex items-center justify-between text-xs text-purple-900">
             <div className="flex items-center gap-2">
               <Gift className="w-4 h-4 text-purple-600 shrink-0" />
               <span><strong>Meja All-in-One:</strong> Sekali scan tiket langsung mencatat kehadiran tamu SEKALIGUS penyerahan souvenir fisik.</span>
             </div>
-            <span className="font-semibold px-2 py-0.5 bg-purple-100 text-purple-800 rounded-md text-[10px] shrink-0 hidden sm:inline-block">Combo Check-in</span>
+            <span className="font-semibold px-2 py-0.5 bg-purple-100 text-purple-800 rounded text-[10px] shrink-0 hidden sm:inline-block">Combo Check-in</span>
           </div>
         )}
 
         {stationMode === 'souvenir_only' && (
-          <div className="bg-emerald-50/80 border border-emerald-200/80 rounded-xl p-2.5 px-3.5 flex items-center justify-between text-xs text-emerald-900">
+          <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-md p-2.5 px-3 flex items-center justify-between text-xs text-emerald-900">
             <div className="flex items-center gap-2">
               <PackageCheck className="w-4 h-4 text-emerald-600 shrink-0" />
               <span><strong>Loket Logistik Souvenir:</strong> Booth penukaran souvenir untuk tamu yang sudah masuk acara. Sistem otomatis tolak penyerahan ganda.</span>
             </div>
-            <span className="font-semibold px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md text-[10px] shrink-0 hidden sm:inline-block">Souvenir Desk</span>
+            <span className="font-semibold px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] shrink-0 hidden sm:inline-block">Souvenir Desk</span>
           </div>
         )}
       </div>
 
       {/* Differentiated POS Stats Cards based on Active Tab */}
       {stationMode === 'checkin' && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 animate-in fade-in duration-200">
-          <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+          <div className="bg-white p-4 rounded-lg border border-slate-200 border-l-4 border-l-slate-500 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-xs text-gray-500 font-medium">Total Tamu Undangan</p>
-              <p className="text-xl font-bold text-gray-900 mt-1">{stats.total.toLocaleString('id-ID')}</p>
-              <p className="text-[10px] text-gray-400 mt-0.5">Kuota terdaftar</p>
+              <p className="text-xs text-slate-500 font-semibold">Total Tamu Undangan</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1 font-mono tabular-nums">{stats.total.toLocaleString('id-ID')}</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">Kuota terdaftar</p>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-gray-50 flex items-center justify-center text-gray-500">
-              <Users className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-md bg-slate-100 flex items-center justify-center text-slate-600 shrink-0">
+              <Users className="w-4 h-4" />
             </div>
           </div>
 
-          <div className="bg-white p-4 rounded-xl border border-green-100 shadow-sm flex items-center justify-between">
+          <div className="bg-white p-4 rounded-lg border border-slate-200 border-l-4 border-l-emerald-500 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-xs text-green-700 font-medium">Sudah Check-In</p>
-              <p className="text-xl font-bold text-green-700 mt-1">{stats.attended.toLocaleString('id-ID')}</p>
-              <p className="text-[10px] text-green-600 mt-0.5">Telah masuk gate</p>
+              <p className="text-xs text-emerald-700 font-semibold">Sudah Check-In</p>
+              <p className="text-2xl font-bold text-emerald-700 mt-1 font-mono tabular-nums">{stats.attended.toLocaleString('id-ID')}</p>
+              <p className="text-[11px] text-emerald-600 mt-0.5">Telah masuk gate</p>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center text-green-600">
-              <CheckCircle2 className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-md bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
+              <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>
 
-          <div className="bg-white p-4 rounded-xl border border-orange-100 shadow-sm flex items-center justify-between">
+          <div className="bg-white p-4 rounded-lg border border-slate-200 border-l-4 border-l-amber-500 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-xs text-orange-700 font-medium">Belum Masuk Gate</p>
-              <p className="text-xl font-bold text-orange-700 mt-1">{unattendedCount.toLocaleString('id-ID')}</p>
-              <p className="text-[10px] text-orange-600 mt-0.5">Sisa tamu di jalan</p>
+              <p className="text-xs text-amber-700 font-semibold">Belum Masuk Gate</p>
+              <p className="text-2xl font-bold text-amber-700 mt-1 font-mono tabular-nums">{unattendedCount.toLocaleString('id-ID')}</p>
+              <p className="text-[11px] text-amber-600 mt-0.5">Sisa tamu di jalan</p>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-orange-50 flex items-center justify-center text-orange-600">
-              <Clock className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-md bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
+              <Clock className="w-4 h-4" />
             </div>
           </div>
 
-          <div className="bg-white p-4 rounded-xl border border-blue-100 shadow-sm flex items-center justify-between">
+          <div className="bg-white p-4 rounded-lg border border-slate-200 border-l-4 border-l-blue-500 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-xs text-blue-700 font-medium">Tingkat Kehadiran</p>
-              <p className="text-xl font-bold text-blue-700 mt-1">{checkinPercentage}%</p>
-              <p className="text-[10px] text-blue-600 mt-0.5">{stats.attended}/{stats.total} Tamu</p>
+              <p className="text-xs text-blue-700 font-semibold">Tingkat Kehadiran</p>
+              <p className="text-2xl font-bold text-blue-700 mt-1 font-mono tabular-nums">{checkinPercentage}%</p>
+              <p className="text-[11px] text-blue-600 mt-0.5 font-mono tabular-nums">{stats.attended}/{stats.total} Tamu</p>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 font-bold text-xs">
-              <TrendingUp className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-md bg-blue-50 flex items-center justify-center text-blue-600 font-bold text-xs shrink-0">
+              <TrendingUp className="w-4 h-4" />
             </div>
           </div>
         </div>
       )}
 
       {stationMode === 'checkin_souvenir' && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 animate-in fade-in duration-200">
-          <div className="bg-white p-4 rounded-xl border border-purple-100 shadow-sm flex items-center justify-between">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+          <div className="bg-white p-4 rounded-lg border border-slate-200 border-l-4 border-l-purple-500 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-xs text-purple-700 font-medium">Hadir & Terima Souvenir</p>
-              <p className="text-xl font-bold text-purple-800 mt-1">{stats.souvenirTaken.toLocaleString('id-ID')}</p>
-              <p className="text-[10px] text-purple-600 mt-0.5">Check-in komplit</p>
+              <p className="text-xs text-purple-700 font-semibold">Hadir & Terima Souvenir</p>
+              <p className="text-2xl font-bold text-purple-800 mt-1 font-mono tabular-nums">{stats.souvenirTaken.toLocaleString('id-ID')}</p>
+              <p className="text-[11px] text-purple-600 mt-0.5">Check-in komplit</p>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center text-purple-600">
-              <Gift className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-md bg-purple-50 flex items-center justify-center text-purple-600 shrink-0">
+              <Gift className="w-4 h-4" />
             </div>
           </div>
 
-          <div className="bg-white p-4 rounded-xl border border-amber-100 shadow-sm flex items-center justify-between">
+          <div className="bg-white p-4 rounded-lg border border-slate-200 border-l-4 border-l-amber-500 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-xs text-amber-700 font-medium">Hadir Belum Ambil</p>
-              <p className="text-xl font-bold text-amber-700 mt-1">{waitingForSouvenirCount.toLocaleString('id-ID')}</p>
-              <p className="text-[10px] text-amber-600 mt-0.5">Souvenir dilewati</p>
+              <p className="text-xs text-amber-700 font-semibold">Hadir Belum Ambil</p>
+              <p className="text-2xl font-bold text-amber-700 mt-1 font-mono tabular-nums">{waitingForSouvenirCount.toLocaleString('id-ID')}</p>
+              <p className="text-[11px] text-amber-600 mt-0.5">Souvenir dilewati</p>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600">
-              <Clock className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-md bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
+              <Clock className="w-4 h-4" />
             </div>
           </div>
 
-          <div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm flex items-center justify-between">
+          <div className="bg-white p-4 rounded-lg border border-slate-200 border-l-4 border-l-indigo-500 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-xs text-indigo-700 font-medium">Sisa Stok di Meja</p>
-              <p className="text-xl font-bold text-indigo-700 mt-1">{(activeSouvenir?.remainingStock ?? 0).toLocaleString('id-ID')} pcs</p>
-              <p className="text-[10px] text-indigo-500 mt-0.5">Dari {activeSouvenir?.initialStock ?? 0} pcs awal</p>
+              <p className="text-xs text-indigo-700 font-semibold">Sisa Stok di Meja</p>
+              <p className="text-2xl font-bold text-indigo-700 mt-1 font-mono tabular-nums">{(activeSouvenir?.remainingStock ?? 0).toLocaleString('id-ID')} pcs</p>
+              <p className="text-[11px] text-indigo-500 mt-0.5">Dari {activeSouvenir?.initialStock ?? 0} pcs awal</p>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
-              <Boxes className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-md bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
+              <Boxes className="w-4 h-4" />
             </div>
           </div>
 
-          <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-sm flex items-center justify-between">
+          <div className="bg-white p-4 rounded-lg border border-slate-200 border-l-4 border-l-emerald-500 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-xs text-emerald-700 font-medium">Rasio Serah Souvenir</p>
-              <p className="text-xl font-bold text-emerald-700 mt-1">{souvenirPercentage}%</p>
-              <p className="text-[10px] text-emerald-600 mt-0.5">{stats.souvenirTaken}/{stats.attended} Tamu Hadir</p>
+              <p className="text-xs text-emerald-700 font-semibold">Rasio Serah Souvenir</p>
+              <p className="text-2xl font-bold text-emerald-700 mt-1 font-mono tabular-nums">{souvenirPercentage}%</p>
+              <p className="text-[11px] text-emerald-600 mt-0.5 font-mono tabular-nums">{stats.souvenirTaken}/{stats.attended} Tamu Hadir</p>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600">
-              <CheckCircle2 className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-md bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
+              <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>
         </div>
       )}
 
       {stationMode === 'souvenir_only' && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 animate-in fade-in duration-200">
-          <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-sm flex items-center justify-between">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+          <div className="bg-white p-4 rounded-lg border border-slate-200 border-l-4 border-l-emerald-500 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-xs text-emerald-700 font-medium">Souvenir Diserahkan</p>
-              <p className="text-xl font-bold text-emerald-800 mt-1">{stats.souvenirTaken.toLocaleString('id-ID')} pcs</p>
-              <p className="text-[10px] text-emerald-600 mt-0.5">Telah dibagikan</p>
+              <p className="text-xs text-emerald-700 font-semibold">Souvenir Diserahkan</p>
+              <p className="text-2xl font-bold text-emerald-800 mt-1 font-mono tabular-nums">{stats.souvenirTaken.toLocaleString('id-ID')} pcs</p>
+              <p className="text-[11px] text-emerald-600 mt-0.5">Telah dibagikan</p>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600">
-              <PackageCheck className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-md bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
+              <PackageCheck className="w-4 h-4" />
             </div>
           </div>
 
-          <div className="bg-white p-4 rounded-xl border border-amber-100 shadow-sm flex items-center justify-between">
+          <div className="bg-white p-4 rounded-lg border border-slate-200 border-l-4 border-l-amber-500 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-xs text-amber-700 font-medium">Menunggu di Venue</p>
-              <p className="text-xl font-bold text-amber-700 mt-1">{waitingForSouvenirCount.toLocaleString('id-ID')} Tamu</p>
-              <p className="text-[10px] text-amber-600 mt-0.5">Sudah hadir di gate</p>
+              <p className="text-xs text-amber-700 font-semibold">Menunggu di Venue</p>
+              <p className="text-2xl font-bold text-amber-700 mt-1 font-mono tabular-nums">{waitingForSouvenirCount.toLocaleString('id-ID')} Tamu</p>
+              <p className="text-[11px] text-amber-600 mt-0.5">Sudah hadir di gate</p>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600">
-              <Sparkles className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-md bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
+              <Sparkles className="w-4 h-4" />
             </div>
           </div>
 
-          <div className="bg-white p-4 rounded-xl border border-blue-100 shadow-sm flex items-center justify-between">
+          <div className="bg-white p-4 rounded-lg border border-slate-200 border-l-4 border-l-blue-500 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-xs text-blue-700 font-medium">Sisa Stok Fisik</p>
-              <p className="text-xl font-bold text-blue-700 mt-1">{(activeSouvenir?.remainingStock ?? 0).toLocaleString('id-ID')} pcs</p>
-              <p className="text-[10px] text-blue-600 mt-0.5">
+              <p className="text-xs text-blue-700 font-semibold">Sisa Stok Fisik</p>
+              <p className="text-2xl font-bold text-blue-700 mt-1 font-mono tabular-nums">{(activeSouvenir?.remainingStock ?? 0).toLocaleString('id-ID')} pcs</p>
+              <p className="text-[11px] text-blue-600 mt-0.5">
                 {(activeSouvenir?.remainingStock ?? 0) <= 10 ? '⚠️ Stok Menipis' : 'Stok Aman'}
               </p>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
-              <Boxes className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-md bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
+              <Boxes className="w-4 h-4" />
             </div>
           </div>
 
-          <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
+          <div className="bg-white p-4 rounded-lg border border-slate-200 border-l-4 border-l-slate-400 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-xs text-gray-500 font-medium">Belum Masuk Gate</p>
-              <p className="text-xl font-bold text-gray-800 mt-1">{unattendedCount.toLocaleString('id-ID')} Tamu</p>
-              <p className="text-[10px] text-gray-400 mt-0.5">Belum scan di pintu</p>
+              <p className="text-xs text-slate-500 font-semibold">Belum Masuk Gate</p>
+              <p className="text-2xl font-bold text-slate-800 mt-1 font-mono tabular-nums">{unattendedCount.toLocaleString('id-ID')} Tamu</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">Belum scan di pintu</p>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-gray-50 flex items-center justify-center text-gray-500">
-              <Clock className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-md bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
+              <Clock className="w-4 h-4" />
             </div>
           </div>
         </div>
@@ -1101,23 +1178,23 @@ export default function Scanner() {
       
       {/* Live Scan Result Notification Banner */}
       {scanResult && (
-        <div className={`p-5 rounded-2xl flex items-start gap-4 shadow-md border animate-in fade-in slide-in-from-top-4 duration-200 ${
+        <div className={`p-4 rounded-lg flex items-start gap-3.5 shadow-xs border ${
           scanResult.status === 'success' 
-            ? 'bg-gradient-to-r from-emerald-50 to-green-50 border-emerald-300 text-emerald-900' 
-            : 'bg-gradient-to-r from-rose-50 to-red-50 border-rose-300 text-rose-900'
+            ? 'bg-emerald-50 border-emerald-300 text-emerald-900' 
+            : 'bg-rose-50 border-rose-300 text-rose-900'
         }`}>
-          <div className={`p-2.5 rounded-xl shrink-0 ${scanResult.status === 'success' ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'}`}>
-            {scanResult.status === 'success' ? <CheckCircle className="w-7 h-7" /> : <AlertCircle className="w-7 h-7" />}
+          <div className={`p-2 rounded-md shrink-0 ${scanResult.status === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'}`}>
+            {scanResult.status === 'success' ? <CheckCircle className="w-6 h-6" /> : <AlertCircle className="w-6 h-6" />}
           </div>
           <div className="flex-1">
             <div className="flex items-center justify-between">
-              <h4 className="text-lg font-bold">
+              <h4 className="text-base font-bold">
                 {scanResult.status === 'success' 
                   ? (stationMode === 'souvenir_only' ? '✓ Souvenir Berhasil Diserahkan' : '✓ Check-in Berhasil') 
                   : '✕ Verifikasi Gagal'}
               </h4>
               {scanResult.category && (
-                <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
                   {scanResult.category}
                 </span>
               )}
@@ -1125,26 +1202,31 @@ export default function Scanner() {
             <p className="text-sm font-medium mt-1 leading-relaxed">
               {scanResult.message}
             </p>
+            {scanResult.operatorName && (
+              <p className="text-xs font-semibold mt-1.5 opacity-85">
+                👤 Dicatat oleh petugas: {scanResult.operatorName}
+              </p>
+            )}
           </div>
         </div>
       )}
 
       {/* Main Scanner Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
         {/* Scanner Area (2 Cols) */}
         <div className="lg:col-span-2 space-y-4">
           {scanMode === 'camera' && (
-            <div className="bg-white p-4 sm:p-6 rounded-2xl shadow-sm border border-gray-200 overflow-hidden w-full">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <div className="bg-white p-4 sm:p-5 rounded-lg shadow-2xs border border-slate-200 overflow-hidden w-full">
+              <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-slate-100">
+                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                   Pemindai Kamera ({stationMode === 'souvenir_only' ? 'Loket Souvenir' : stationMode === 'checkin_souvenir' ? 'Meja Terpadu' : 'Gate Check-in'})
                 </span>
-                <span className="flex items-center gap-1.5 text-xs text-emerald-600 font-medium bg-emerald-50 px-2 py-0.5 rounded-full">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" /> Real-time
+                <span className="flex items-center gap-1.5 text-xs text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" /> Real-time
                 </span>
               </div>
-              <div id="reader" className="w-full max-w-xl mx-auto min-h-[340px] overflow-hidden rounded-xl border border-gray-200 [&>video]:object-cover [&_button]:px-4 [&_button]:py-2 [&_button]:bg-indigo-600 [&_button]:text-white [&_button]:rounded-lg [&_button]:hover:bg-indigo-700 [&_button]:transition-colors [&_button]:mb-6 [&_button]:shadow-sm [&_a]:text-indigo-600 [&_a]:underline [&_a]:mt-6 [&_a]:block [&_a]:cursor-pointer [&_#html5-qrcode-anchor-scan-type-change]:mt-6 [&_span]:block [&_span]:mb-4"></div>
-              <p className="text-center text-gray-500 text-xs mt-3">
+              <div id="reader" className="w-full max-w-xl mx-auto min-h-[340px] overflow-hidden rounded-md border border-slate-200 [&>video]:object-cover [&_button]:px-4 [&_button]:py-2 [&_button]:bg-indigo-600 [&_button]:text-white [&_button]:rounded-md [&_button]:hover:bg-indigo-700 [&_button]:transition-colors [&_button]:mb-4 [&_button]:font-medium [&_a]:text-indigo-600 [&_a]:underline [&_a]:mt-4 [&_a]:block [&_a]:cursor-pointer [&_#html5-qrcode-anchor-scan-type-change]:mt-4 [&_span]:block [&_span]:mb-3"></div>
+              <p className="text-center text-slate-500 text-xs mt-3">
                 {stationMode === 'souvenir_only'
                   ? 'Arahkan kamera ke QR tiket tamu untuk menukarkan souvenir fisik.'
                   : stationMode === 'checkin_souvenir'
@@ -1155,14 +1237,14 @@ export default function Scanner() {
           )}
 
           {scanMode === 'tool' && (
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-200">
-              <div className="max-w-md mx-auto text-center space-y-5">
-                <div className="bg-indigo-50 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto text-indigo-600">
-                  <ScanLine className="w-8 h-8" />
+            <div className="bg-white p-6 sm:p-8 rounded-lg shadow-2xs border border-slate-200">
+              <div className="max-w-md mx-auto text-center space-y-4">
+                <div className="bg-indigo-50 w-14 h-14 rounded-lg border border-indigo-100 flex items-center justify-center mx-auto text-indigo-600">
+                  <ScanLine className="w-7 h-7" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-1">Mode Alat Barcode Scanner (Kasir)</h3>
-                  <p className="text-xs text-gray-500">Tembakkan laser pemindai USB/Bluetooth langsung ke tiket fisik atau layar ponsel tamu.</p>
+                  <h3 className="text-base font-bold text-slate-900 mb-1">Mode Alat Barcode Scanner (Kasir)</h3>
+                  <p className="text-xs text-slate-500">Tembakkan laser pemindai USB/Bluetooth langsung ke tiket fisik atau layar ponsel tamu.</p>
                 </div>
                 
                 <form onSubmit={handleManualSubmit}>
@@ -1171,7 +1253,7 @@ export default function Scanner() {
                     type="text"
                     value={manualInput}
                     onChange={e => setManualInput(e.target.value)}
-                    className="w-full text-center text-xl font-mono tracking-widest p-4 border-2 border-indigo-300 rounded-xl focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100 transition-all outline-none shadow-sm placeholder:text-gray-400 placeholder:text-sm"
+                    className="w-full text-center text-lg font-mono tracking-widest p-3.5 border border-indigo-300 rounded-md focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 transition-all outline-none placeholder:text-slate-400 placeholder:text-sm"
                     placeholder="Scan atau ketik kode tiket..."
                     autoFocus
                     disabled={isProcessing}
@@ -1184,7 +1266,7 @@ export default function Scanner() {
                     <span className="w-2 h-2 rounded-full bg-indigo-600 animate-ping" /> Memverifikasi tiket ke database...
                   </p>
                 ) : (
-                  <p className="text-xs text-gray-400">Kursor otomatis standby di kotak input. Tekan Enter setelah mengetik manual.</p>
+                  <p className="text-xs text-slate-400">Kursor otomatis standby di kotak input. Tekan Enter setelah mengetik manual.</p>
                 )}
               </div>
             </div>
@@ -1192,35 +1274,35 @@ export default function Scanner() {
 
           {/* Special Feature for "Khusus Meja Souvenir": Waiting Queue & 1-Click Handout */}
           {stationMode === 'souvenir_only' && (
-            <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-emerald-100 space-y-3">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2.5 border-b border-gray-100">
+            <div className="bg-white p-4 sm:p-5 rounded-lg shadow-2xs border border-slate-200 space-y-3">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2.5 border-b border-slate-100">
                 <div>
-                  <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-emerald-600" />
                     Antrean Tamu Menunggu Souvenir
                   </h3>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-slate-500">
                     Tamu yang sudah check-in di gate tetapi belum mengambil souvenir ({waitingGuests.length} orang)
                   </p>
                 </div>
                 <div className="relative w-full sm:w-56">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
                     value={waitingSearch}
                     onChange={e => setWaitingSearch(e.target.value)}
                     placeholder="Cari nama atau tiket..."
-                    className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:ring-emerald-500 focus:border-emerald-500 bg-gray-50"
+                    className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-md focus:ring-emerald-500 focus:border-emerald-500 bg-slate-50"
                   />
                 </div>
               </div>
 
               <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
                 {waitingGuests.length === 0 ? (
-                  <div className="text-center py-6 text-gray-400">
+                  <div className="text-center py-6 text-slate-400">
                     <PackageCheck className="w-7 h-7 mx-auto opacity-40 mb-1.5" />
                     <p className="text-xs font-medium">Tidak ada antrean tamu menunggu souvenir.</p>
-                    <p className="text-[10px] text-gray-400">Semua tamu yang hadir sudah menerima souvenir atau belum ada yang hadir di gate.</p>
+                    <p className="text-[10px] text-slate-400">Semua tamu yang hadir sudah menerima souvenir atau belum ada yang hadir di gate.</p>
                   </div>
                 ) : (
                   waitingGuests.slice(0, 15).map(guest => {
@@ -1230,18 +1312,18 @@ export default function Scanner() {
                     return (
                       <div 
                         key={guest.id} 
-                        className="p-2.5 bg-gray-50 hover:bg-emerald-50/50 rounded-xl border border-gray-100 transition-colors flex items-center justify-between gap-3"
+                        className="p-2.5 bg-slate-50 hover:bg-emerald-50/50 rounded-md border border-slate-200/80 transition-colors flex items-center justify-between gap-3"
                       >
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-gray-900 truncate">{guest.name}</span>
+                            <span className="text-xs font-bold text-slate-900 truncate">{guest.name}</span>
                             {guest.category && (
                               <span className="text-[10px] font-medium text-emerald-700 bg-emerald-100/70 px-1.5 py-0.2 rounded">
                                 {guest.category}
                               </span>
                             )}
                           </div>
-                          <p className="text-[10px] text-gray-500 mt-0.5">
+                          <p className="text-[10px] text-slate-500 mt-0.5">
                             Kode: <span className="font-mono font-medium">{guest.ticketCode || '-'}</span> • Masuk gate: {timeStr}
                           </p>
                         </div>
@@ -1249,7 +1331,7 @@ export default function Scanner() {
                         <button
                           onClick={() => handleManualHandout(guest)}
                           disabled={isHandingOutId === guest.id}
-                          className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                          className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-md transition-colors cursor-pointer disabled:opacity-50"
                         >
                           {isHandingOutId === guest.id ? (
                             <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -1268,62 +1350,62 @@ export default function Scanner() {
         </div>
 
         {/* Live Feed Column (1 Col) - Differentiated per POS Mode */}
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex flex-col h-full">
+        <div className="bg-white p-4 sm:p-5 rounded-lg shadow-2xs border border-slate-200 flex flex-col h-full">
           {/* Header of Feed */}
           {stationMode === 'checkin' && (
-            <div className="flex items-center justify-between pb-3 border-b border-gray-100 mb-3">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <div>
-                <h3 className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
                   <Users className="w-4 h-4 text-blue-600" />
                   Riwayat Masuk Gate
                 </h3>
-                <p className="text-[10px] text-gray-400">Tamu yang baru saja check-in</p>
+                <p className="text-[11px] text-slate-400">Tamu yang baru saja check-in</p>
               </div>
-              <span className="text-[10px] text-blue-700 font-semibold bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
+              <span className="text-[10px] text-blue-700 font-semibold bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">
                 Gate Only
               </span>
             </div>
           )}
 
           {stationMode === 'checkin_souvenir' && (
-            <div className="flex items-center justify-between pb-3 border-b border-gray-100 mb-3">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <div>
-                <h3 className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
                   <Gift className="w-4 h-4 text-purple-600" />
                   Riwayat Check-In & Souvenir
                 </h3>
-                <p className="text-[10px] text-gray-400">Meja terpadu check-in + serah fisik</p>
+                <p className="text-[11px] text-slate-400">Meja terpadu check-in + serah fisik</p>
               </div>
-              <span className="text-[10px] text-purple-700 font-semibold bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full">
+              <span className="text-[10px] text-purple-700 font-semibold bg-purple-50 border border-purple-200 px-2 py-0.5 rounded">
                 Gate + Souvenir
               </span>
             </div>
           )}
 
           {stationMode === 'souvenir_only' && (
-            <div className="flex items-center justify-between pb-3 border-b border-gray-100 mb-3">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <div>
-                <h3 className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
                   <PackageCheck className="w-4 h-4 text-emerald-600" />
                   Log Serah Souvenir Loket
                 </h3>
-                <p className="text-[10px] text-gray-400">Catatan penukaran fisik real-time</p>
+                <p className="text-[11px] text-slate-400">Catatan penukaran fisik real-time</p>
               </div>
-              <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+              <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
                 Loket Souvenir
               </span>
             </div>
           )}
 
           {/* Feed Content */}
-          <div className="flex-1 overflow-y-auto space-y-2.5 max-h-[460px] pr-1">
+          <div className="flex-1 overflow-y-auto space-y-2 max-h-[460px] pr-1">
             {/* Mode 1: Check-in Saja Feed */}
             {stationMode === 'checkin' && (
               recentScans.filter(g => g.attended).length === 0 ? (
-                <div className="text-center py-12 text-gray-400">
+                <div className="text-center py-12 text-slate-400">
                   <Clock className="w-8 h-8 mx-auto opacity-40 mb-2" />
                   <p className="text-xs font-medium">Belum ada tamu yang check-in di gate.</p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">Daftar tamu yang masuk pintu acara akan muncul di sini secara real-time.</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Daftar tamu yang masuk pintu acara akan muncul di sini secara real-time.</p>
                 </div>
               ) : (
                 recentScans.filter(g => g.attended).map((guest, idx) => {
@@ -1331,24 +1413,32 @@ export default function Scanner() {
                   const timeStr = attendedDate ? attendedDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
                   
                   return (
-                    <div key={guest.id || idx} className="p-3 bg-gray-50 hover:bg-blue-50/40 rounded-xl border border-gray-100 transition-colors flex items-center justify-between gap-3">
+                    <div key={guest.id || idx} className="p-2.5 bg-slate-50 hover:bg-blue-50/40 rounded-md border border-slate-200/80 transition-colors flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-xs font-bold text-gray-900 truncate">{guest.name}</p>
+                        <p className="text-xs font-bold text-slate-900 truncate">{guest.name}</p>
                         <div className="flex items-center gap-1.5 mt-0.5">
                           {guest.category && (
                             <span className="text-[10px] font-medium text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-100">
                               {guest.category}
                             </span>
                           )}
+                          <span className="text-[10px] font-medium text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-100">
+                            {Math.max(1, Number(guest.pax) || 1)} Orang
+                          </span>
                           {guest.session && (
-                            <span className="text-[10px] text-gray-500">
+                            <span className="text-[10px] text-slate-500">
                               • {guest.session}
                             </span>
                           )}
                         </div>
+                        {guest.checkInStaff && (
+                          <p className="text-[10px] text-slate-400 mt-0.5 truncate">
+                            Petugas Scan: <span className="font-medium text-slate-600">{guest.checkInStaff}</span>
+                          </p>
+                        )}
                       </div>
                       <div className="text-right shrink-0 flex flex-col items-end gap-1">
-                        <span className="text-[11px] font-mono font-medium text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                        <span className="text-[11px] font-mono font-medium text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
                           {timeStr}
                         </span>
                         <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200">
@@ -1364,10 +1454,10 @@ export default function Scanner() {
             {/* Mode 2: Check-in + Souvenir Feed */}
             {stationMode === 'checkin_souvenir' && (
               recentScans.filter(g => g.attended).length === 0 ? (
-                <div className="text-center py-12 text-gray-400">
+                <div className="text-center py-12 text-slate-400">
                   <Gift className="w-8 h-8 mx-auto opacity-40 mb-2" />
                   <p className="text-xs font-medium">Belum ada scan terpadu.</p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">Tamu yang check-in dan menerima souvenir akan muncul di sini.</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Tamu yang check-in dan menerima souvenir akan muncul di sini.</p>
                 </div>
               ) : (
                 recentScans.filter(g => g.attended).map((guest, idx) => {
@@ -1375,22 +1465,27 @@ export default function Scanner() {
                   const timeStr = attendedDate ? attendedDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
                   
                   return (
-                    <div key={guest.id || idx} className="p-3 bg-gray-50 hover:bg-purple-50/40 rounded-xl border border-gray-100 transition-colors flex items-center justify-between gap-3">
+                    <div key={guest.id || idx} className="p-2.5 bg-slate-50 hover:bg-purple-50/40 rounded-md border border-slate-200/80 transition-colors flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-xs font-bold text-gray-900 truncate">{guest.name}</p>
+                        <p className="text-xs font-bold text-slate-900 truncate">{guest.name}</p>
                         <div className="flex items-center gap-1.5 mt-0.5">
                           {guest.category && (
                             <span className="text-[10px] font-medium text-purple-700 bg-purple-50 px-1.5 py-0.2 rounded border border-purple-100">
                               {guest.category}
                             </span>
                           )}
-                          <span className="text-[10px] font-mono text-gray-500">
+                          <span className="text-[10px] font-mono text-slate-500">
                             {guest.ticketCode}
                           </span>
                         </div>
+                        {(guest.checkInStaff || guest.souvenirTakenBy) && (
+                          <p className="text-[10px] text-slate-400 mt-0.5 truncate">
+                            Petugas: <span className="font-medium text-slate-600">{guest.souvenirTakenBy || guest.checkInStaff}</span>
+                          </p>
+                        )}
                       </div>
                       <div className="text-right shrink-0 flex flex-col items-end gap-1">
-                        <span className="text-[11px] font-mono font-medium text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
+                        <span className="text-[11px] font-mono font-medium text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
                           {timeStr}
                         </span>
                         {guest.souvenirTaken ? (
@@ -1412,10 +1507,10 @@ export default function Scanner() {
             {/* Mode 3: Khusus Meja Souvenir Feed (Loads from Souvenir Logs) */}
             {stationMode === 'souvenir_only' && (
               souvenirLogs.length === 0 ? (
-                <div className="text-center py-12 text-gray-400">
+                <div className="text-center py-12 text-slate-400">
                   <PackageCheck className="w-8 h-8 mx-auto opacity-40 mb-2" />
                   <p className="text-xs font-medium">Belum ada penyerahan souvenir.</p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">Tamu yang menukarkan tiket di loket ini akan tercatat otomatis di sini.</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Tamu yang menukarkan tiket di loket ini akan tercatat otomatis di sini.</p>
                 </div>
               ) : (
                 souvenirLogs.slice(0, 15).map((log, idx) => {
@@ -1423,20 +1518,20 @@ export default function Scanner() {
                   const timeStr = logDate ? logDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
                   
                   return (
-                    <div key={log.id || idx} className="p-3 bg-gray-50 hover:bg-emerald-50/40 rounded-xl border border-gray-100 transition-colors flex items-center justify-between gap-3">
+                    <div key={log.id || idx} className="p-2.5 bg-slate-50 hover:bg-emerald-50/40 rounded-md border border-slate-200/80 transition-colors flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-xs font-bold text-gray-900 truncate">{log.guestName}</p>
+                        <p className="text-xs font-bold text-slate-900 truncate">{log.guestName}</p>
                         <div className="flex items-center gap-1.5 mt-0.5">
                           <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-100 truncate max-w-[140px]">
                             🎁 {log.souvenirName}
                           </span>
                         </div>
-                        <p className="text-[9px] text-gray-400 mt-0.5">
+                        <p className="text-[10px] text-slate-400 mt-0.5">
                           Petugas: {log.performedBy || 'Loket Souvenir'}
                         </p>
                       </div>
                       <div className="text-right shrink-0 flex flex-col items-end gap-1">
-                        <span className="text-[11px] font-mono font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                        <span className="text-[11px] font-mono font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                           {timeStr}
                         </span>
                         <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200">
@@ -1450,8 +1545,8 @@ export default function Scanner() {
             )}
           </div>
 
-          <div className="pt-3 border-t border-gray-100 mt-3 flex justify-between items-center text-xs text-gray-500">
-            <span className="flex items-center gap-1">
+          <div className="pt-3 border-t border-slate-100 mt-3 flex justify-between items-center text-xs text-slate-500">
+            <span className="flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Sinkronisasi otomatis
             </span>
             <Link 

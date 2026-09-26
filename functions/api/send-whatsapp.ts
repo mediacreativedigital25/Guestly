@@ -1,7 +1,7 @@
 export async function onRequestPost(context: any) {
   try {
     const { request, env } = context;
-    const { target, message, token } = await request.json();
+    const { target, message, url, token } = await request.json();
 
     const fonnteToken = token || env.FONNTE_TOKEN;
     if (!target || !message) {
@@ -21,6 +21,10 @@ export async function onRequestPost(context: any) {
     const body = new URLSearchParams();
     body.append('target', target);
     body.append('message', message);
+    body.append('countryCode', '62');
+    if (url) {
+      body.append('url', url);
+    }
 
     const response = await fetch("https://api.fonnte.com/send", {
       method: "POST",

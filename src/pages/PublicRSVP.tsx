@@ -72,6 +72,7 @@ export default function PublicRSVP() {
   const isNamePrefilled = Boolean(searchParams.get('to') || searchParams.get('name'));
   const [phone, setPhone] = useState(searchParams.get('phone') || '');
   const [rsvpStatus, setRsvpStatus] = useState('attending');
+  const [paxInput, setPaxInput] = useState<number>(Number(searchParams.get('pax')) || 1);
   const [sessionInput, setSessionInput] = useState(searchParams.get('session') || '');
   const [wishes, setWishes] = useState('');
   const [selectedSticker, setSelectedSticker] = useState<string>('');
@@ -136,7 +137,14 @@ export default function PublicRSVP() {
         if (eventId) {
           const eData = await supabaseDb.getEvent(eventId);
           if (eData) {
-            document.title = eData.title || (eData.coupleName ? `The Wedding Of ${eData.coupleName}` : 'Undangan Acara');
+            const pageTitle = eData.title || (eData.coupleName ? `The Wedding Of ${eData.coupleName}` : 'Undangan Acara');
+            document.title = pageTitle;
+            const thumbUrl = eData.thumbnailUrl || eData.frameOverlayUrl;
+            if (thumbUrl) {
+              const absThumb = thumbUrl.startsWith('/') ? `${window.location.origin}${thumbUrl}` : thumbUrl;
+              const ogImg = document.querySelector('meta[property="og:image"]');
+              if (ogImg) ogImg.setAttribute('content', absThumb);
+            }
             setEventData(eData);
           }
 
@@ -191,9 +199,12 @@ export default function PublicRSVP() {
       
       let newGuest: Guest;
 
+      const effectivePax = rsvpStatus === 'declined' ? 0 : Math.max(1, Number(paxInput) || 1);
+
       if (existingGuestId && existingGuest) {
         const updatePayload: Partial<Guest> = {
           rsvpStatus: rsvpStatus as any,
+          pax: effectivePax,
         };
         if (wishes.trim()) updatePayload.wishes = wishes.trim();
         if (sessionInput) updatePayload.session = sessionInput;
@@ -207,6 +218,7 @@ export default function PublicRSVP() {
           eventId: eventId!,
           name: name.trim(),
           rsvpStatus: rsvpStatus as any,
+          pax: effectivePax,
           phone: phone.trim() || undefined,
           wishes: wishes.trim() || undefined,
           session: sessionInput || undefined,
@@ -253,6 +265,7 @@ export default function PublicRSVP() {
       }
       setSelectedSticker('');
       setRsvpStatus('attending');
+      setPaxInput(1);
       
     } catch (error: any) {
       console.error(error);
@@ -293,6 +306,15 @@ export default function PublicRSVP() {
            {!isEmbed && (
              <div className={`${theme.bgHeader} px-6 py-10 text-center relative overflow-hidden`}>
                <div className="relative z-10">
+                 {eventData.thumbnailUrl && (
+                   <div className="mx-auto mb-4 w-24 h-24 sm:w-28 sm:h-28 rounded-full p-1 bg-white/25 backdrop-blur-xs shadow-lg border border-white/40 overflow-hidden">
+                     <img
+                       src={eventData.thumbnailUrl}
+                       alt={eventData.coupleName || eventData.title}
+                       className="w-full h-full object-cover rounded-full"
+                     />
+                   </div>
+                 )}
                  <span className="inline-block px-3 py-1 bg-white/20 text-white text-xs font-semibold rounded-full tracking-wider mb-4 uppercase">
                     RSVP & BUKU TAMU
                  </span>
@@ -394,17 +416,36 @@ export default function PublicRSVP() {
                     </div>
                   )}
 
-                  <div className="space-y-1">
-                    <label className={`block text-[11px] font-semibold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Konfirmasi Kehadiran <span className="text-red-500">*</span></label>
-                    <select 
-                      value={rsvpStatus} 
-                      onChange={e => setRsvpStatus(e.target.value)} 
-                      className={`w-full border ${isDark ? 'border-neutral-700 bg-neutral-800 text-white' : 'border-gray-300 bg-white text-gray-900'} ${isEmbed ? 'rounded-lg px-3 py-2 text-sm' : 'rounded-xl px-4 py-3'} transition-colors ${theme.ringColor}`}
-                    >
-                      <option value="attending">Hadir</option>
-                      <option value="pending">Masih Ragu</option>
-                      <option value="declined">Tidak Hadir</option>
-                    </select>
+                  <div className={`grid grid-cols-1 ${rsvpStatus !== 'declined' ? 'sm:grid-cols-2 gap-4' : ''}`}>
+                    <div className="space-y-1">
+                      <label className={`block text-[11px] font-semibold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Konfirmasi Kehadiran <span className="text-red-500">*</span></label>
+                      <select 
+                        value={rsvpStatus} 
+                        onChange={e => setRsvpStatus(e.target.value)} 
+                        className={`w-full border ${isDark ? 'border-neutral-700 bg-neutral-800 text-white' : 'border-gray-300 bg-white text-gray-900'} ${isEmbed ? 'rounded-lg px-3 py-2 text-sm' : 'rounded-xl px-4 py-3'} transition-colors ${theme.ringColor}`}
+                      >
+                        <option value="attending">Hadir</option>
+                        <option value="pending">Masih Ragu</option>
+                        <option value="declined">Tidak Hadir</option>
+                      </select>
+                    </div>
+
+                    {rsvpStatus !== 'declined' && (
+                      <div className="space-y-1">
+                        <label className={`block text-[11px] font-semibold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Jumlah Orang Hadir (Pax) <span className="text-red-500">*</span></label>
+                        <select 
+                          value={paxInput} 
+                          onChange={e => setPaxInput(Number(e.target.value))} 
+                          className={`w-full border ${isDark ? 'border-neutral-700 bg-neutral-800 text-white' : 'border-gray-300 bg-white text-gray-900'} ${isEmbed ? 'rounded-lg px-3 py-2 text-sm' : 'rounded-xl px-4 py-3'} transition-colors ${theme.ringColor}`}
+                        >
+                          <option value={1}>1 Orang</option>
+                          <option value={2}>2 Orang</option>
+                          <option value={3}>3 Orang</option>
+                          <option value={4}>4 Orang</option>
+                          <option value={5}>5 Orang</option>
+                        </select>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-1">
@@ -471,7 +512,11 @@ export default function PublicRSVP() {
                             guest.rsvpStatus === 'declined' ? (isDark ? 'bg-red-900 text-red-300' : 'bg-red-100 text-red-800') : 
                             (isDark ? 'bg-yellow-900 text-yellow-300' : 'bg-yellow-100 text-yellow-800')
                           }`}>
-                            {guest.rsvpStatus === 'attending' ? 'Hadir' : guest.rsvpStatus === 'declined' ? 'Tidak Hadir' : 'Masih Ragu'}
+                            {guest.rsvpStatus === 'attending'
+                              ? `Hadir • ${guest.pax || 1} Orang`
+                              : guest.rsvpStatus === 'declined'
+                              ? 'Tidak Hadir'
+                              : `Masih Ragu • ${guest.pax || 1} Orang`}
                           </span>
                         </div>
                       </div>

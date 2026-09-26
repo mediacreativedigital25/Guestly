@@ -54,10 +54,7 @@ export default function UserProfile() {
       await updatePassword(auth.currentUser, newPassword);
       setNewPassword('');
       setConfirmPassword('');
-      showAlert('Berhasil', 'Password berhasil diperbarui. Halaman akan dimuat ulang.', 'success');
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
+      showAlert('Berhasil', 'Password berhasil diperbarui dan tersimpan ke Supabase.', 'success');
     } catch (error: any) {
       console.error(error);
       if (error.code === 'auth/requires-recent-login') {

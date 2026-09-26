@@ -47,7 +47,7 @@ export default function AdminCalendar() {
       if (appUser?.role === 'partner') {
          q = query(collection(db, 'events'), where('partnerId', '==', appUser.id || ''));
       } else if (appUser?.role === 'client') {
-         q = query(collection(db, 'events'), where('clientId', '==', appUser.id || ''));
+         q = query(collection(db, 'events'), where('clientId', '==', appUser.clientId || appUser.id || ''));
       }
       const snapshot = await getDocs(q);
       const eventsData: EventRecord[] = [];

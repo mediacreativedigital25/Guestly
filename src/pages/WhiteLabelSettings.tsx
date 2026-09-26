@@ -60,7 +60,7 @@ export default function WhiteLabelSettings() {
     }
   };
 
-  if (appUser?.role !== 'partner' && appUser?.role !== 'superadmin') {
+  if (appUser?.role !== 'partner' && appUser?.role !== 'superadmin' && appUser?.role !== 'owner') {
     return <div className="p-8 text-center text-red-600">Anda tidak memiliki akses ke halaman ini.</div>;
   }
 

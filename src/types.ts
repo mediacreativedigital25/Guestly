@@ -1,9 +1,13 @@
-export type Role = 'superadmin' | 'partner' | 'client' | 'reseller' | 'staff' | 'admin';
+export type Role = 'superadmin' | 'owner' | 'admin' | 'partner' | 'client' | 'reseller' | 'staff';
+
+export type StaffType = 'checkin' | 'souvenir' | 'all';
 
 export interface User {
   id?: string;
   uid?: string;
   role: Role;
+  staffType?: StaffType;
+  assignedEventIds?: string[];
   name: string;
   email: string;
   package?: string;
@@ -73,6 +77,7 @@ export interface EventRecord {
   frameOverlayUrl?: string;
   thumbnailUrl?: string;
   guestCategories?: string[];
+  invitationTypes?: string[];
   sessions?: string[];
   primaryColor?: string;
   fontFamily?: string;
@@ -109,9 +114,11 @@ export interface Guest {
   fonnteToken?: string;
   address?: string;
   category?: string;
+  invitationType?: string;
   session?: string;
   tableNumber?: string;
   pax?: number;
+  rsvpPax?: number;
   ticketCode: string;
   rsvpStatus: 'pending' | 'attending' | 'declined';
   wishes?: string;
@@ -123,6 +130,7 @@ export interface Guest {
   reply?: string;
   timestamp?: any;
   checkInTime?: any;
+  checkInStaff?: string;
   hasResponded?: boolean;
   souvenirTaken?: boolean;
   souvenirClaimed?: boolean;

@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS public.guests (
 
 -- Alter existing guests table if columns are missing
 ALTER TABLE public.guests ADD COLUMN IF NOT EXISTS ticket_code TEXT;
+ALTER TABLE public.guests ADD COLUMN IF NOT EXISTS pax INTEGER DEFAULT 1;
 ALTER TABLE public.guests ADD COLUMN IF NOT EXISTS session TEXT;
 ALTER TABLE public.guests ADD COLUMN IF NOT EXISTS rsvp_status TEXT DEFAULT 'pending';
 ALTER TABLE public.guests ADD COLUMN IF NOT EXISTS attended BOOLEAN DEFAULT false;

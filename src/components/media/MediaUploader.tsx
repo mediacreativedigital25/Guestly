@@ -17,7 +17,7 @@ interface MediaUploaderProps {
 
 export const MediaUploader: React.FC<MediaUploaderProps> = ({
   category,
-  maxSize = 5 * 1024 * 1024,
+  maxSize = 15 * 1024 * 1024,
   allowedMimeTypes,
   defaultValue,
   disabled,
@@ -89,11 +89,21 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       return;
     }
     
-    if (allowedMimeTypes && allowedMimeTypes.length > 0 && !allowedMimeTypes.includes(selectedFile.type)) {
-      const err = 'Tipe file tidak didukung.';
-      setError(err);
-      onUploadError?.(err);
-      return;
+    if (allowedMimeTypes && allowedMimeTypes.length > 0) {
+      const allowsImages = allowedMimeTypes.some((t) => t.startsWith('image/'));
+      const isImageFile =
+        selectedFile.type.startsWith('image/') ||
+        /\.(jpg|jpeg|png|webp|gif|svg|ico|heic|heif|avif)$/i.test(selectedFile.name);
+      const isExplicitlyAllowed =
+        allowedMimeTypes.includes(selectedFile.type) ||
+        (allowsImages && isImageFile);
+
+      if (!isExplicitlyAllowed) {
+        const err = 'Tipe file tidak didukung.';
+        setError(err);
+        onUploadError?.(err);
+        return;
+      }
     }
 
     uploadFile(selectedFile);

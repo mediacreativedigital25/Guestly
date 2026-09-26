@@ -109,12 +109,21 @@ export default function SouvenirManagement({
       }
     };
 
+    const handleSynced = (e: any) => {
+      if (e.detail?.eventId === eventId) {
+        setSouvenirs(souvenirStorage.getSouvenirs(eventId, guests));
+        setLogs(souvenirStorage.getLogs(eventId));
+      }
+    };
+
     window.addEventListener('guestly_souvenirs_changed', handleSouvenirsChanged);
     window.addEventListener('guestly_souvenir_logs_changed', handleLogsChanged);
+    window.addEventListener('guestly_souvenir_synced', handleSynced);
 
     return () => {
       window.removeEventListener('guestly_souvenirs_changed', handleSouvenirsChanged);
       window.removeEventListener('guestly_souvenir_logs_changed', handleLogsChanged);
+      window.removeEventListener('guestly_souvenir_synced', handleSynced);
     };
   }, [eventId, guests]);
 
@@ -124,6 +133,17 @@ export default function SouvenirManagement({
   const totalRemainingSystem = souvenirs.reduce((sum, s) => sum + (s.remainingStock || 0), 0);
   const totalPhysicalAudit = souvenirs.reduce((sum, s) => sum + (s.physicalStockAudit ?? s.remainingStock), 0);
   const overallDiscrepancy = totalPhysicalAudit - totalRemainingSystem;
+
+  const configuredCategories = event?.guestCategories && event.guestCategories.length > 0
+    ? event.guestCategories
+    : ['VIP', 'Keluarga', 'Reguler'];
+
+  const getCategoryRank = (cat?: string) => {
+    const cleaned = (cat || '').trim().toLowerCase();
+    if (!cleaned) return 999999;
+    const idx = configuredCategories.findIndex(c => c.trim().toLowerCase() === cleaned);
+    return idx !== -1 ? idx : 99999;
+  };
 
   // Filtered guest list for distribution
   const filteredGuests = guests.filter((g) => {
@@ -139,9 +159,14 @@ export default function SouvenirManagement({
       statusFilter === 'taken' ? isTaken :
       !isTaken;
 
-    const matchCat = categoryFilter === 'all' || (g.category || '') === categoryFilter;
+    const matchCat = categoryFilter === 'all' || (g.category || '').trim().toLowerCase() === categoryFilter.trim().toLowerCase();
 
     return matchSearch && matchStatus && matchCat;
+  }).sort((a, b) => {
+    const rankA = getCategoryRank(a.category);
+    const rankB = getCategoryRank(b.category);
+    if (rankA !== rankB) return rankA - rankB;
+    return (a.name || '').localeCompare(b.name || '');
   });
 
   const guestsTakenCount = guests.filter(g => !!g.souvenirTaken).length;

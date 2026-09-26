@@ -24,7 +24,7 @@ export async function onRequestPost(context: any) {
     const reqCategory = formData.get('category');
     
     // Validasi: Category sesuai enum, Tidak boleh menerima Null Byte, Script Injection dll
-    const allowedCategories = ['attachment', 'avatar', 'logo', 'document', 'gallery', 'testimonial'];
+    const allowedCategories = ['attachment', 'avatar', 'logo', 'banner', 'thumbnail', 'favicon', 'library', 'frame', 'document', 'gallery', 'testimonial'];
     category = reqCategory && typeof reqCategory === 'string' ? reqCategory : 'attachment';
     if (!allowedCategories.includes(category)) {
       statusCode = 400;
@@ -41,12 +41,10 @@ export async function onRequestPost(context: any) {
     // @ts-ignore
     size = file.size;
     // @ts-ignore
-    mimeType = file.type;
+    mimeType = file.type || 'image/jpeg';
 
-    // TODO: Implement Rate Limiting Abstraction (e.g., 10 upload / menit / user)
-
-    // Validasi Ukuran (Maks 5MB atau 10MB)
-    const maxSize = category === 'document' ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+    // Validasi Ukuran (Maks 15MB)
+    const maxSize = 15 * 1024 * 1024;
     if (size > maxSize) {
       statusCode = 413;
       errorCode = 'PAYLOAD_TOO_LARGE';
@@ -55,12 +53,12 @@ export async function onRequestPost(context: any) {
 
     // Mime Type Whitelist
     const allowedMimeTypes = [
-      'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml',
+      'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon',
       'audio/mpeg', 'audio/wav', 'audio/ogg',
       'video/mp4', 'video/webm',
       'application/pdf'
     ];
-    if (!allowedMimeTypes.includes(mimeType)) {
+    if (!allowedMimeTypes.includes(mimeType) && !mimeType.startsWith('image/')) {
       statusCode = 415;
       errorCode = 'UNSUPPORTED_MEDIA_TYPE';
       throw new Error('Invalid file type');

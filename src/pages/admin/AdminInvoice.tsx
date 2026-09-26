@@ -88,22 +88,27 @@ export default function AdminInvoice() {
         const serviceData = serviceDoc.data();
         const userData = userDoc.data();
 
-        const currentEventQuota = userData.eventQuota || 0;
-        const currentClientQuota = userData.clientQuota || 0;
+        const currentEventQuota = userData.eventCredit !== undefined ? userData.eventCredit : (userData.eventQuota || 0);
+        const currentClientQuota = userData.clientCredit !== undefined ? userData.clientCredit : (userData.clientQuota || 0);
         const currentGuestQuota = userData.guestQuota || 0;
         const currentWaBlastQuota = userData.waBlastQuota || 0;
         
         let newActiveUntil = userData.activeUntil;
         if (serviceData.activePeriodDays) {
            const now = new Date();
-           const currentActiveUntil = userData.activeUntil ? new Date(userData.activeUntil.toMillis()) : now;
+           const currentActiveUntil = userData.activeUntil?.toMillis ? new Date(userData.activeUntil.toMillis()) : (userData.activeUntil ? new Date(userData.activeUntil) : now);
            const baseDate = currentActiveUntil > now ? currentActiveUntil : now;
            newActiveUntil = new Date(baseDate.getTime() + serviceData.activePeriodDays * 24 * 60 * 60 * 1000);
         }
 
+        const nextEventQuota = currentEventQuota + (serviceData.eventQuota || 0);
+        const nextClientQuota = currentClientQuota + (serviceData.clientQuota || 0);
+
         transaction.update(userRef, {
-          eventQuota: currentEventQuota + (serviceData.eventQuota || 0),
-          clientQuota: currentClientQuota + (serviceData.clientQuota || 0),
+          eventQuota: nextEventQuota,
+          eventCredit: nextEventQuota,
+          clientQuota: nextClientQuota,
+          clientCredit: nextClientQuota,
           guestQuota: currentGuestQuota + (serviceData.guestQuota || 0),
           waBlastQuota: currentWaBlastQuota + (serviceData.waBlastQuota || 0),
           ...(newActiveUntil ? { activeUntil: newActiveUntil } : {}),

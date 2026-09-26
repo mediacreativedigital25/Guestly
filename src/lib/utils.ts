@@ -41,3 +41,50 @@ export function getDaysRemaining(input: string | { date?: string; activeUntil?: 
 export function isEventExpired(input: string | { date?: string; activeUntil?: string }): boolean {
   return getDaysRemaining(input) <= 0;
 }
+
+export function getRoleLabel(role?: string, staffType?: string): string {
+  switch (role) {
+    case 'superadmin':
+      return 'Super Admin';
+    case 'owner':
+      return 'Owner';
+    case 'admin':
+      return 'Admin';
+    case 'partner':
+      return 'Partner';
+    case 'client':
+      return 'Client';
+    case 'staff':
+      if (staffType === 'checkin') return 'Staff Scan Kehadiran';
+      if (staffType === 'souvenir') return 'Staff Souvenir';
+      return 'Staff All-in (Scan & Souvenir)';
+    default:
+      return role || 'User';
+  }
+}
+
+export function getOperatorLabel(user?: { name?: string; email?: string; role?: string; staffType?: string } | null): string {
+  if (!user) return 'Petugas';
+  const name = user.name || user.email || 'Petugas';
+  const roleLabel = getRoleLabel(user.role, user.staffType);
+  return `${name} (${roleLabel})`;
+}
+
+export function canUserAccessEvent(
+  user?: { id?: string; role?: string; clientId?: string | null; partnerId?: string | null; assignedEventIds?: string[] } | null,
+  eventId?: string
+): boolean {
+  if (!user || !eventId) return false;
+  if (user.role === 'superadmin' || user.role === 'owner') return true;
+  if (user.role === 'staff') {
+    const assigned = Array.isArray(user.assignedEventIds) ? user.assignedEventIds : [];
+    return assigned.includes(eventId);
+  }
+  if (user.role === 'admin') {
+    const assigned = Array.isArray(user.assignedEventIds) ? user.assignedEventIds : [];
+    // If admin has specific events assigned, restrict to those; if empty, allow all events
+    return assigned.length === 0 ? true : assigned.includes(eventId);
+  }
+  return true;
+}
+

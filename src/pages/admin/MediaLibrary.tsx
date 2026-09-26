@@ -36,34 +36,34 @@ export default function MediaLibrary() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isReplaceModalOpen, setIsReplaceModalOpen] = useState(false);
 
+  const fetchMedia = async () => {
+    if (!appUser) return;
+    try {
+      const { getDocs, limit, query, collection, orderBy, where } = await import('firebase/firestore');
+      let baseQ;
+      if (appUser.role === 'superadmin') {
+        baseQ = query(collection(db, 'media'), orderBy('uploadedAt', 'desc'));
+      } else {
+        baseQ = query(collection(db, 'media'), where('uploadedBy', '==', appUser.id), orderBy('uploadedAt', 'desc'));
+      }
+      const qLimited = query(baseQ, limit(50));
+      const snapshot = await getDocs(qLimited);
+      const files: MediaItem[] = [];
+      snapshot.forEach((doc) => {
+        files.push({ id: doc.id, ...doc.data() as any });
+      });
+      setMediaFiles(files);
+      setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMore(snapshot.docs.length === 50);
+    } catch (err) {
+      console.error("MediaLibrary getDocs error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!appUser) return;
-    
-    const fetchMedia = async () => {
-      try {
-        const { getDocs, limit, query, collection, orderBy, where } = await import('firebase/firestore');
-        let baseQ;
-        if (appUser.role === 'superadmin') {
-          baseQ = query(collection(db, 'media'), orderBy('uploadedAt', 'desc'));
-        } else {
-          baseQ = query(collection(db, 'media'), where('uploadedBy', '==', appUser.id), orderBy('uploadedAt', 'desc'));
-        }
-        const qLimited = query(baseQ, limit(50));
-        const snapshot = await getDocs(qLimited);
-        const files: MediaItem[] = [];
-        snapshot.forEach((doc) => {
-          files.push({ id: doc.id, ...doc.data() as any });
-        });
-        setMediaFiles(files);
-        setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
-        setHasMore(snapshot.docs.length === 50);
-      } catch (err) {
-        console.error("MediaLibrary getDocs error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
     fetchMedia();
   }, [appUser]);
 
@@ -121,6 +121,7 @@ export default function MediaLibrary() {
         await mediaService.deleteMedia(item.key);
       }
       await deleteDoc(doc(db, 'media', item.id));
+      setMediaFiles(prev => prev.filter(m => m.id !== item.id));
       setSelectedMedia(null);
       showAlert('Berhasil', 'File media berhasil dihapus', 'success');
     } catch (error) {
@@ -149,7 +150,7 @@ export default function MediaLibrary() {
       // MediaUploader calls mediaService which already creates a new document in 'media' collection.
       // So we just need to delete the old document.
       await deleteDoc(doc(db, 'media', selectedMedia.id));
-      
+      await fetchMedia();
       showAlert('Berhasil', 'File media berhasil diganti', 'success');
       setIsReplaceModalOpen(false);
       setSelectedMedia(null);
@@ -160,6 +161,7 @@ export default function MediaLibrary() {
   };
 
   const handleUploadSuccess = () => {
+    fetchMedia();
     showAlert('Berhasil', 'File media berhasil diunggah', 'success');
     setIsUploadModalOpen(false);
   };

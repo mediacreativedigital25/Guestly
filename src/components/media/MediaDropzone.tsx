@@ -15,8 +15,14 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({ onFileSelect, disa
     if (disabled) return;
     const file = e.dataTransfer.files?.[0];
     if (file) {
-      if (allowedMimeTypes && allowedMimeTypes.length > 0 && !allowedMimeTypes.includes(file.type)) {
-         return;
+      if (allowedMimeTypes && allowedMimeTypes.length > 0) {
+        const allowsImages = allowedMimeTypes.some((t) => t.startsWith('image/'));
+        const isImageFile =
+          file.type.startsWith('image/') ||
+          /\.(jpg|jpeg|png|webp|gif|svg|ico|heic|heif|avif)$/i.test(file.name);
+        if (!allowedMimeTypes.includes(file.type) && !(allowsImages && isImageFile)) {
+          return;
+        }
       }
       onFileSelect(file);
     }

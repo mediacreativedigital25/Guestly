@@ -1,8 +1,13 @@
 import { SouvenirItem, SouvenirLog, Guest } from '../types';
+import { supabase } from '../lib/supabase';
+import { notifyLocalListeners } from '../lib/supabaseCompat';
 
 const SOUVENIR_STORAGE_KEY_PREFIX = 'guestly_souvenirs_';
 const SOUVENIR_LOGS_KEY_PREFIX = 'guestly_souvenir_logs_';
 const SOUVENIR_GUESTS_KEY_PREFIX = 'guestly_souvenir_guests_';
+
+const hydratedEvents = new Set<string>();
+const hydratingNow = new Set<string>();
 
 export interface GuestSouvenirRecord {
   guestId: string;
@@ -13,10 +18,85 @@ export interface GuestSouvenirRecord {
   takenBy: string;
 }
 
+async function persistToSupabase(key: string, data: any) {
+  try {
+    await supabase.from('settings').upsert(
+      {
+        id: key,
+        data,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    );
+    notifyLocalListeners('settings', key);
+  } catch (err) {
+    console.warn('Failed to sync souvenir data to Supabase:', err);
+  }
+}
+
 export const souvenirStorage = {
+  hydrateFromSupabase(eventId: string, force = false) {
+    if (!eventId) return;
+    if (!force && hydratedEvents.has(eventId)) return;
+    if (hydratingNow.has(eventId)) return;
+    hydratedEvents.add(eventId);
+    hydratingNow.add(eventId);
+
+    const itemsKey = `doc:souvenirs:${eventId}`;
+    const logsKey = `doc:souvenir_logs:${eventId}`;
+    const guestsKey = `doc:souvenir_guests:${eventId}`;
+
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('settings')
+          .select('id, data')
+          .in('id', [itemsKey, logsKey, guestsKey]);
+
+        if (error || !data) return;
+        let hasItemsUpdate = false;
+        let hasLogsUpdate = false;
+
+        for (const row of data) {
+          if (row.id === itemsKey && Array.isArray(row.data?.items)) {
+            const nextStr = JSON.stringify(row.data.items);
+            if (localStorage.getItem(`${SOUVENIR_STORAGE_KEY_PREFIX}${eventId}`) !== nextStr) {
+              localStorage.setItem(`${SOUVENIR_STORAGE_KEY_PREFIX}${eventId}`, nextStr);
+              hasItemsUpdate = true;
+            }
+          } else if (row.id === logsKey && Array.isArray(row.data?.logs)) {
+            const nextStr = JSON.stringify(row.data.logs);
+            if (localStorage.getItem(`${SOUVENIR_LOGS_KEY_PREFIX}${eventId}`) !== nextStr) {
+              localStorage.setItem(`${SOUVENIR_LOGS_KEY_PREFIX}${eventId}`, nextStr);
+              hasLogsUpdate = true;
+            }
+          } else if (row.id === guestsKey && row.data?.map && typeof row.data.map === 'object') {
+            const nextStr = JSON.stringify(row.data.map);
+            if (localStorage.getItem(`${SOUVENIR_GUESTS_KEY_PREFIX}${eventId}`) !== nextStr) {
+              localStorage.setItem(`${SOUVENIR_GUESTS_KEY_PREFIX}${eventId}`, nextStr);
+              hasItemsUpdate = true;
+            }
+          }
+        }
+
+        if (hasItemsUpdate && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('guestly_souvenirs_changed', { detail: { eventId } }));
+        }
+        if (hasLogsUpdate && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('guestly_souvenir_logs_changed', { detail: { eventId } }));
+        }
+      } catch {
+        // ignore background sync error
+      } finally {
+        hydratingNow.delete(eventId);
+      }
+    })();
+  },
+
   // Guest-to-Souvenir mapping for zero-error offline/online parity
   getGuestMap(eventId: string): Record<string, GuestSouvenirRecord> {
     if (!eventId) return {};
+    this.hydrateFromSupabase(eventId);
     const key = `${SOUVENIR_GUESTS_KEY_PREFIX}${eventId}`;
     const raw = localStorage.getItem(key);
     if (!raw) return {};
@@ -48,6 +128,7 @@ export const souvenirStorage = {
     };
     const key = `${SOUVENIR_GUESTS_KEY_PREFIX}${eventId}`;
     localStorage.setItem(key, JSON.stringify(map));
+    persistToSupabase(`doc:souvenir_guests:${eventId}`, { map });
   },
 
   removeGuestTake(eventId: string, guestId: string): void {
@@ -56,6 +137,7 @@ export const souvenirStorage = {
     delete map[guestId];
     const key = `${SOUVENIR_GUESTS_KEY_PREFIX}${eventId}`;
     localStorage.setItem(key, JSON.stringify(map));
+    persistToSupabase(`doc:souvenir_guests:${eventId}`, { map });
   },
 
   mergeGuestsWithSouvenirs(eventId: string, guests: Guest[]): Guest[] {
@@ -80,6 +162,7 @@ export const souvenirStorage = {
 
   getSouvenirs(eventId: string, rawGuests: Guest[] = []): SouvenirItem[] {
     if (!eventId) return [];
+    this.hydrateFromSupabase(eventId);
 
     const guests = this.mergeGuestsWithSouvenirs(eventId, rawGuests);
 
@@ -147,11 +230,13 @@ export const souvenirStorage = {
     if (!eventId) return;
     const key = `${SOUVENIR_STORAGE_KEY_PREFIX}${eventId}`;
     localStorage.setItem(key, JSON.stringify(items));
+    persistToSupabase(`doc:souvenirs:${eventId}`, { items });
     window.dispatchEvent(new CustomEvent('guestly_souvenirs_changed', { detail: { eventId, items } }));
   },
 
   getLogs(eventId: string): SouvenirLog[] {
     if (!eventId) return [];
+    this.hydrateFromSupabase(eventId);
     const key = `${SOUVENIR_LOGS_KEY_PREFIX}${eventId}`;
     const raw = localStorage.getItem(key);
     if (!raw) return [];
@@ -173,6 +258,7 @@ export const souvenirStorage = {
     const updated = [newEntry, ...current].slice(0, 100); // Keep last 100 logs
     const key = `${SOUVENIR_LOGS_KEY_PREFIX}${eventId}`;
     localStorage.setItem(key, JSON.stringify(updated));
+    persistToSupabase(`doc:souvenir_logs:${eventId}`, { logs: updated });
     window.dispatchEvent(new CustomEvent('guestly_souvenir_logs_changed', { detail: { eventId, logs: updated } }));
   },
 

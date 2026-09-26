@@ -93,7 +93,7 @@ export default function MyServices() {
           <div className="border border-gray-100 bg-gray-50 rounded-lg p-5">
             <p className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">Kuota Acara</p>
             <p className="text-2xl font-bold text-gray-900">
-              {appUser?.eventQuota !== undefined ? appUser.eventQuota : 0} <span className="text-sm font-normal text-gray-500">Acara</span>
+              {appUser?.eventCredit !== undefined ? appUser.eventCredit : (appUser?.eventQuota !== undefined ? appUser.eventQuota : 0)} <span className="text-sm font-normal text-gray-500">Acara</span>
             </p>
           </div>
 
@@ -101,7 +101,7 @@ export default function MyServices() {
             <div className="border border-gray-100 bg-gray-50 rounded-lg p-5">
               <p className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">Kuota Client</p>
               <p className="text-2xl font-bold text-gray-900">
-                {appUser?.clientQuota !== undefined ? appUser.clientQuota : 0} <span className="text-sm font-normal text-gray-500">Client</span>
+                {appUser?.clientCredit !== undefined ? appUser.clientCredit : (appUser?.clientQuota !== undefined ? appUser.clientQuota : 0)} <span className="text-sm font-normal text-gray-500">Client</span>
               </p>
             </div>
           )}

@@ -60,17 +60,27 @@ export const supabaseDb = {
 
   // ================= GUESTS =================
   async getGuests(eventId: string): Promise<Guest[]> {
-    const { data, error } = await supabase
-      .from('guests')
-      .select('*')
-      .eq('event_id', eventId)
-      .order('created_at', { ascending: false });
+    const PAGE_SIZE = 1000;
+    let allRows: any[] = [];
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from('guests')
+        .select('*')
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: false })
+        .range(from, from + PAGE_SIZE - 1);
 
-    if (error) {
-      console.error(`Error fetching guests for event ${eventId}:`, error);
-      throw error;
+      if (error) {
+        console.error(`Error fetching guests for event ${eventId}:`, error);
+        throw error;
+      }
+      if (!data || data.length === 0) break;
+      allRows = allRows.concat(data);
+      if (data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
     }
-    return (data || []).map(rowToGuest);
+    return allRows.map(rowToGuest);
   },
 
   async getGuestByTicket(eventId: string, ticketCode: string): Promise<Guest | null> {
@@ -110,6 +120,7 @@ export const supabaseDb = {
     if (updates.phone !== undefined) rowUpdates.phone = updates.phone;
     if (updates.email !== undefined) rowUpdates.email = updates.email;
     if (updates.category !== undefined) rowUpdates.category = updates.category;
+    if (updates.invitationType !== undefined) rowUpdates.qr_code = updates.invitationType || null;
     if (updates.tableNumber !== undefined) rowUpdates.seat = updates.tableNumber;
     if (updates.pax !== undefined) rowUpdates.pax = updates.pax;
     if (updates.session !== undefined) rowUpdates.session = updates.session;
@@ -117,6 +128,7 @@ export const supabaseDb = {
     if (updates.attended !== undefined) rowUpdates.attended = updates.attended;
     if (updates.checkInTime !== undefined) rowUpdates.check_in_time = updates.checkInTime ? new Date(updates.checkInTime as any).toISOString() : null;
     if (updates.attendedAt !== undefined) rowUpdates.check_in_time = updates.attendedAt ? new Date(updates.attendedAt as any).toISOString() : null;
+    if (updates.checkInStaff !== undefined) rowUpdates.check_in_staff = updates.checkInStaff || null;
     if (updates.souvenirTaken !== undefined) rowUpdates.souvenir_taken = updates.souvenirTaken;
     if (updates.souvenirName !== undefined) rowUpdates.souvenir_type = updates.souvenirName;
     if (updates.souvenirTakenAt !== undefined) rowUpdates.souvenir_time = updates.souvenirTakenAt ? new Date(updates.souvenirTakenAt as any).toISOString() : null;
@@ -135,6 +147,11 @@ export const supabaseDb = {
       console.error(`Error updating guest ${guestId}:`, error);
       throw error;
     }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('supabase-compat-change', { detail: { collectionName: 'guests', docId: guestId } })
+      );
+    }
     return rowToGuest(data);
   },
 
@@ -152,8 +169,9 @@ export const supabaseDb = {
 
   // Realtime subscription for Scanner & Greeting Screen
   subscribeToGuests(eventId: string, callback: (guest: any) => void) {
+    const channelName = `guests-realtime-${eventId}-${Math.random().toString(36).slice(2, 7)}`;
     const channel = supabase
-      .channel(`guests-realtime-${eventId}`)
+      .channel(channelName)
       .on(
         'broadcast',
         { event: 'guest_checked_in' },
@@ -170,19 +188,34 @@ export const supabaseDb = {
       )
       .subscribe();
 
+    const broadcastChannel = supabase
+      .channel(`guests-realtime-${eventId}`)
+      .on(
+        'broadcast',
+        { event: 'guest_checked_in' },
+        (payload) => {
+          callback({ new: payload.payload, eventType: 'BROADCAST' });
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(broadcastChannel);
     };
   },
 
   async broadcastGuestArrival(eventId: string, guest: any) {
     try {
       const channel = supabase.channel(`guests-realtime-${eventId}`);
-      await channel.subscribe();
-      await channel.send({
-        type: 'broadcast',
-        event: 'guest_checked_in',
-        payload: guest
+      channel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          channel.send({
+            type: 'broadcast',
+            event: 'guest_checked_in',
+            payload: guest
+          });
+        }
       });
     } catch (e) {
       console.warn('Failed to broadcast guest arrival:', e);
@@ -236,25 +269,27 @@ export const supabaseDb = {
 
 // ================= HELPERS (ROW <-> MODEL) =================
 function rowToEvent(row: any): EventRecord {
+  const extra = row.settings && typeof row.settings === 'object' ? row.settings : {};
   return {
     id: row.id,
-    title: row.title,
-    coupleName: row.couple_name,
-    slug: row.slug,
-    partnerId: row.partner_id || '',
-    clientId: row.client_id || '',
-    date: row.date || '',
-    time: row.time,
-    location: row.location,
-    rsvpTheme: row.rsvp_theme || 'default',
-    thumbnailUrl: row.thumbnail_url,
-    frameOverlayUrl: row.frame_overlay_url,
-    digitalInviteLink: row.digital_invite_link,
-    invitationUrl: row.invitation_url,
-    status: row.status || 'published',
-    sessions: row.sessions || [],
-    guestCategories: row.guest_categories || ['VIP', 'Keluarga', 'Reguler'],
-    souvenirTypes: row.souvenir_types || [],
+    title: row.title || extra.title,
+    coupleName: row.couple_name ?? extra.coupleName,
+    slug: row.slug ?? extra.slug,
+    partnerId: row.partner_id || extra.partnerId || '',
+    clientId: row.client_id || extra.clientId || '',
+    date: row.date || extra.date || '',
+    time: row.time ?? extra.time,
+    location: row.location ?? extra.location,
+    rsvpTheme: row.rsvp_theme || row.theme || extra.rsvpTheme || 'default',
+    thumbnailUrl: row.thumbnail_url || extra.thumbnailUrl || row.cover_image || extra.coverImage,
+    frameOverlayUrl: row.frame_overlay_url || extra.frameOverlayUrl,
+    digitalInviteLink: row.digital_invite_link || extra.digitalInviteLink,
+    invitationUrl: row.invitation_url || extra.invitationUrl,
+    status: row.status || extra.status || 'published',
+    sessions: row.sessions || extra.sessions || [],
+    guestCategories: row.guest_categories || extra.guestCategories || ['VIP', 'Keluarga', 'Reguler'],
+    invitationTypes: row.invitation_types || extra.invitationTypes || ['Undangan Fisik', 'Undangan Cetak', 'Undangan Digital'],
+    souvenirTypes: row.souvenir_types || extra.souvenirTypes || [],
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -273,7 +308,7 @@ function eventToRow(event: any): any {
     location: event.location || null,
     theme: event.rsvpTheme || 'default',
     rsvp_theme: event.rsvpTheme || 'default',
-    cover_image: event.coverImage || null,
+    cover_image: event.thumbnailUrl || event.coverImage || null,
     thumbnail_url: event.thumbnailUrl || null,
     frame_overlay_url: event.frameOverlayUrl || null,
     digital_invite_link: event.digitalInviteLink || null,
@@ -295,13 +330,15 @@ function rowToGuest(row: any): Guest {
     phone: row.phone,
     email: row.email,
     category: row.category,
+    invitationType: row.invitation_type || row.qr_code || '',
     tableNumber: row.seat,
-    pax: row.pax,
+    pax: row.pax ?? 1,
     session: row.session,
     rsvpStatus: row.rsvp_status || 'pending',
     attended: Boolean(row.attended),
     attendedAt: row.check_in_time,
     checkInTime: row.check_in_time,
+    checkInStaff: row.check_in_staff || undefined,
     souvenirTaken: Boolean(row.souvenir_taken),
     souvenirName: row.souvenir_type,
     souvenirTakenAt: row.souvenir_time,
@@ -322,8 +359,9 @@ function guestToRow(guest: any): any {
     phone: guest.phone || null,
     email: guest.email || null,
     category: guest.category || 'Reguler',
+    qr_code: guest.invitationType || null,
     seat: guest.tableNumber || null,
-    pax: guest.pax || 1,
+    pax: guest.pax !== undefined ? Number(guest.pax) : 1,
     session: guest.session || null,
     status: guest.rsvpStatus || 'pending',
     rsvp_status: guest.rsvpStatus || 'pending',
