@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { collection, query, getDocs, addDoc, updateDoc, serverTimestamp, doc, getDoc, orderBy, where } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { supabaseDb } from '../lib/supabaseDb';
 import { EventRecord, Guest } from '../types';
 import { CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { parseFirestoreDate } from '../lib/utils';
@@ -135,20 +134,14 @@ export default function PublicRSVP() {
       try {
         setLoading(true);
         if (eventId) {
-          const eventDoc = await getDoc(doc(db, 'events', eventId));
-          if (eventDoc.exists()) {
-            const eData = { id: eventDoc.id, ...eventDoc.data() } as EventRecord;
-            if (eData) {
-              document.title = eData.title || (eData.coupleName ? `The Wedding Of ${eData.coupleName}` : 'Undangan Acara');
-            }
+          const eData = await supabaseDb.getEvent(eventId);
+          if (eData) {
+            document.title = eData.title || (eData.coupleName ? `The Wedding Of ${eData.coupleName}` : 'Undangan Acara');
             setEventData(eData);
           }
 
-          const guestsRef = collection(db, 'events', eventId, 'guests');
-          const q = query(guestsRef, orderBy('createdAt', 'desc'));
-          const snapshot = await getDocs(q);
-          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
-          setGuestsWithWishes(data.filter(g => g.wishes && g.wishes.trim().length > 0));
+          const allGuests = await supabaseDb.getGuests(eventId);
+          setGuestsWithWishes(allGuests.filter(g => g.wishes && g.wishes.trim().length > 0));
         }
       } catch (error) {
         console.error("Error fetching event data", error);
@@ -177,21 +170,19 @@ export default function PublicRSVP() {
       const ticketParam = searchParams.get('ticket');
       
       if (ticketParam) {
-        const q = query(collection(db, 'events', eventId!, 'guests'), where('ticketCode', '==', ticketParam || ''));
-        const snapshot = await getDocs(q);
-        if (!snapshot.empty) {
-          existingGuestId = snapshot.docs[0].id;
-          existingGuest = snapshot.docs[0].data() as Guest;
+        const found = await supabaseDb.getGuestByTicket(eventId!, ticketParam);
+        if (found) {
+          existingGuestId = found.id;
+          existingGuest = found;
         }
       } else {
         // Fallback: check by name if no ticket provided (case-insensitive)
-        const allGuestsSnapshot = await getDocs(collection(db, 'events', eventId!, 'guests'));
+        const allGuests = await supabaseDb.getGuests(eventId!);
         const searchName = name.trim().toLowerCase();
         
-        for (const doc of allGuestsSnapshot.docs) {
-           const gData = doc.data() as Guest;
+        for (const gData of allGuests) {
            if (gData.name && gData.name.trim().toLowerCase() === searchName) {
-             existingGuestId = doc.id;
+             existingGuestId = gData.id;
              existingGuest = gData;
              break;
            }
@@ -201,45 +192,28 @@ export default function PublicRSVP() {
       let newGuest: Guest;
 
       if (existingGuestId && existingGuest) {
-        const updatePayload: any = {
+        const updatePayload: Partial<Guest> = {
           rsvpStatus: rsvpStatus as any,
-          updatedAt: serverTimestamp()
         };
         if (wishes.trim()) updatePayload.wishes = wishes.trim();
         if (sessionInput) updatePayload.session = sessionInput;
         if (phone.trim()) updatePayload.phone = phone.trim();
         if (selectedSticker) updatePayload.stickerUrl = selectedSticker;
 
-        await updateDoc(doc(db, 'events', eventId!, 'guests', existingGuestId), updatePayload);
-        newGuest = {
-           ...existingGuest,
-           ...updatePayload,
-           id: existingGuestId,
-           updatedAt: new Date(),
-        } as unknown as Guest;
+        newGuest = await supabaseDb.updateGuest(existingGuestId, updatePayload);
       } else {
-        const payload: any = {
+        const ticketCode = ticketParam || Math.random().toString(36).substring(2, 10).toUpperCase();
+        newGuest = await supabaseDb.upsertGuest({
+          eventId: eventId!,
           name: name.trim(),
           rsvpStatus: rsvpStatus as any,
-          updatedAt: serverTimestamp()
-        };
-        if (phone.trim()) payload.phone = phone.trim();
-        if (wishes.trim()) payload.wishes = wishes.trim();
-        if (sessionInput) payload.session = sessionInput;
-        if (selectedSticker) payload.stickerUrl = selectedSticker;
-        
-        const ticketCode = ticketParam || Math.random().toString(36).substring(2, 10).toUpperCase();
-        payload.eventId = eventId!;
-        payload.ticketCode = ticketCode;
-        payload.attended = false;
-        payload.createdAt = serverTimestamp();
-        
-        const guestRef = await addDoc(collection(db, 'events', eventId!, 'guests'), payload);
-        newGuest = { 
-          id: guestRef.id, 
-          ...payload, 
-          createdAt: new Date() 
-        } as unknown as Guest;
+          phone: phone.trim() || undefined,
+          wishes: wishes.trim() || undefined,
+          session: sessionInput || undefined,
+          stickerUrl: selectedSticker || undefined,
+          ticketCode,
+          attended: false
+        });
       }
       
       setGuestsWithWishes(prev => {

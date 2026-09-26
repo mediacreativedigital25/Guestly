@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { doc, serverTimestamp, collection, query, where, getDocs, limit, runTransaction, onSnapshot, orderBy, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabaseDb } from '../lib/supabaseDb';
 import { parseFirestoreDate } from '../lib/utils';
 import { Guest, SouvenirItem, SouvenirLog } from '../types';
 import { 
@@ -153,6 +154,20 @@ export default function Scanner() {
   const fetchStats = async () => {
     if (!eventId) return;
     try {
+      const supaList = await supabaseDb.getGuests(eventId);
+      if (supaList && supaList.length > 0) {
+        setStats({
+          total: supaList.length,
+          attended: supaList.filter(g => g.attended).length,
+          souvenirTaken: supaList.filter(g => g.souvenirTaken).length
+        });
+        return;
+      }
+    } catch (supaErr) {
+      console.warn("Supabase fetchStats fallback:", supaErr);
+    }
+
+    try {
       const { getCountFromServer } = await import('firebase/firestore');
       const guestsRef = collection(db, 'events', eventId, 'guests');
       const [totalSnap, attendedSnap, souvenirSnap] = await Promise.all([
@@ -172,6 +187,17 @@ export default function Scanner() {
 
   const loadAllGuests = async () => {
     if (!eventId) return;
+    try {
+      const supaList = await supabaseDb.getGuests(eventId);
+      if (supaList && supaList.length > 0) {
+        const merged = souvenirStorage.mergeGuestsWithSouvenirs(eventId, supaList);
+        setAllGuests(merged);
+        return;
+      }
+    } catch (supaErr) {
+      console.warn("Supabase loadAllGuests fallback:", supaErr);
+    }
+
     try {
       const guestsRef = collection(db, 'events', eventId, 'guests');
       const snap = await getDocs(guestsRef);
@@ -498,6 +524,28 @@ export default function Scanner() {
           souvenirNotice: transactionResult.souvenirGiven ? `Souvenir: ${transactionResult.souvenirName}` : undefined
         });
 
+        // Supabase Realtime Broadcast to Greeting Screen & database update
+        supabaseDb.broadcastGuestArrival(eventId!, {
+          name: transactionResult.name,
+          category: transactionResult.category,
+          ticketCode: code,
+          session: transactionResult.session,
+          attended: true,
+          attendedAt: new Date().toISOString()
+        });
+
+        // Also sync state into Supabase guests table
+        supabaseDb.getGuestByTicket(eventId!, code).then((found) => {
+          if (found?.id) {
+            supabaseDb.updateGuest(found.id, {
+              attended: true,
+              attendedAt: new Date().toISOString(),
+              souvenirTaken: Boolean(transactionResult.souvenirGiven),
+              souvenirName: transactionResult.souvenirName || undefined
+            });
+          }
+        }).catch(e => console.warn('Supabase guest sync error:', e));
+
         loadAllGuests();
       }
     } catch (error: any) {
@@ -731,7 +779,7 @@ export default function Scanner() {
   });
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <div className="w-full max-w-[1600px] mx-auto space-y-6 pb-12">
       {/* Top Header & Navigation */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100 gap-4">
         <div className="flex items-center gap-3">
@@ -1095,7 +1143,7 @@ export default function Scanner() {
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" /> Real-time
                 </span>
               </div>
-              <div id="reader" className="w-full max-w-sm sm:max-w-md mx-auto min-h-[300px] overflow-hidden rounded-xl border border-gray-200 [&>video]:object-cover [&_button]:px-4 [&_button]:py-2 [&_button]:bg-indigo-600 [&_button]:text-white [&_button]:rounded-lg [&_button]:hover:bg-indigo-700 [&_button]:transition-colors [&_button]:mb-6 [&_button]:shadow-sm [&_a]:text-indigo-600 [&_a]:underline [&_a]:mt-6 [&_a]:block [&_a]:cursor-pointer [&_#html5-qrcode-anchor-scan-type-change]:mt-6 [&_span]:block [&_span]:mb-4"></div>
+              <div id="reader" className="w-full max-w-xl mx-auto min-h-[340px] overflow-hidden rounded-xl border border-gray-200 [&>video]:object-cover [&_button]:px-4 [&_button]:py-2 [&_button]:bg-indigo-600 [&_button]:text-white [&_button]:rounded-lg [&_button]:hover:bg-indigo-700 [&_button]:transition-colors [&_button]:mb-6 [&_button]:shadow-sm [&_a]:text-indigo-600 [&_a]:underline [&_a]:mt-6 [&_a]:block [&_a]:cursor-pointer [&_#html5-qrcode-anchor-scan-type-change]:mt-6 [&_span]:block [&_span]:mb-4"></div>
               <p className="text-center text-gray-500 text-xs mt-3">
                 {stationMode === 'souvenir_only'
                   ? 'Arahkan kamera ke QR tiket tamu untuk menukarkan souvenir fisik.'

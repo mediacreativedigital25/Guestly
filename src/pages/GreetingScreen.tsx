@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { collection, doc, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { supabaseDb } from '../lib/supabaseDb';
 import { EventRecord, Guest } from '../types';
 import { parseFirestoreDate } from '../lib/utils';
 import { useSettings } from '../SettingsContext';
@@ -23,80 +22,58 @@ export default function GreetingScreen() {
   useEffect(() => {
     if (!eventId) return;
     
-    // Subscribe to Event Info
-    const eventRef = doc(db, 'events', eventId);
-    const unsubscribeEvent = onSnapshot(eventRef, async (docSnap) => {
-      if (docSnap.exists()) {
-        const data = { id: docSnap.id, ...docSnap.data() } as EventRecord;
+    // 1. Initial Load of Event from Supabase
+    supabaseDb.getEvent(eventId).then(async (data) => {
+      if (data) {
         setEventData(data);
-        
-        // Fetch partner logo
         if (data.partnerId) {
-           try {
-              const { getDoc } = await import('firebase/firestore');
-              const partnerDocRef = doc(db, 'users', data.partnerId);
-              const partnerDocSnap = await getDoc(partnerDocRef);
-              if (partnerDocSnap.exists() && partnerDocSnap.data().logoUrl) {
-                 setPartnerLogoUrl(partnerDocSnap.data().logoUrl);
-              }
-           } catch (e) {
-              console.error("Error fetching partner logo:", e);
-           }
-        }
-      }
-    }, (err: any) => {
-      console.error(err);
-      if (err.code !== 'unavailable') {
-        setErrorInfo('Failed to load event data.');
-      }
-    });
-
-    // Subscribe to the most recently attended guest
-    // Using orderBy attendedAt desc, limit 1 avoids composite index while ensuring we get the latest check-in.
-    const guestsRef = collection(db, 'events', eventId, 'guests');
-    const q = query(
-      guestsRef,
-      orderBy('attendedAt', 'desc'),
-      limit(1)
-    );
-
-    const unsubscribeGuests = onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) {
-        const guestData = snapshot.docs[0].data() as Guest;
-        
-        const attendedDate = guestData.attendedAt ? parseFirestoreDate(guestData.attendedAt) : null;
-        if (guestData.attended && attendedDate) {
-          // Check if the check-in happened recently (within the last 15 seconds)
-          // to prevent showing old check-ins when the page is first loaded
-          const checkInTime = attendedDate.getTime();
-          const now = new Date().getTime();
-          
-          if (now - checkInTime < 15000) {
-            setLatestGuest(guestData);
-            setShowGreeting(true);
-            
-            if (timeoutRef.current) {
-              clearTimeout(timeoutRef.current);
-            }
-            
-            // Hide greeting after 8 seconds and return to waiting screen
-            timeoutRef.current = setTimeout(() => {
-              setShowGreeting(false);
-            }, 8000);
+          const partner = await supabaseDb.getUser(data.partnerId);
+          if (partner && (partner as any).logoUrl) {
+            setPartnerLogoUrl((partner as any).logoUrl);
           }
         }
       }
-    }, (err: any) => {
-      console.error(err);
-      if (err.code === 'permission-denied') {
-        setErrorInfo('Akses ditolak. Rekomendasi: Gunakan Cloudflare endpoint khusus untuk Public Greeting Screen agar lebih aman (tanpa expose PII).');
-      } else if (err.code !== 'unavailable') {
-        setErrorInfo('Failed to listen to guest check-ins. ' + err.message);
+    }).catch(err => {
+      console.error("Error fetching event data from Supabase:", err);
+      setErrorInfo('Gagal memuat data acara dari Supabase.');
+    });
+
+    // 2. Realtime WebSocket subscription to Supabase guests table
+    const unsubscribeGuests = supabaseDb.subscribeToGuests(eventId, (payload) => {
+      const newRecord = payload.new;
+      if (newRecord && newRecord.attended) {
+        const guest: Guest = {
+          id: newRecord.id,
+          eventId: newRecord.event_id,
+          name: newRecord.name,
+          ticketCode: newRecord.ticket_code,
+          category: newRecord.category,
+          tableNumber: newRecord.seat,
+          pax: newRecord.pax,
+          session: newRecord.session,
+          rsvpStatus: newRecord.rsvp_status,
+          attended: true,
+          attendedAt: newRecord.check_in_time || new Date().toISOString(),
+          wishes: newRecord.wishes,
+          createdAt: newRecord.created_at,
+          updatedAt: newRecord.updated_at
+        };
+
+        setLatestGuest(guest);
+        setShowGreeting(true);
+
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+        }
+
+        // Hide greeting after 8 seconds and return to waiting screen
+        timeoutRef.current = setTimeout(() => {
+          setShowGreeting(false);
+        }, 8000);
       }
     });
 
     return () => {
-      unsubscribeEvent();
       unsubscribeGuests();
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
