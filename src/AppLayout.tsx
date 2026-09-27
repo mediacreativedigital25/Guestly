@@ -229,12 +229,12 @@ export default function AppLayout() {
         if (isMounted) setResolvedBusinessName('');
         return;
       }
-      if (appUser.businessName || appUser.brandName) {
-        if (isMounted) setResolvedBusinessName(appUser.businessName || appUser.brandName || '');
-        return;
-      }
       if (appUser.role === 'superadmin') {
         if (isMounted) setResolvedBusinessName('Guestly Official (Super Admin)');
+        return;
+      }
+      if (appUser.businessName || appUser.brandName) {
+        if (isMounted) setResolvedBusinessName(appUser.businessName || appUser.brandName || '');
         return;
       }
       if (appUser.role === 'owner' || appUser.role === 'partner') {
@@ -906,13 +906,15 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                 <div className="text-[11px] font-medium text-indigo-600 mt-0.5">
                   {getRoleLabel(appUser.role, appUser.staffType)}
                 </div>
-                {(appUser.businessName || resolvedBusinessName) && (
+                {(appUser.role === 'superadmin' ? 'Guestly Official (Super Admin)' : (appUser.businessName || resolvedBusinessName)) && (
                   <div
                     className="mt-2 pt-2 border-t border-gray-100 text-[11px] font-medium text-gray-600 flex items-center gap-1.5 truncate"
-                    title={appUser.businessName || resolvedBusinessName}
+                    title={appUser.role === 'superadmin' ? 'Guestly Official (Super Admin)' : (appUser.businessName || resolvedBusinessName)}
                   >
                     <Building2 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                    <span className="truncate">{appUser.businessName || resolvedBusinessName}</span>
+                    <span className="truncate">
+                      {appUser.role === 'superadmin' ? 'Guestly Official (Super Admin)' : (appUser.businessName || resolvedBusinessName)}
+                    </span>
                   </div>
                 )}
               </div>

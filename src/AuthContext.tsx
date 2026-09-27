@@ -38,27 +38,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           const userDoc = await getDoc(userDocRef);
           
           if (userDoc.exists()) {
-            const data = userDoc.data() as User;
-            const isSuperAdminEmail = ['64.nagreg@gmail.com', '64.iklas@gmail.com', 'iklaspadli85@gmail.com', 'mediacreativedigital25@gmail.com'].includes(user.email || '') || user.email?.includes('superadmin');
-            if (isSuperAdminEmail && data.role !== 'superadmin') {
-              // Upgrade to superadmin automatically thanks to new rules
-              try {
-                await setDoc(userDocRef, { ...data, role: 'superadmin', updatedAt: serverTimestamp() }, { merge: true });
-                data.role = 'superadmin';
-              } catch (e) {
-                console.error("Failed to upgrade superadmin status:");
-                console.error(e);
-              }
-            }
+            const data = { ...(userDoc.data() as User) };
             if (data.logoUrl) data.logoUrl = resolveMediaUrl(data.logoUrl);
             if (data.bannerUrl) data.bannerUrl = resolveMediaUrl(data.bannerUrl);
             if (data.brandingImageUrl) data.brandingImageUrl = resolveMediaUrl(data.brandingImageUrl);
             setAppUser({ id: userDoc.id, ...data });
           } else {
-            // Check if superadmin is booting up or fallback to initial setup where users might need to be explicitly added
-            // Let's create an admin account if it's the very first user (simplified for this demo logic)
-            // Note: Rules require superadmin or same user.
-            const isFirst = ['64.nagreg@gmail.com', '64.iklas@gmail.com', 'iklaspadli85@gmail.com', 'mediacreativedigital25@gmail.com'].includes(user.email || '') || user.email?.includes('superadmin'); // Quick bootstrap for the requestor
+            // Bootstrap initial account only when user document does not exist yet
+            const isFirst = ['64.iklas@gmail.com'].includes(user.email || '') || user.email?.includes('superadmin');
             const newUser: User = {
               role: isFirst ? 'superadmin' : 'client',
               name: user.displayName || 'Admin',
@@ -71,16 +58,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             try {
               await setDoc(userDocRef, newUser);
               setAppUser({ id: user.uid, ...newUser });
-            } catch(e) {
-               // Security rules may reject if user creates themselves as partner/admin without superadmin
-               // Since our rule has: (isSuperAdmin() || (request.auth.uid == userId && incoming().role != 'superadmin'));
-               // and if isFirst it attempts 'superadmin', let's fix that. Actually, bootstrap is hard via client SDK. 
-               // For demo purposes, we will assume user creates 'client' without partnerId first.
-               newUser.role = 'client'; // fallback safely
-               await setDoc(userDocRef, newUser);
-               setAppUser({ id: user.uid, ...newUser });
+            } catch (e) {
+              newUser.role = 'client';
+              await setDoc(userDocRef, newUser);
+              setAppUser({ id: user.uid, ...newUser });
             }
           }
+
+          if (unsubscribeSnapshot) {
+            unsubscribeSnapshot();
+          }
+          unsubscribeSnapshot = onSnapshot(userDocRef, (snap) => {
+            if (snap.exists()) {
+              const liveData = { ...(snap.data() as User) };
+              if (liveData.logoUrl) liveData.logoUrl = resolveMediaUrl(liveData.logoUrl);
+              if (liveData.bannerUrl) liveData.bannerUrl = resolveMediaUrl(liveData.bannerUrl);
+              if (liveData.brandingImageUrl) liveData.brandingImageUrl = resolveMediaUrl(liveData.brandingImageUrl);
+              setAppUser({ id: snap.id, ...liveData });
+            }
+          });
 
         } catch (error: any) {
           handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);

@@ -495,27 +495,35 @@ function guestModelToRow(id: string, eventId: string, data: any, existingRow?: a
 
 function rowToUserModel(row: any, metaData?: any): any {
   const extra = metaData && typeof metaData === 'object' ? metaData : {};
+  const resolvedRole = extra.role || row.role || 'client';
   return hydrateDates({
     ...extra,
     id: row.id,
     uid: row.id,
-    email: row.email || extra.email || '',
-    name: row.name || extra.name || '',
-    role: extra.role || row.role || 'client',
-    staffType: extra.staffType || undefined,
-    assignedEventIds: Array.isArray(extra.assignedEventIds) ? extra.assignedEventIds : undefined,
-    partnerId: row.partner_id ?? extra.partnerId ?? null,
-    clientId: row.client_id ?? extra.clientId ?? null,
+    email: extra.email || row.email || '',
+    name: extra.name || row.name || '',
+    role: resolvedRole,
+    staffType: resolvedRole === 'staff' ? (extra.staffType || 'checkin') : undefined,
+    assignedEventIds:
+      (resolvedRole === 'staff' || resolvedRole === 'admin') && Array.isArray(extra.assignedEventIds)
+        ? extra.assignedEventIds
+        : [],
+    partnerId: extra.partnerId !== undefined ? extra.partnerId : (row.partner_id ?? null),
+    clientId: extra.clientId !== undefined ? extra.clientId : (row.client_id ?? null),
     createdAt: row.created_at || extra.createdAt || new Date().toISOString(),
-    updatedAt: row.updated_at || extra.updatedAt || new Date().toISOString(),
+    updatedAt: extra.updatedAt || row.updated_at || new Date().toISOString(),
   });
 }
 
 // ================= CORE CRUD OPERATIONS =================
 
 function applyFieldOperators(existing: Record<string, any>, incoming: Record<string, any>, merge: boolean): Record<string, any> {
-  const base = merge ? { ...existing } : {};
+  const base = merge ? serializeForStorage(existing) || {} : {};
   for (const [k, v] of Object.entries(incoming)) {
+    if (v === undefined) {
+      delete base[k];
+      continue;
+    }
     if (v && typeof v === 'object') {
       if (v.__op === 'deleteField') {
         delete base[k];
@@ -916,6 +924,20 @@ export async function setDoc(docRef: DocRef, data: any, options?: { merge?: bool
       ? 'partner'
       : 'client';
 
+    const nowIso = new Date().toISOString();
+
+    // 1. Save full authoritative user document to settings (doc:users:{id}) first
+    const { error } = await supabase.from('settings').upsert(
+      {
+        id: `doc:users:${id}`,
+        data: { ...updatedModel, role: exactRole, id, uid: id, updatedAt: nowIso },
+        updated_at: nowIso,
+      },
+      { onConflict: 'id' }
+    );
+    if (error) throw error;
+
+    // 2. Sync summary row to public.users table
     const { error: userRowErr } = await supabase.from('users').upsert(
       {
         id,
@@ -924,7 +946,7 @@ export async function setDoc(docRef: DocRef, data: any, options?: { merge?: bool
         role: exactRole,
         partner_id: null,
         client_id: updatedModel.clientId || null,
-        updated_at: new Date().toISOString(),
+        updated_at: nowIso,
       },
       { onConflict: 'id' }
     );
@@ -938,21 +960,12 @@ export async function setDoc(docRef: DocRef, data: any, options?: { merge?: bool
           role: fallbackRole,
           partner_id: null,
           client_id: updatedModel.clientId || null,
-          updated_at: new Date().toISOString(),
+          updated_at: nowIso,
         },
         { onConflict: 'id' }
       );
     }
 
-    const { error } = await supabase.from('settings').upsert(
-      {
-        id: `doc:users:${id}`,
-        data: { ...updatedModel, id, uid: id, updatedAt: new Date().toISOString() },
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'id' }
-    );
-    if (error) throw error;
     notifyLocalListeners('users', id);
     return;
   }

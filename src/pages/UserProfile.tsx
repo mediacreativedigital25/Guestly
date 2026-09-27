@@ -5,6 +5,7 @@ import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { User, Lock, Save } from 'lucide-react';
 import { showAlert, showCancelAlert } from '../lib/alerts';
+import { getRoleLabel } from '../lib/utils';
 
 export default function UserProfile() {
   const { currentUser, appUser } = useAuth();
@@ -82,12 +83,15 @@ export default function UserProfile() {
               <div>
                 <p className="text-sm text-gray-500 mb-1">Login Sebagai / Role</p>
                 <div className="flex items-center gap-2">
-                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium uppercase tracking-wider ${
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide ${
                     appUser.role === 'superadmin' ? 'bg-purple-100 text-purple-800' :
-                    appUser.role === 'partner' ? 'bg-blue-100 text-blue-800' :
-                    'bg-green-100 text-green-800'
+                    appUser.role === 'owner' ? 'bg-amber-100 text-amber-800' :
+                    appUser.role === 'admin' ? 'bg-blue-100 text-blue-800' :
+                    appUser.role === 'staff' ? 'bg-emerald-100 text-emerald-800' :
+                    appUser.role === 'partner' ? 'bg-indigo-100 text-indigo-800' :
+                    'bg-gray-100 text-gray-800'
                   }`}>
-                    {appUser.role}
+                    {getRoleLabel(appUser.role, appUser.staffType)}
                   </span>
                 </div>
               </div>

@@ -400,73 +400,97 @@ export default function UsersList() {
         throw new Error('Petugas Staff wajib ditugaskan minimal ke 1 acara agar dapat membuka Scanner/Souvenir.');
       }
 
-      // Determine business association
+      // Determine business association & clean up stale role attributes
+      const existingTargetUser = users.find(u => u.id === editingUserId);
       let resolvedPartnerId: string | null = editUserPartnerId || null;
-      let resolvedBizName: string | undefined = editUserBusinessName?.trim() || undefined;
+      let resolvedBizName: string | null = editUserBusinessName?.trim() || null;
 
-      if (appUser.role === 'owner' || appUser.role === 'partner') {
+      if (editUserRole === 'superadmin') {
+        resolvedPartnerId = null;
+        resolvedBizName = null;
+      } else if (appUser.role === 'owner' || appUser.role === 'partner') {
         resolvedPartnerId = appUser.partnerId || appUser.id || null;
-        resolvedBizName = appUser.businessName || appUser.name;
+        resolvedBizName = appUser.businessName || appUser.name || null;
       } else if (appUser.role === 'admin') {
         resolvedPartnerId = appUser.partnerId || null;
-        resolvedBizName = appUser.businessName || undefined;
+        resolvedBizName = appUser.businessName || null;
       } else if (appUser.role === 'superadmin') {
         if (editUserRole === 'owner' || editUserRole === 'partner') {
           resolvedPartnerId = editingUserId;
           resolvedBizName = editUserBusinessName?.trim() || editUserName.trim();
-        } else if (editUserPartnerId) {
-          const matchedOwner = businessOwners.find(b => b.id === editUserPartnerId || b.ownerUid === editUserPartnerId);
-          if (matchedOwner) {
-            resolvedBizName = matchedOwner.businessName;
+        } else {
+          // If user was previously an owner/partner, don't keep their own UID as their parent business ID
+          if (resolvedPartnerId === editingUserId) {
+            resolvedPartnerId = null;
+          }
+          if (resolvedPartnerId) {
+            const matchedOwner = businessOwners.find(
+              b => (b.id === resolvedPartnerId || b.ownerUid === resolvedPartnerId) && b.ownerUid !== editingUserId
+            );
+            resolvedBizName = matchedOwner ? matchedOwner.businessName : null;
+          } else {
+            resolvedBizName = null;
           }
         }
       }
 
       const forceHideServices =
-        editUserRole === 'staff' ||
-        editUserRole === 'admin' ||
-        (editUserRole === 'client' && Boolean(resolvedPartnerId)) ||
-        editUserHideServiceInfo;
+        editUserRole === 'superadmin'
+          ? false
+          : editUserRole === 'staff' ||
+            editUserRole === 'admin' ||
+            (editUserRole === 'client' && Boolean(resolvedPartnerId)) ||
+            editUserHideServiceInfo;
 
-      const updateData: Partial<User> = {
+      const isBusinessRole = editUserRole === 'owner' || editUserRole === 'partner';
+
+      const updateData: Record<string, any> = {
         name: editUserName.trim(),
         phone: editUserPhone.trim(),
         role: editUserRole,
-        staffType: editUserRole === 'staff' ? editUserStaffType : undefined,
+        staffType: editUserRole === 'staff' ? editUserStaffType : null,
         assignedEventIds: editUserRole === 'staff' || editUserRole === 'admin' ? editUserAssignedEvents : [],
         partnerId: resolvedPartnerId,
+        clientId: editUserRole === 'client' ? (existingTargetUser?.clientId || editingUserId) : null,
         businessName: resolvedBizName,
+        businessAddress: isBusinessRole ? editUserBusinessAddress.trim() : null,
+        businessCity: isBusinessRole ? editUserBusinessCity.trim() : null,
+        businessCategory: isBusinessRole ? (existingTargetUser?.businessCategory || 'Wedding Organizer (WO)') : null,
+        logoUrl: isBusinessRole ? editUserLogoUrl : (existingTargetUser?.logoUrl || ''),
         hideServiceInfo: forceHideServices,
         updatedAt: serverTimestamp()
       };
 
       if (appUser.role === 'superadmin') {
-        updateData.clientCredit = Number(editUserClientCredit) || 0;
-        updateData.clientQuota = Number(editUserClientCredit) || 0;
-        updateData.eventCredit = Number(editUserEventCredit) || 0;
-        updateData.eventQuota = Number(editUserEventCredit) || 0;
-        updateData.allowManualEvent = Boolean(editUserAllowManualEvent);
-        updateData.eventManual = Boolean(editUserAllowManualEvent);
-      }
-
-      if (editUserRole === 'partner' || editUserRole === 'owner') {
-        updateData.logoUrl = editUserLogoUrl;
-        if (appUser.role === 'superadmin') {
-          updateData.businessAddress = editUserBusinessAddress.trim();
-          updateData.businessCity = editUserBusinessCity.trim();
-        }
+        const canHaveQuota = editUserRole === 'owner' || editUserRole === 'partner' || editUserRole === 'client';
+        updateData.clientCredit = canHaveQuota ? (Number(editUserClientCredit) || 0) : 0;
+        updateData.clientQuota = canHaveQuota ? (Number(editUserClientCredit) || 0) : 0;
+        updateData.eventCredit = canHaveQuota ? (Number(editUserEventCredit) || 0) : 0;
+        updateData.eventQuota = canHaveQuota ? (Number(editUserEventCredit) || 0) : 0;
+        updateData.allowManualEvent = canHaveQuota ? Boolean(editUserAllowManualEvent) : false;
+        updateData.eventManual = canHaveQuota ? Boolean(editUserAllowManualEvent) : false;
       }
 
       if (editUserPassword && editUserPassword.trim().length > 0) {
         if (editUserPassword.trim().length < 6) {
           throw new Error('Password baru minimal 6 karakter.');
         }
-        (updateData as any)._password = editUserPassword.trim();
+        updateData._password = editUserPassword.trim();
       }
 
       await updateDoc(doc(db, 'users', editingUserId), updateData);
 
-      setUsers(users.map(u => (u.id === editingUserId ? { ...u, ...updateData } : u)));
+      setUsers(prev =>
+        prev.map(u => {
+          if (u.id !== editingUserId) return u;
+          const nextUser: any = { ...u, ...updateData };
+          if (!nextUser.staffType) delete nextUser.staffType;
+          if (!nextUser.businessName) delete nextUser.businessName;
+          if (!nextUser.businessAddress) delete nextUser.businessAddress;
+          if (!nextUser.businessCity) delete nextUser.businessCity;
+          return nextUser as User;
+        })
+      );
       setIsEditingUser(false);
       navigate('/auth/login/users', { replace: true });
       showAlert('Berhasil', 'Data pengguna, bisnis naungan & penugasan berhasil diperbarui!', 'success');
@@ -1183,7 +1207,37 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
             <label className="block text-sm font-medium text-gray-700 mb-1">Role / Jabatan</label>
             <select
               value={editUserRole}
-              onChange={e => setEditUserRole(e.target.value as Role)}
+              onChange={e => {
+                const nextRole = e.target.value as Role;
+                setEditUserRole(nextRole);
+
+                if (nextRole === 'superadmin') {
+                  setEditUserPartnerId('');
+                  setEditUserBusinessName('');
+                  setEditUserBusinessAddress('');
+                  setEditUserBusinessCity('');
+                  setEditUserAssignedEvents([]);
+                  setEditUserHideServiceInfo(false);
+                } else if (nextRole === 'owner' || nextRole === 'partner') {
+                  setEditUserPartnerId(editingUserId);
+                  setEditUserAssignedEvents([]);
+                  setEditUserHideServiceInfo(false);
+                } else {
+                  // Transitioning to admin, staff, or client
+                  if (editUserPartnerId === editingUserId) {
+                    setEditUserPartnerId('');
+                    setEditUserBusinessName('');
+                    setEditUserBusinessAddress('');
+                    setEditUserBusinessCity('');
+                  }
+                  if (nextRole === 'staff' || nextRole === 'admin') {
+                    setEditUserHideServiceInfo(true);
+                  } else if (nextRole === 'client') {
+                    const nextPid = editUserPartnerId === editingUserId ? '' : editUserPartnerId;
+                    setEditUserHideServiceInfo(Boolean(nextPid));
+                  }
+                }
+              }}
               className="w-full border border-gray-300 rounded-md px-3 py-2 font-medium text-gray-900 bg-white"
             >
               {allowedRoleOptions.map(opt => (
@@ -1264,11 +1318,13 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                   className="w-full border border-amber-300 rounded-lg px-3 py-2 bg-white text-sm font-medium text-gray-900"
                 >
                   <option value="">-- Global / Tanpa Naungan Khusus --</option>
-                  {businessOwners.map(biz => (
-                    <option key={biz.id} value={biz.id}>
-                      🏢 {biz.businessName} (Owner: {biz.ownerName})
-                    </option>
-                  ))}
+                  {businessOwners
+                    .filter(biz => biz.ownerUid !== editingUserId)
+                    .map(biz => (
+                      <option key={biz.id} value={biz.id}>
+                        🏢 {biz.businessName} (Owner: {biz.ownerName})
+                      </option>
+                    ))}
                 </select>
               </div>
             )}
