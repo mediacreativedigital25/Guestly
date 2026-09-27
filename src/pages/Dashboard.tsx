@@ -8,7 +8,6 @@ import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import { format, isSameDay, addMonths, startOfDay, endOfDay, differenceInCalendarDays } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
-import { Sparkles, Printer, QrCode, Download, WifiOff, Gift, Calendar as CalendarIcon, Briefcase, ArrowRight } from 'lucide-react';
 import { parseFirestoreDate, getRoleLabel, canUserAccessEvent, shouldHideServiceInfo, getUserBusinessId } from '../lib/utils';
 
 export default function Dashboard() {
@@ -337,7 +336,6 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
       <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
         <p className="text-gray-600">Selamat datang, {appUser?.name}! Anda login sebagai <span className="font-medium text-indigo-600">{getRoleLabel(appUser?.role, appUser?.staffType)}</span>.</p>
         
@@ -604,190 +602,6 @@ export default function Dashboard() {
               </div>
             </div>
           )}
-
-          {/* Pembaruan Sistem Terbaru (Changelog 26 & 27 September 2026) */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="p-5 sm:p-6 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-indigo-50/60 via-white to-rose-50/40">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs shrink-0">
-                  <Sparkles className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-base sm:text-lg font-bold text-gray-900">
-                      Pembaruan Sistem Terbaru (Changelog)
-                    </h2>
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-100 text-indigo-700">
-                      V2.3.0
-                    </span>
-                  </div>
-                  <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
-                    Ringkasan fitur dan peningkatan terbaru Guestly pada 26 &amp; 27 September 2026
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => navigate('/auth/login/changelog')}
-                className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-indigo-600 hover:text-indigo-800 bg-white border border-indigo-200 hover:border-indigo-300 px-3.5 py-2 rounded-lg transition-colors self-start sm:self-center shrink-0 cursor-pointer"
-              >
-                <span>Lihat Riwayat Lengkap</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-5 sm:p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Release 27 September 2026 */}
-              <div className="rounded-xl border border-indigo-100 bg-indigo-50/20 p-4 sm:p-5 space-y-4">
-                <div className="flex items-center justify-between gap-2 pb-3 border-b border-indigo-100/80">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-md text-xs font-bold bg-indigo-600 text-white">
-                      V2.3.0
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-100 text-rose-700">
-                      Major Update
-                    </span>
-                  </div>
-                  <span className="text-xs font-semibold text-gray-500 bg-white px-2.5 py-1 rounded-full border border-gray-200">
-                    27 September 2026
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 mt-0.5">
-                      <Sparkles className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs sm:text-sm font-bold text-gray-900">
-                        Kartu E-Invitation Digital &amp; Katalog Template R2
-                      </h3>
-                      <p className="text-xs text-gray-600 leading-relaxed mt-0.5">
-                        Desain kartu undangan digital 16:9 dengan bingkai lengkung (arch) foto mempelai, tema warna elegan, dan katalog template Cloudflare R2.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 mt-0.5">
-                      <Printer className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs sm:text-sm font-bold text-gray-900">
-                        2 Mode Cetak &amp; Unduh: Bentuk Card atau QR Biasa
-                      </h3>
-                      <p className="text-xs text-gray-600 leading-relaxed mt-0.5">
-                        Pilihan cetak Bentuk Card E-Invitation (8 kartu/A4) atau QR Biasa (20 label/A4) lengkap dengan pratinjau langsung.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center shrink-0 mt-0.5">
-                      <QrCode className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs sm:text-sm font-bold text-gray-900">
-                        Emblem Favicon Guestly di Tengah QR &amp; Logo Frosted Glass
-                      </h3>
-                      <p className="text-xs text-gray-600 leading-relaxed mt-0.5">
-                        QR Code Level H (30%) dengan identitas Favicon Guestly di tengah serta area logo berlatar transparan buram (frosted glass).
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 mt-0.5">
-                      <Download className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs sm:text-sm font-bold text-gray-900">
-                        Nama Panjang Anti-Terpotong &amp; Mesin Unduh PNG 2D Canvas
-                      </h3>
-                      <p className="text-xs text-gray-600 leading-relaxed mt-0.5">
-                        Penyesuaian ukuran huruf otomatis untuk nama/gelar panjang dan mesin 2D Canvas Compositor agar seluruh gambar kartu selalu ikut terunduh tajam.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Release 26 September 2026 */}
-              <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 sm:p-5 space-y-4">
-                <div className="flex items-center justify-between gap-2 pb-3 border-b border-gray-200/80">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-md text-xs font-bold bg-gray-800 text-white">
-                      V2.2.0
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 text-blue-700">
-                      Feature Drop
-                    </span>
-                  </div>
-                  <span className="text-xs font-semibold text-gray-500 bg-white px-2.5 py-1 rounded-full border border-gray-200">
-                    26 September 2026
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 mt-0.5">
-                      <WifiOff className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs sm:text-sm font-bold text-gray-900">
-                        Mode Offline-First Scanner &amp; Layar Sapaan (TV Greeting)
-                      </h3>
-                      <p className="text-xs text-gray-600 leading-relaxed mt-0.5">
-                        Check-in QR tamu dan layar sapaan VIP tetap berjalan tanpa hambatan saat internet terputus dan tersinkronisasi otomatis saat kembali online.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0 mt-0.5">
-                      <Gift className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs sm:text-sm font-bold text-gray-900">
-                        Manajemen Pengambilan Souvenir &amp; Pencatatan Petugas
-                      </h3>
-                      <p className="text-xs text-gray-600 leading-relaxed mt-0.5">
-                        Dukungan pengambilan souvenir otomatis (1x scan) maupun terpisah (2x scan meja souvenir) beserta kuota stok dan nama petugas.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center shrink-0 mt-0.5">
-                      <CalendarIcon className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs sm:text-sm font-bold text-gray-900">
-                        Kalender Jadwal 3 Bulan &amp; Indikator Hitung Mundur H-3
-                      </h3>
-                      <p className="text-xs text-gray-600 leading-relaxed mt-0.5">
-                        Pemantauan jadwal acara Published selama 3 bulan ke depan lengkap dengan lencana pengingat otomatis (Hari Ini, H-1 s/d H-3).
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 mt-0.5">
-                      <Briefcase className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs sm:text-sm font-bold text-gray-900">
-                        Workspace Khusus Petugas (Staff) &amp; Identitas Naungan WO
-                      </h3>
-                      <p className="text-xs text-gray-600 leading-relaxed mt-0.5">
-                        Tampilan kerja ringkas khusus petugas lapangan, informasi naungan bisnis/WO di profil, dan peningkatan stabilitas pemuatan media.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       )}
     </div>

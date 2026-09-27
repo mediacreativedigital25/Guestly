@@ -50,6 +50,105 @@
   }
 }
 
+/* Guestly SweetAlert2 Theme Overrides */
+.swal2-container {
+  z-index: 99999 !important;
+}
+
+.guestly-swal-popup {
+  font-family: var(--font-sans) !important;
+  background: #ffffff !important;
+  border-radius: 16px !important;
+  border: 1px solid #e6dfec !important;
+  box-shadow: 0 20px 45px -12px rgba(91, 75, 99, 0.22), 0 4px 16px -4px rgba(201, 143, 157, 0.12) !important;
+  padding: 1.75rem 1.5rem 1.5rem !important;
+  color: #5B4B63 !important;
+}
+
+.guestly-swal-title {
+  font-family: var(--font-sans) !important;
+  font-size: 1.15rem !important;
+  font-weight: 700 !important;
+  color: #5B4B63 !important;
+  padding-top: 0.25rem !important;
+}
+
+.guestly-swal-html {
+  font-family: var(--font-sans) !important;
+  font-size: 0.875rem !important;
+  line-height: 1.55 !important;
+  color: #74638a !important;
+  margin-top: 0.5rem !important;
+}
+
+.guestly-swal-actions {
+  margin-top: 1.5rem !important;
+  gap: 0.625rem !important;
+  width: 100% !important;
+  justify-content: center !important;
+}
+
+.guestly-swal-confirm {
+  font-family: var(--font-sans) !important;
+  background-color: #C98F9D !important;
+  color: #ffffff !important;
+  font-size: 0.875rem !important;
+  font-weight: 600 !important;
+  padding: 0.625rem 1.5rem !important;
+  border-radius: 10px !important;
+  border: 1px solid #C98F9D !important;
+  box-shadow: 0 2px 8px rgba(201, 143, 157, 0.35) !important;
+  transition: all 0.2s ease !important;
+  cursor: pointer !important;
+}
+
+.guestly-swal-confirm:hover {
+  background-color: #b07080 !important;
+  border-color: #b07080 !important;
+}
+
+.guestly-swal-confirm:focus {
+  box-shadow: 0 0 0 3px rgba(201, 143, 157, 0.3) !important;
+}
+
+.guestly-swal-cancel {
+  font-family: var(--font-sans) !important;
+  background-color: #f5eff5 !important;
+  color: #5B4B63 !important;
+  font-size: 0.875rem !important;
+  font-weight: 600 !important;
+  padding: 0.625rem 1.5rem !important;
+  border-radius: 10px !important;
+  border: 1px solid #D8C7F3 !important;
+  transition: all 0.2s ease !important;
+  cursor: pointer !important;
+}
+
+.guestly-swal-cancel:hover {
+  background-color: #e6dfec !important;
+  color: #493b50 !important;
+}
+
+.swal2-icon.swal2-success {
+  border-color: #10b981 !important;
+  color: #10b981 !important;
+}
+
+.swal2-icon.swal2-warning {
+  border-color: #C98F9D !important;
+  color: #C98F9D !important;
+}
+
+.swal2-icon.swal2-info {
+  border-color: #D8C7F3 !important;
+  color: #5B4B63 !important;
+}
+
+.swal2-icon.swal2-error {
+  border-color: #f43f5e !important;
+  color: #f43f5e !important;
+}
+
 @font-face {
   font-family: 'Darling';
   src: url('/fonts/Darling.ttf') format('truetype');

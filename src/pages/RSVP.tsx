@@ -40,7 +40,8 @@ interface CachedGuestPass {
 }
 
 function getPassCacheKey(eventId?: string, ticketCode?: string): string {
-  return `guestly_einvite_pass_v1_${eventId || 'ev'}_${ticketCode || 'tk'}`;
+  const normTicket = String(ticketCode || 'tk').trim().split('?')[0].split('#')[0].toUpperCase();
+  return `guestly_einvite_pass_v1_${eventId || 'ev'}_${normTicket}`;
 }
 
 function readCachedPass(eventId?: string, ticketCode?: string): CachedGuestPass | null {
@@ -351,12 +352,17 @@ export default function RSVP() {
     ticketCode: ticketCode || 'GUEST',
   };
 
+  const customMapsRaw = (eventData?.eInviteMapsUrl || eventData?.mapsUrl || '').trim();
   const venueSearchTarget =
     eventData?.eInviteVenueAddress ||
     eventData?.eInviteVenueName ||
     eventData?.location ||
     '';
-  const mapsQueryUrl = venueSearchTarget
+  const mapsQueryUrl = customMapsRaw
+    ? /^https?:\/\//i.test(customMapsRaw)
+      ? customMapsRaw
+      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(customMapsRaw)}`
+    : venueSearchTarget
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venueSearchTarget)}`
     : null;
 

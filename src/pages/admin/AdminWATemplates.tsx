@@ -3,6 +3,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
 import { WATemplate } from '../../types';
 import { Plus, Edit2, Trash2, X, Check, Search, FileText } from 'lucide-react';
+import { showAlert as showPopupAlert, showConfirm, showCancelAlert } from '../../lib/alerts';
 
 const generateId = () =>
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -58,6 +59,7 @@ export default function AdminWATemplates() {
 
   const showAlert = (message: string, type: 'success' | 'error' | 'info') => {
     setAlert({ message, type });
+    showPopupAlert(type === 'success' ? 'Berhasil' : type === 'error' ? 'Gagal' : 'Informasi', message, type);
     setTimeout(() => setAlert(null), 3000);
   };
 
@@ -78,10 +80,13 @@ export default function AdminWATemplates() {
     setIsModalOpen(true);
   };
 
-  const handleCloseModal = () => {
+  const handleCloseModal = (showCancel = false) => {
     setIsModalOpen(false);
     setEditingTemplate(null);
     setFormData({ name: '', content: '' });
+    if (showCancel) {
+      showCancelAlert('Perubahan template WhatsApp dibatalkan.');
+    }
   };
 
   const saveTemplatesToDb = async (newTemplates: WATemplate[]) => {
@@ -112,6 +117,8 @@ export default function AdminWATemplates() {
             ? { ...t, name: formData.name, content: formData.content, updatedAt: new Date().toISOString() }
             : t
         );
+        await saveTemplatesToDb(updatedTemplates);
+        handleCloseModal(false);
         showAlert('Template berhasil diperbarui', 'success');
       } else {
         const newTemplate: WATemplate = {
@@ -122,10 +129,10 @@ export default function AdminWATemplates() {
           updatedAt: new Date().toISOString()
         };
         updatedTemplates = [...templates, newTemplate];
+        await saveTemplatesToDb(updatedTemplates);
+        handleCloseModal(false);
         showAlert('Template baru berhasil ditambahkan', 'success');
       }
-      await saveTemplatesToDb(updatedTemplates);
-      handleCloseModal();
     } catch (error) {
       showAlert('Terjadi kesalahan saat menyimpan template', 'error');
       handleFirestoreError(error, OperationType.UPDATE, 'settings/waTemplates');
@@ -133,7 +140,8 @@ export default function AdminWATemplates() {
   };
 
   const handleDelete = async (templateId: string) => {
-    if (!window.confirm('Apakah Anda yakin ingin menghapus template ini?')) return;
+    const confirmed = await showConfirm('Apakah Anda yakin ingin menghapus template ini?');
+    if (!confirmed) return;
     try {
       const updatedTemplates = templates.filter(t => t.id !== templateId);
       await saveTemplatesToDb(updatedTemplates);
@@ -178,8 +186,7 @@ export default function AdminWATemplates() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Template WA Blast</h1>
+      <div className="flex justify-end items-center">
         <button
           onClick={() => handleOpenModal()}
           className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors flex items-center"
@@ -320,7 +327,7 @@ export default function AdminWATemplates() {
                 <div className="flex justify-end pt-4 border-t border-gray-200">
                   <button
                     type="button"
-                    onClick={handleCloseModal}
+                    onClick={() => handleCloseModal(true)}
                     className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 mr-3"
                   >
                     Batal

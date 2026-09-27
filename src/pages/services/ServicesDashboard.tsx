@@ -1,13 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../AuthContext';
-import { Package, Users, PartyPopper, CalendarDays, Server, FileText, TrendingUp, CheckCircle } from 'lucide-react';
+import {
+  Package,
+  Users,
+  PartyPopper,
+  CalendarDays,
+  Server,
+  FileText,
+  TrendingUp,
+  CheckCircle,
+  MessageCircle,
+  Infinity as InfinityIcon
+} from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 
 export default function ServicesDashboard() {
   const { appUser } = useAuth();
-  
+
   const [stats, setStats] = useState({
     totalServices: 0,
     activeServices: 0,
@@ -22,7 +33,7 @@ export default function ServicesDashboard() {
         setLoading(false);
         return;
       }
-      
+
       try {
         setLoading(true);
         // Fetch Services
@@ -64,6 +75,8 @@ export default function ServicesDashboard() {
   }
 
   const isSuperAdmin = appUser.role === 'superadmin';
+  const isPartnerOrOwner = ['owner', 'partner', 'admin', 'superadmin'].includes(appUser.role);
+
   const parsedActiveDate = appUser.activeUntil?.toDate
     ? appUser.activeUntil.toDate()
     : appUser.activeUntil?.seconds
@@ -75,24 +88,40 @@ export default function ServicesDashboard() {
     ? parsedActiveDate.toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })
     : null;
 
+  const eventQuotaValue =
+    appUser.eventCredit !== undefined
+      ? appUser.eventCredit
+      : appUser.eventQuota !== undefined
+      ? appUser.eventQuota
+      : 0;
+  const clientQuotaValue =
+    appUser.clientCredit !== undefined
+      ? appUser.clientCredit
+      : appUser.clientQuota !== undefined
+      ? appUser.clientQuota
+      : 0;
+  const guestQuotaValue = appUser.guestQuota !== undefined ? Number(appUser.guestQuota) : 0;
+  const isUnlimitedGuestQuota = guestQuotaValue <= 0 && (isPartnerOrOwner || eventQuotaValue > 0);
+  const waBlastQuotaValue = appUser.waBlastQuota !== undefined ? Number(appUser.waBlastQuota) : 0;
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard Layanan</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {isSuperAdmin ? 'Ringkasan performa dan metrik layanan sistem.' : 'Pantau sisa kuota dan masa aktif layanan Anda.'}
-          </p>
-        </div>
-        {!isSuperAdmin && (
+      {!isSuperAdmin && (
+        <div className="flex justify-end items-center gap-3">
+          <Link
+            to="/auth/login/services/my"
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium text-sm"
+          >
+            Layanan Saya
+          </Link>
           <Link
             to="/auth/login/services/catalog"
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium"
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium text-sm"
           >
             Beli Layanan
           </Link>
-        )}
-      </div>
+        </div>
+      )}
 
       {isSuperAdmin ? (
         loading ? (
@@ -163,8 +192,8 @@ export default function ServicesDashboard() {
               <div>
                 <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Masa Aktif</p>
                 <div className="mt-2 flex items-baseline gap-2">
-                  <span className={`text-xl sm:text-2xl font-bold ${activeUntilDate ? 'text-gray-900' : 'text-gray-400'}`}>
-                    {activeUntilDate || 'Tidak Aktif'}
+                  <span className="text-lg sm:text-xl font-bold text-gray-900">
+                    {activeUntilDate || 'Selamanya (Tanpa Batas)'}
                   </span>
                 </div>
               </div>
@@ -177,27 +206,10 @@ export default function ServicesDashboard() {
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Kuota Klien</p>
-                <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-4xl font-bold text-gray-900">
-                    {appUser.clientCredit !== undefined ? appUser.clientCredit : (appUser.clientQuota || 0)}
-                  </span>
-                  <span className="text-sm text-gray-500">tersisa</span>
-                </div>
-              </div>
-              <div className="p-3 bg-blue-50 rounded-full shrink-0">
-                <Users className="w-8 h-8 text-blue-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between">
-              <div>
                 <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Kuota Acara</p>
                 <div className="mt-2 flex items-baseline gap-2">
                   <span className="text-4xl font-bold text-gray-900">
-                    {appUser.eventCredit !== undefined ? appUser.eventCredit : (appUser.eventQuota || 0)}
+                    {eventQuotaValue}
                   </span>
                   <span className="text-sm text-gray-500">tersisa</span>
                 </div>
@@ -208,15 +220,60 @@ export default function ServicesDashboard() {
             </div>
           </div>
 
+          {isPartnerOrOwner ? (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Kuota Client</p>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="text-4xl font-bold text-gray-900">
+                      {clientQuotaValue}
+                    </span>
+                    <span className="text-sm text-gray-500">tersisa</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-blue-50 rounded-full shrink-0">
+                  <Users className="w-8 h-8 text-blue-600" />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Kuota WA Blast</p>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="text-4xl font-bold text-gray-900">
+                      {waBlastQuotaValue}
+                    </span>
+                    <span className="text-sm text-gray-500">pesan</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-blue-50 rounded-full shrink-0">
+                  <MessageCircle className="w-8 h-8 text-blue-600" />
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Kuota Tamu</p>
+                <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Kuota Tamu (Per Acara)</p>
                 <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-4xl font-bold text-gray-900">
-                    {appUser.guestQuota || 0}
-                  </span>
-                  <span className="text-sm text-gray-500">tersisa</span>
+                  {isUnlimitedGuestQuota ? (
+                    <span className="text-xl font-bold text-gray-900 inline-flex items-center gap-1.5">
+                      <InfinityIcon className="w-5 h-5 text-emerald-600" />
+                      Tanpa Batas
+                    </span>
+                  ) : (
+                    <>
+                      <span className="text-4xl font-bold text-gray-900">
+                        {guestQuotaValue}
+                      </span>
+                      <span className="text-sm text-gray-500">tamu</span>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="p-3 bg-emerald-50 rounded-full shrink-0">

@@ -193,52 +193,83 @@ export function resolveMediaUrl(url?: string | null): string {
   const trimmed = String(url).trim();
   if (!trimmed) return '';
   if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return trimmed;
-  const r2Match = trimmed.match(/^https?:\/\/cdn\.guestly\.yulovi\.com\/+(.+)$/i);
-  if (r2Match && r2Match[1]) {
-    return `/api/media/r2/${r2Match[1]}`;
+  // Convert legacy /api/media/r2/<key> back to the public R2 CDN URL so it works on both dev and Cloudflare Pages
+  const apiR2Match = trimmed.match(/^\/api\/media\/r2\/+(.+)$/i);
+  if (apiR2Match && apiR2Match[1]) {
+    return `https://cdn.guestly.yulovi.com/${apiR2Match[1]}`;
   }
   return trimmed;
+}
+
+export function getMediaFallbackUrls(
+  urls: Array<string | null | undefined>
+): string[] {
+  const result: string[] = [];
+  const addUnique = (u?: string | null) => {
+    if (!u) return;
+    const s = u.trim();
+    if (!s || result.includes(s)) return;
+    result.push(s);
+  };
+
+  for (const raw of urls) {
+    if (!raw) continue;
+    const primary = resolveMediaUrl(raw);
+    addUnique(primary);
+
+    // Also add local/Pages R2 proxy path as secondary fallback for any R2 CDN URL
+    const r2Match = primary.match(/^https?:\/\/cdn\.guestly\.yulovi\.com\/+(.+)$/i);
+    if (r2Match && r2Match[1]) {
+      addUnique(`/api/media/r2/${r2Match[1]}`);
+    }
+  }
+
+  return result;
 }
 
 const DEFAULT_FALLBACK_COUPLE_PHOTO =
   'https://images.unsplash.com/photo-1583939003579-730e3918a45a?auto=format&fit=crop&w=900&q=80';
 
 async function fetchImageAsDataUrl(rawUrl: string): Promise<string | null> {
-  const url = resolveMediaUrl(rawUrl);
-  if (!url) return null;
-  if (url.startsWith('data:')) return url;
+  const candidates = getMediaFallbackUrls([rawUrl]);
+  if (candidates.length === 0) return null;
 
-  // 1. Try server proxy first (handles local /uploads, direct R2 GetObjectCommand, and external URLs)
-  try {
-    const resp = await fetch(`/api/media/proxy?url=${encodeURIComponent(url)}`);
-    const contentType = resp.headers.get('content-type') || '';
-    if (resp.ok && contentType.includes('application/json')) {
-      const json = await resp.json();
-      if (json?.success && json?.dataUrl) {
-        return json.dataUrl as string;
-      }
-    }
-  } catch {
-    // fallback below
-  }
+  for (const url of candidates) {
+    if (url.startsWith('data:')) return url;
 
-  // 2. Fallback: direct browser fetch (works for same-origin /api/media/r2/... and CORS-enabled URLs)
-  try {
-    const resp = await fetch(url, { mode: 'cors', credentials: 'omit' });
-    if (resp.ok) {
-      const blob = await resp.blob();
-      if (blob.size > 0 && !blob.type.includes('text/html')) {
-        return await new Promise<string | null>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () =>
-            resolve(typeof reader.result === 'string' ? reader.result : null);
-          reader.onerror = () => resolve(null);
-          reader.readAsDataURL(blob);
-        });
+    // 1. Try server/Pages proxy first (handles local /uploads, R2 bucket/CDN, and external URLs without CORS issues)
+    try {
+      const resp = await fetch(`/api/media/proxy?url=${encodeURIComponent(url)}`);
+      const contentType = resp.headers.get('content-type') || '';
+      if (resp.ok && contentType.includes('application/json')) {
+        const json = await resp.json();
+        if (json?.success && json?.dataUrl) {
+          return json.dataUrl as string;
+        }
       }
+    } catch {
+      // fallback below
     }
-  } catch {
-    // ignore
+
+    // 2. Fallback: direct browser fetch (works for same-origin /api/media/r2/... and CORS-enabled URLs)
+    try {
+      const resp = await fetch(url, { mode: 'cors', credentials: 'omit' });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        if (blob.size > 0 && !blob.type.includes('text/html')) {
+          const dataUrl = await new Promise<string | null>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () =>
+              resolve(typeof reader.result === 'string' ? reader.result : null);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(blob);
+          });
+          if (dataUrl) return dataUrl;
+        }
+      }
+    } catch {
+      // ignore and try next candidate
+    }
   }
 
   return null;

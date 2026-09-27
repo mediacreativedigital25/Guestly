@@ -19,7 +19,7 @@ import {
   X,
   HelpCircle,
 } from 'lucide-react';
-import { showAlert, showConfirm } from '../../lib/alerts';
+import { showAlert, showConfirm, showCancelAlert } from '../../lib/alerts';
 
 const CHATGPT_PROMPT_TEMPLATE = `Tolong buatkan gambar desain "Blank Background Template" untuk kartu E-Invitation pernikahan digital dengan spesifikasi tata letak (layout) yang SANGAT KETAT berikut agar bisa ditumpuk dengan teks & foto dinamis di aplikasi web saya:
 
@@ -230,11 +230,7 @@ export default function AdminEInviteTemplates() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Sparkles className="w-6 h-6 text-indigo-600" />
-            <span>Template E-Invitation (Cloudflare R2)</span>
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="text-sm text-gray-500">
             Kelola katalog desain kartu E-Invitation yang disimpan di{' '}
             <code className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded font-mono text-xs">
               guestly-storage/E-Invitation/
@@ -658,7 +654,10 @@ export default function AdminEInviteTemplates() {
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={() => {
+                    setIsModalOpen(false);
+                    showCancelAlert('Perubahan template E-Invitation dibatalkan.');
+                  }}
                   className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
                 >
                   Batal

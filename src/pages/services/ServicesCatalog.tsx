@@ -22,7 +22,7 @@ export default function ServicesCatalog() {
         let filteredData = data;
         if (appUser?.role === 'client') {
            filteredData = data.filter(s => s.targetRole === 'client' || s.targetRole === 'all');
-        } else if (appUser?.role === 'partner') {
+        } else if (appUser?.role === 'partner' || appUser?.role === 'owner') {
            filteredData = data.filter(s => s.targetRole === 'partner' || s.targetRole === 'all');
         }
         
@@ -39,10 +39,6 @@ export default function ServicesCatalog() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Layanan Guestly</h1>
-      </div>
-      
       {loading ? (
         <div className="text-center py-12 text-gray-500">Memuat katalog...</div>
       ) : services.length === 0 ? (
@@ -93,10 +89,22 @@ export default function ServicesCatalog() {
                          Kuota {service.eventQuota} Acara
                        </li>
                      ) : null}
+                     {service.clientQuota ? (
+                       <li className="flex items-center gap-2">
+                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                         Kuota {service.clientQuota} Client
+                       </li>
+                     ) : null}
                      {service.guestQuota ? (
                        <li className="flex items-center gap-2">
                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                         Kuota {service.guestQuota} Tamu
+                         Kuota {service.guestQuota.toLocaleString('id-ID')} Tamu
+                       </li>
+                     ) : null}
+                     {service.waBlastQuota ? (
+                       <li className="flex items-center gap-2">
+                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                         Kuota {service.waBlastQuota.toLocaleString('id-ID')} WA Blast
                        </li>
                      ) : null}
                    </ul>

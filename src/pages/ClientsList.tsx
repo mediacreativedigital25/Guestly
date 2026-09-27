@@ -6,12 +6,14 @@ import { Client, User } from '../types';
 import { parseFirestoreDate, getUserBusinessId } from '../lib/utils';
 import { format } from 'date-fns';
 import { Plus, Trash2, Edit, Eye } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
-import { showAlert, showConfirm } from '../lib/alerts';
+import { Link, useNavigate, useLocation, useParams } from 'react-router-dom';
+import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 
 export default function ClientsList() {
   const { appUser } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { clientId: routeClientId } = useParams<{ clientId?: string }>();
   const [clients, setClients] = useState<Client[]>([]);
   const [partners, setPartners] = useState<{id: string, name: string, logoUrl?: string}[]>([]);
   const [loading, setLoading] = useState(true);
@@ -129,6 +131,36 @@ export default function ClientsList() {
 
     return () => {};
   }, [appUser]);
+
+  // Sync URL sub-routes (/clients/add, /clients/:clientId/edit, /clients/:clientId/view) with modal/form state
+  useEffect(() => {
+    const path = location.pathname;
+    if (path.endsWith('/clients/add')) {
+      setIsAddingClient(true);
+      setEditingClient(null);
+      setViewingClient(null);
+    } else if (routeClientId && path.endsWith('/edit')) {
+      const found = clients.find(c => c.id === routeClientId);
+      if (found) {
+        setEditingClient(found);
+        setEditClientName(found.name);
+        setEditClientEmail(found.contactEmail || '');
+        setIsAddingClient(false);
+        setViewingClient(null);
+      }
+    } else if (routeClientId && path.endsWith('/view')) {
+      const found = clients.find(c => c.id === routeClientId);
+      if (found) {
+        setViewingClient(found);
+        setIsAddingClient(false);
+        setEditingClient(null);
+      }
+    } else if (path === '/auth/login/clients') {
+      setIsAddingClient(false);
+      setEditingClient(null);
+      setViewingClient(null);
+    }
+  }, [location.pathname, routeClientId, clients]);
 
   
   const handleLoadMore = async () => {
@@ -270,6 +302,7 @@ export default function ClientsList() {
       setCreateAccount(false);
       setNewClientPassword('');
       setIsAddingClient(false);
+      navigate('/auth/login/clients', { replace: true });
       showAlert('Berhasil', 'Client berhasil ditambahkan!', 'success');
     } catch (error: any) {
       console.error(error);
@@ -290,6 +323,33 @@ export default function ClientsList() {
     setEditingClient(client);
     setEditClientName(client.name);
     setEditClientEmail(client.contactEmail || '');
+    if (client.id) {
+      navigate(`/auth/login/clients/${client.id}/edit`);
+    }
+  };
+
+  const closeEditModal = (showCancel = false) => {
+    setEditingClient(null);
+    if (location.pathname !== '/auth/login/clients') {
+      navigate('/auth/login/clients');
+    }
+    if (showCancel) {
+      showCancelAlert('Perubahan data client telah dibatalkan.');
+    }
+  };
+
+  const openViewModal = (client: Client) => {
+    setViewingClient(client);
+    if (client.id) {
+      navigate(`/auth/login/clients/${client.id}/view`);
+    }
+  };
+
+  const closeViewModal = () => {
+    setViewingClient(null);
+    if (location.pathname !== '/auth/login/clients') {
+      navigate('/auth/login/clients');
+    }
   };
 
   const handleUpdateClient = async (e: React.FormEvent) => {
@@ -317,6 +377,7 @@ export default function ClientsList() {
       ));
       
       setEditingClient(null);
+      navigate('/auth/login/clients', { replace: true });
       showAlert('Berhasil', 'Client berhasil diperbarui!', 'success');
     } catch (error: any) {
       console.error(error);
@@ -329,22 +390,28 @@ export default function ClientsList() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Clients</h1>
+      <div className="flex justify-end items-center">
         <button 
           onClick={() => {
+            if (isAddingClient) {
+              setIsAddingClient(false);
+              navigate('/auth/login/clients');
+              showCancelAlert('Penambahan client baru telah dibatalkan.');
+              return;
+            }
             const userCredit = appUser?.clientCredit !== undefined ? appUser.clientCredit : (appUser?.clientQuota || 0);
-            if (!isAddingClient && appUser?.role !== 'superadmin' && userCredit <= 0) {
+            if (appUser?.role !== 'superadmin' && userCredit <= 0) {
                showAlert('Akses Ditolak', 'Anda tidak memiliki kuota klien. Silakan beli layanan terlebih dahulu.', 'warning');
-               navigate('/auth/login/services/catalog');
+               navigate('/auth/login/clients');
                return;
             }
-            setIsAddingClient(!isAddingClient)
+            setIsAddingClient(true);
+            navigate('/auth/login/clients/add');
           }}
           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium"
         >
           <Plus className="w-4 h-4" />
-          {isAddingClient ? 'Cancel' : 'Add Client'}
+          {isAddingClient ? 'Batal' : 'Add Client'}
         </button>
       </div>
 
@@ -394,9 +461,23 @@ export default function ClientsList() {
             </div>
           )}
 
-          <button disabled={isSubmitting} type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium disabled:opacity-50 flex items-center justify-center min-w-[120px]">
-             {isSubmitting ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div> : 'Save Client'}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => {
+                setIsAddingClient(false);
+                navigate('/auth/login/clients');
+                showCancelAlert('Penambahan client baru telah dibatalkan.');
+              }}
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 font-medium"
+            >
+              Batal
+            </button>
+            <button disabled={isSubmitting} type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium disabled:opacity-50 flex items-center justify-center min-w-[120px]">
+               {isSubmitting ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div> : 'Save Client'}
+            </button>
+          </div>
         </form>
       )}
       
@@ -457,7 +538,7 @@ export default function ClientsList() {
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                        <div className="flex justify-end gap-2">
                          <button
-                           onClick={() => setViewingClient(client)}
+                           onClick={() => openViewModal(client)}
                            className="text-gray-500 hover:text-gray-700 bg-gray-50 hover:bg-gray-200 p-2 rounded-md transition-colors inline-block"
                            title="Detail Client"
                          >
@@ -503,7 +584,7 @@ export default function ClientsList() {
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full relative">
              <button
-                onClick={() => setViewingClient(null)}
+                onClick={closeViewModal}
                 className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 font-bold"
              >
                 ✕
@@ -538,7 +619,7 @@ export default function ClientsList() {
              <div className="mt-6 flex justify-end">
                 <button
                   type="button"
-                  onClick={() => setViewingClient(null)}
+                  onClick={closeViewModal}
                   className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
                 >
                   Tutup
@@ -553,7 +634,7 @@ export default function ClientsList() {
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full relative">
             <button
-               onClick={() => setEditingClient(null)}
+               onClick={closeEditModal}
                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 font-bold"
             >
                ✕
@@ -595,7 +676,7 @@ export default function ClientsList() {
               <div className="pt-4 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setEditingClient(null)}
+                  onClick={() => closeEditModal(true)}
                   className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
                 >
                   Batal

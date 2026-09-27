@@ -4,7 +4,7 @@ import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
 import { GuestlyService } from '../../types';
 import { Modal } from '../../components/Modal';
 import { Plus, Edit, Trash2 } from 'lucide-react';
-import { showAlert, showConfirm } from '../../lib/alerts';
+import { showAlert, showConfirm, showCancelAlert } from '../../lib/alerts';
 
 export default function AdminServices() {
   const [services, setServices] = useState<GuestlyService[]>([]);
@@ -148,8 +148,7 @@ export default function AdminServices() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Layanan Guestly</h1>
-          <p className="mt-1 text-sm text-gray-500">Kelola master paket dan fitur yang tersedia di Guestly</p>
+          <p className="text-sm text-gray-500">Kelola master paket dan fitur yang tersedia di Guestly</p>
         </div>
          <div className="flex flex-wrap items-center gap-3">
           <button 
@@ -504,7 +503,10 @@ export default function AdminServices() {
             <div className="flex items-center justify-end gap-3 pt-6 border-t border-gray-100 mt-8 !mb-2">
                <button 
                  type="button" 
-                 onClick={() => setIsCreating(false)} 
+                 onClick={() => {
+                   setIsCreating(false);
+                   showCancelAlert('Perubahan layanan telah dibatalkan.');
+                 }} 
                  disabled={isSaving}
                  className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-colors disabled:opacity-50"
                >
@@ -537,7 +539,10 @@ export default function AdminServices() {
           <div className="flex justify-end gap-3">
             <button 
               type="button" 
-              onClick={() => setDeletingId(null)} 
+              onClick={() => {
+                setDeletingId(null);
+                showCancelAlert('Penghapusan layanan telah dibatalkan.');
+              }} 
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
             >
               Batal

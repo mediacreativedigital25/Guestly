@@ -113,10 +113,6 @@ export default function Approvals() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h1 className="text-2xl font-bold text-gray-900">Persetujuan Edit Tamu</h1>
-      </div>
-
       <div className="bg-white shadow rounded-lg overflow-hidden border border-gray-200">
         <div className="px-4 py-5 border-b border-gray-200 sm:px-6">
           <h3 className="text-lg leading-6 font-medium text-gray-900">Daftar Permintaan ({requests.length})</h3>

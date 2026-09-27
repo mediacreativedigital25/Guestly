@@ -1,4 +1,4 @@
-import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { useParams, Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { QrCode, Printer, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code, MessageCircle, RefreshCcw, Users, Loader2, Gift, ArrowUpDown, AlertCircle, ArrowLeft, Image as ImageIcon } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'react-qr-code';
@@ -6,7 +6,7 @@ import { collection, query, getDocs, addDoc, serverTimestamp, doc, getDoc, delet
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { supabaseDb } from '../lib/supabaseDb';
 import { Guest, EventRecord, WATemplate, EInviteTemplate } from '../types';
-import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel, exportCardToPng } from '../lib/utils';
+import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel, exportCardToPng, resolveMediaUrl } from '../lib/utils';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -16,13 +16,15 @@ import { MediaUploader } from '../components/media/MediaUploader';
 import { EInvitationCard } from '../components/EInvitationCard';
 import { eInviteTemplateService, DEFAULT_EINVITE_TEMPLATES } from '../services/eInviteTemplateService';
 import { useAuth } from '../AuthContext';
-import { showAlert, showConfirm } from '../lib/alerts';
+import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 import { useSettings } from '../SettingsContext';
 import SouvenirManagement from '../components/SouvenirManagement';
 import { souvenirStorage } from '../services/souvenirStorage';
 
 export default function EventDetails() {
-  const { eventId } = useParams();
+  const { eventId, guestId: routeGuestId } = useParams<{ eventId: string; guestId?: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const { appUser } = useAuth();
   const currentOperator = getOperatorLabel(appUser);
@@ -125,9 +127,15 @@ export default function EventDetails() {
       const cleanedThumb = thumbnailInput.trim();
       await updateDoc(doc(db, 'events', eventId), {
         thumbnailUrl: cleanedThumb ? cleanedThumb : deleteField(),
+        eInvitePhotoUrl: cleanedThumb ? cleanedThumb : deleteField(),
+        coverImage: cleanedThumb ? cleanedThumb : deleteField(),
         updatedAt: serverTimestamp(),
       });
-      setEvent({ ...event, thumbnailUrl: cleanedThumb || undefined });
+      setEvent({
+        ...event,
+        thumbnailUrl: cleanedThumb || undefined,
+        eInvitePhotoUrl: cleanedThumb || undefined,
+      });
       setIsThumbnailModalOpen(false);
       showAlert(
         'Berhasil',
@@ -308,10 +316,48 @@ export default function EventDetails() {
     };
   }, [eventId]);
 
+  // Sync URL sub-routes (/events/:eventId/guests/add, /events/:eventId/guests/:guestId/edit)
+  useEffect(() => {
+    const path = location.pathname;
+    if (path.endsWith('/guests/add')) {
+      setIsAddingGuest(true);
+    } else if (routeGuestId && path.endsWith('/edit')) {
+      if (guests.length > 0 && editingGuestId !== routeGuestId) {
+        const target = guests.find(g => g.id === routeGuestId);
+        if (target) {
+          setEditingGuestId(target.id!);
+          setEditGuestName(target.name || '');
+          setEditGuestAddress(target.address || '');
+          setEditGuestPhone(target.phone || '');
+          setEditGuestCategory(target.category || '');
+          setEditGuestInvitationType(target.invitationType || '');
+          setEditGuestSession(target.session || '');
+          setEditGuestPax(String(target.pax !== undefined && target.pax > 0 ? Number(target.pax) : 1));
+          setEditGuestRsvpStatus(target.rsvpStatus || 'pending');
+          setIsEditingGuest(true);
+        }
+      }
+    } else if (path === `/auth/login/events/${eventId}`) {
+      if (isEditingGuest) {
+        setIsEditingGuest(false);
+        setEditingGuestId(null);
+      }
+      if (isAddingGuest) {
+        setIsAddingGuest(false);
+      }
+    }
+  }, [location.pathname, routeGuestId, guests.length]);
+
   const handleAddGuest = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (appUser?.role !== 'superadmin' && appUser?.guestQuota !== undefined && guests.length >= appUser.guestQuota) {
+    if (
+      appUser &&
+      !['superadmin', 'owner', 'partner', 'admin'].includes(appUser.role) &&
+      appUser.guestQuota !== undefined &&
+      appUser.guestQuota > 0 &&
+      guests.length >= appUser.guestQuota
+    ) {
       showAlert('Kuota Habis', `Anda telah mencapai batas maksimal kuota tamu (${appUser.guestQuota} tamu). Silakan beli atau upgrade layanan Anda.`, 'warning');
       return;
     }
@@ -384,6 +430,9 @@ export default function EventDetails() {
       setNewGuestSession('');
       setNewGuestPax('1');
       setIsAddingGuest(false);
+      if (location.pathname.endsWith('/guests/add')) {
+        navigate(`/auth/login/events/${eventId}`);
+      }
     } catch (error) {
       showAlert("Gagal", "Failed to add guest. Check permissions.", "error");
       handleFirestoreError(error, OperationType.CREATE, `events/${eventId}/guests`);
@@ -1224,6 +1273,9 @@ export default function EventDetails() {
     setEditGuestPax(String(guest.pax !== undefined && guest.pax > 0 ? Number(guest.pax) : 1));
     setEditGuestRsvpStatus(guest.rsvpStatus || 'pending');
     setIsEditingGuest(true);
+    if (eventId && guest.id && !location.pathname.endsWith(`/guests/${guest.id}/edit`)) {
+      navigate(`/auth/login/events/${eventId}/guests/${guest.id}/edit`);
+    }
   };
 
   const handleSaveEditGuest = async (e: React.FormEvent) => {
@@ -1312,6 +1364,9 @@ export default function EventDetails() {
       }
       setIsEditingGuest(false);
       setEditingGuestId(null);
+      if (location.pathname.includes('/guests/')) {
+        navigate(`/auth/login/events/${eventId}`);
+      }
     } catch (error) {
       console.error(error);
       showAlert('Error', 'Gagal mengedit tamu.', 'error');
@@ -1501,7 +1556,7 @@ export default function EventDetails() {
                   {event.thumbnailUrl ? (
                     <div className="flex items-center gap-4 p-3 rounded-lg border border-slate-200 bg-slate-50/70 max-w-xl">
                       <img
-                        src={event.thumbnailUrl}
+                        src={resolveMediaUrl(event.thumbnailUrl)}
                         alt="Thumbnail Acara / Foto Mempelai"
                         className="w-16 h-16 rounded-lg object-cover border border-slate-200 bg-white shrink-0 shadow-xs"
                       />
@@ -1534,106 +1589,6 @@ export default function EventDetails() {
                     </div>
                   )}
                </div>
-               {/* E-Invitation & Digital Pass Configuration */}
-               {!isStaff && (
-                 <div className="md:col-span-2 pt-3 border-t border-slate-100">
-                   <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                     <div>
-                       <h3 className="text-sm font-semibold text-slate-800">Desain E-Invitation & Kartu Akses Tamu</h3>
-                       <p className="text-xs text-slate-500 mt-0.5">
-                         Mengatur tampilan link undangan personal tamu (menampilkan Nama Acara, Foto Mempelai, Kepada, & Barcode Check-In).
-                       </p>
-                     </div>
-                     {guests.length > 0 && (
-                       <Link
-                         to={`/rsvp/${eventId}/${guests[0].ticketCode}`}
-                         target="_blank"
-                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors"
-                       >
-                         <QrCode className="w-3.5 h-3.5" />
-                         <span>Pratinjau E-Invitation ({guests[0].name})</span>
-                       </Link>
-                     )}
-                   </div>
-
-                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 bg-slate-50/70 border border-slate-200 rounded-xl p-4">
-                     <div>
-                       <div className="flex items-center justify-between mb-2">
-                         <label className="block text-xs font-semibold text-slate-700">
-                           Template Kartu E-Invitation (Cloudflare R2)
-                         </label>
-                         {appUser?.role === 'superadmin' && (
-                           <Link
-                             to="/auth/login/admin/e-invitation-templates"
-                             className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 underline"
-                           >
-                             + Kelola Template
-                           </Link>
-                         )}
-                       </div>
-                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                         {eInviteTemplates.map((tpl) => {
-                           const activeTplId =
-                             event.eInviteTemplateId ||
-                             (eInviteTemplates.find((t) => t.isDefault) || eInviteTemplates[0])?.id;
-                           const active = activeTplId === tpl.id;
-                           return (
-                             <button
-                               key={tpl.id}
-                               type="button"
-                               onClick={() =>
-                                 handleUpdateEInviteConfig({
-                                   eInviteTemplateId: tpl.id,
-                                   eInviteTemplateUrl: tpl.imageUrl || '',
-                                 })
-                               }
-                               className={`flex items-center justify-between gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer text-left ${
-                                 active
-                                   ? 'bg-white border-indigo-600 text-indigo-700 ring-2 ring-indigo-500/20 shadow-2xs'
-                                   : 'bg-white/70 border-slate-200 text-slate-600 hover:bg-white'
-                               }`}
-                             >
-                               <span className="truncate">{tpl.name}</span>
-                               <span
-                                 className="w-2.5 h-2.5 rounded-full shrink-0 border border-slate-300"
-                                 style={{ backgroundColor: tpl.footerColor || '#C27D7A' }}
-                               />
-                             </button>
-                           );
-                         })}
-                       </div>
-                     </div>
-
-                     <div>
-                       <label className="block text-xs font-semibold text-slate-700 mb-2">
-                         Mode Tampilan Halaman Tamu
-                       </label>
-                       <div className="grid grid-cols-2 gap-2">
-                         {[
-                           { id: 'full', label: 'Lengkap (Undangan + QR + RSVP)' },
-                           { id: 'compact', label: 'Ringkas (Fokus Kartu QR Saja)' },
-                         ].map((m) => {
-                           const active = (event.eInviteMode || 'full') === m.id;
-                           return (
-                             <button
-                               key={m.id}
-                               type="button"
-                               onClick={() => handleUpdateEInviteConfig({ eInviteMode: m.id as 'full' | 'compact' })}
-                               className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer text-center ${
-                                 active
-                                   ? 'bg-white border-indigo-600 text-indigo-700 ring-2 ring-indigo-500/20 shadow-2xs'
-                                   : 'bg-white/70 border-slate-200 text-slate-600 hover:bg-white'
-                               }`}
-                             >
-                               {m.label}
-                             </button>
-                           );
-                         })}
-                       </div>
-                     </div>
-                   </div>
-                 </div>
-               )}
                {event.frameOverlayUrl && (
                  <div className="md:col-span-2">
                     <h3 className="text-sm font-medium text-gray-500 mb-2">Frame / Overlay Sapa Tamu</h3>
@@ -1993,7 +1948,20 @@ export default function EventDetails() {
                       </button>
 
                       <button
-                        onClick={() => setIsAddingGuest(!isAddingGuest)}
+                        onClick={() => {
+                          if (isAddingGuest) {
+                            setIsAddingGuest(false);
+                            if (location.pathname.endsWith('/guests/add')) {
+                              navigate(`/auth/login/events/${eventId}`);
+                            }
+                            showCancelAlert('Penambahan tamu baru telah dibatalkan.');
+                          } else {
+                            setIsAddingGuest(true);
+                            if (eventId && !location.pathname.endsWith('/guests/add')) {
+                              navigate(`/auth/login/events/${eventId}/guests/add`);
+                            }
+                          }
+                        }}
                         className={`h-8.5 px-3 text-xs font-medium flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap ${
                           isAddingGuest
                             ? 'text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300'
@@ -2256,7 +2224,20 @@ export default function EventDetails() {
                       </div>
                     </div>
                  </div>
-                 <div className="flex justify-end">
+                 <div className="flex justify-end gap-2">
+                   <button
+                     type="button"
+                     onClick={() => {
+                       setIsAddingGuest(false);
+                       if (location.pathname.endsWith('/guests/add')) {
+                         navigate(`/auth/login/events/${eventId}`);
+                       }
+                       showCancelAlert('Penambahan tamu baru telah dibatalkan.');
+                     }}
+                     className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 font-medium text-sm transition-colors"
+                   >
+                     Batal
+                   </button>
                    <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium text-sm transition-colors">
                      Simpan Tamu
                    </button>
@@ -2625,7 +2606,10 @@ export default function EventDetails() {
           <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
             <button 
               type="button" 
-              onClick={() => setIsBlastModalOpen(false)} 
+              onClick={() => {
+                setIsBlastModalOpen(false);
+                showCancelAlert('Pengiriman WA Blast telah dibatalkan.');
+              }} 
               disabled={isBlasting}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
             >
@@ -2643,7 +2627,17 @@ export default function EventDetails() {
         </div>
       </Modal>
 
-      <Modal isOpen={isEditingGuest} onClose={() => { setIsEditingGuest(false); setEditingGuestId(null); }} title="Edit Tamu">
+      <Modal
+        isOpen={isEditingGuest}
+        onClose={() => {
+          setIsEditingGuest(false);
+          setEditingGuestId(null);
+          if (location.pathname.includes('/guests/')) {
+            navigate(`/auth/login/events/${eventId}`);
+          }
+        }}
+        title="Edit Tamu"
+      >
         <form onSubmit={handleSaveEditGuest} className="p-4 bg-white">
           <div className="grid grid-cols-1 gap-4 mb-4">
              <div>
@@ -2752,7 +2746,14 @@ export default function EventDetails() {
           <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
             <button 
               type="button" 
-              onClick={() => { setIsEditingGuest(false); setEditingGuestId(null); }} 
+              onClick={() => {
+                setIsEditingGuest(false);
+                setEditingGuestId(null);
+                if (location.pathname.includes('/guests/')) {
+                  navigate(`/auth/login/events/${eventId}`);
+                }
+                showCancelAlert('Perubahan data tamu telah dibatalkan.');
+              }} 
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
             >
               Batal
@@ -2798,7 +2799,11 @@ export default function EventDetails() {
           <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-100">
             <button 
               type="button" 
-              onClick={() => { setIsEditingWishes(false); setEditingWishesGuestId(null); }} 
+              onClick={() => {
+                setIsEditingWishes(false);
+                setEditingWishesGuestId(null);
+                showCancelAlert('Perubahan ucapan telah dibatalkan.');
+              }} 
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
             >
               Batal
@@ -2820,7 +2825,10 @@ export default function EventDetails() {
         <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-100">
           <button 
             type="button" 
-            onClick={() => setGuestToDelete(null)} 
+            onClick={() => {
+              setGuestToDelete(null);
+              showCancelAlert('Penghapusan tamu telah dibatalkan.');
+            }} 
             className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 bg-transparent transition-colors"
           >
             Batal
@@ -3210,7 +3218,10 @@ export default function EventDetails() {
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
-                    onClick={() => setIsPrintModalOpen(false)}
+                    onClick={() => {
+                      setIsPrintModalOpen(false);
+                      showCancelAlert('Pencetakan QR telah dibatalkan.');
+                    }}
                     className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
                   >
                     Batal
@@ -3277,7 +3288,7 @@ export default function EventDetails() {
           {thumbnailInput && (
             <div className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200">
               <img
-                src={thumbnailInput}
+                src={resolveMediaUrl(thumbnailInput)}
                 alt="Pratinjau Thumbnail"
                 className="w-16 h-16 rounded-lg object-cover border border-slate-200 bg-white shrink-0"
                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
@@ -3292,7 +3303,10 @@ export default function EventDetails() {
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
             <button
               type="button"
-              onClick={() => setIsThumbnailModalOpen(false)}
+              onClick={() => {
+                setIsThumbnailModalOpen(false);
+                showCancelAlert('Pengaturan thumbnail telah dibatalkan.');
+              }}
               disabled={isSavingThumbnail}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
             >

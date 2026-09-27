@@ -63,8 +63,19 @@ export interface Client {
   updatedAt: any;
 }
 
+export interface SeatingTable {
+  id: string;
+  name: string;
+  zone: 'VVIP' | 'VIP' | 'Keluarga' | 'Reguler';
+  capacity: number;
+  shape?: 'round' | 'long';
+  locationNote?: string;
+}
+
 export interface EventRecord {
   souvenirTypes?: string[];
+  seatingTables?: SeatingTable[];
+  enableSeatingManagement?: boolean;
   invitationUrl?: string;
   id?: string;
   partnerId: string;
@@ -109,6 +120,8 @@ export interface EventRecord {
   eInvitePhotoUrl?: string;
   eInviteVenueName?: string;
   eInviteVenueAddress?: string;
+  eInviteMapsUrl?: string;
+  mapsUrl?: string;
   eInviteGreetingText?: string;
   eInviteFooterText?: string;
   createdAt: any;

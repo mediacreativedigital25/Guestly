@@ -1,12 +1,49 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { useSettings } from './SettingsContext';
-import { LayoutDashboard, Users, CalendarDays, Settings, LogOut, FileText, ChevronDown, ChevronRight, ChevronLeft, UserCog, Menu, X, Shield, User, Briefcase, CreditCard, ShoppingBag, Package, Receipt, PanelLeftClose, PanelLeftOpen, Image as ImageIcon, Building2, Sparkles } from 'lucide-react';
+import {
+  LayoutDashboard,
+  Users,
+  CalendarDays,
+  Settings,
+  LogOut,
+  FileText,
+  ChevronDown,
+  ChevronRight,
+  UserCog,
+  Menu,
+  X,
+  Shield,
+  User,
+  Briefcase,
+  CreditCard,
+  ShoppingBag,
+  Package,
+  Receipt,
+  Image as ImageIcon,
+  Building2,
+  Sparkles,
+  Bell,
+  Search,
+  Clock,
+  CheckCircle2,
+} from 'lucide-react';
 import { cn, getRoleLabel, shouldHideServiceInfo } from './lib/utils';
+import { showConfirm } from './lib/alerts';
+import RouteBreadcrumbs from './components/RouteBreadcrumbs';
 import { auth, db } from './lib/firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc, getDocs, collection, query, where, setDoc, serverTimestamp } from 'firebase/firestore';
+
+interface TopbarNotification {
+  id: string;
+  title: string;
+  description: string;
+  timeLabel: string;
+  to: string;
+  type: 'approval' | 'event' | 'system';
+}
 
 export default function AppLayout() {
   const { currentUser, appUser, loading, logout } = useAuth();
@@ -14,12 +51,176 @@ export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [isPartnerMenuOpen, setIsPartnerMenuOpen] = useState(false);
   const [isAdminPanelMenuOpen, setIsAdminPanelMenuOpen] = useState(false);
   const [isServiceInfoMenuOpen, setIsServiceInfoMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [resolvedBusinessName, setResolvedBusinessName] = useState<string>('');
+
+  // Topbar states
+  const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
+  const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
+  const [notifications, setNotifications] = useState<TopbarNotification[]>([]);
+  const [readNotifIds, setReadNotifIds] = useState<string[]>([]);
+  const [globalSearch, setGlobalSearch] = useState('');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+
+  const profileDropdownRef = useRef<HTMLDivElement>(null);
+  const notifDropdownRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target as Node)) {
+        setIsProfileDropdownOpen(false);
+      }
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
+        setIsNotifDropdownOpen(false);
+      }
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setIsSearchOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Keyboard shortcut Ctrl+K / Cmd+K for search bar
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        setIsSearchOpen(true);
+        setIsNotifDropdownOpen(false);
+        setIsProfileDropdownOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Auto-sync active sidebar dropdown with current route (saling bergantian aktif)
+  useEffect(() => {
+    const p = location.pathname;
+    if (p.startsWith('/auth/login/services') || p.startsWith('/auth/login/invoices')) {
+      setIsServiceInfoMenuOpen(true);
+      setIsUserMenuOpen(false);
+      setIsAdminPanelMenuOpen(false);
+    } else if (
+      p.startsWith('/auth/login/users') ||
+      p.startsWith('/auth/login/businesses') ||
+      p.startsWith('/auth/login/roles')
+    ) {
+      setIsUserMenuOpen(true);
+      setIsServiceInfoMenuOpen(false);
+      setIsAdminPanelMenuOpen(false);
+    } else if (p.startsWith('/auth/login/admin')) {
+      setIsAdminPanelMenuOpen(true);
+      setIsServiceInfoMenuOpen(false);
+      setIsUserMenuOpen(false);
+    } else {
+      setIsServiceInfoMenuOpen(false);
+      setIsUserMenuOpen(false);
+      setIsAdminPanelMenuOpen(false);
+    }
+  }, [location.pathname]);
+
+  // Load notifications (pending approvals & upcoming events)
+  useEffect(() => {
+    if (!appUser) {
+      setNotifications([]);
+      return;
+    }
+    let isMounted = true;
+    const loadNotifications = async () => {
+      try {
+        const items: TopbarNotification[] = [];
+
+        // 1. Check pending edit_requests / approvals
+        const reqSnap = await getDocs(query(collection(db, 'edit_requests'), where('status', '==', 'pending')));
+        const pendingReqs = reqSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+        const relevantReqs = pendingReqs.filter(r => {
+          if (appUser.role === 'superadmin') return true;
+          if (appUser.role === 'client') return r.requestedBy === appUser.id;
+          return true;
+        });
+
+        if (relevantReqs.length > 0) {
+          items.push({
+            id: `approvals-${relevantReqs.length}`,
+            title: `${relevantReqs.length} Pengajuan Approval Menunggu`,
+            description:
+              appUser.role === 'client'
+                ? 'Pengajuan perubahan data tamu Anda sedang menunggu persetujuan.'
+                : 'Terdapat pengajuan data tamu yang memerlukan persetujuan Anda.',
+            timeLabel: 'Menunggu tindakan',
+            to: '/auth/login/approvals',
+            type: 'approval',
+          });
+        }
+
+        // 2. Check upcoming published events within 7 days
+        const evSnap = await getDocs(collection(db, 'events'));
+        const now = new Date();
+        evSnap.docs.forEach(docSnap => {
+          const ev = docSnap.data() as any;
+          if (ev.status !== 'published' || !ev.date) return;
+          if (appUser.role === 'client' && ev.clientId !== (appUser.clientId || appUser.id)) return;
+          if (appUser.role === 'staff' && Array.isArray(appUser.assignedEvents) && !appUser.assignedEvents.includes(docSnap.id)) return;
+
+          const evDate = new Date(ev.date);
+          if (isNaN(evDate.getTime())) return;
+          const diffDays = Math.ceil((evDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          if (diffDays >= 0 && diffDays <= 7) {
+            items.push({
+              id: `event-${docSnap.id}`,
+              title: `Acara Terdekat: ${ev.title || 'Acara'}`,
+              description: diffDays === 0 ? 'Berlangsung hari ini!' : `Berlangsung dalam ${diffDays} hari ke depan.`,
+              timeLabel: ev.date,
+              to: `/auth/login/events/${docSnap.id}`,
+              type: 'event',
+            });
+          }
+        });
+
+        if (items.length === 0) {
+          items.push({
+            id: 'welcome-notif',
+            title: `Selamat datang, ${appUser.name || 'Pengguna'}!`,
+            description: `Anda login sebagai ${getRoleLabel(appUser.role, appUser.staffType)}. Semua sistem berjalan normal.`,
+            timeLabel: 'Hari ini',
+            to: '/auth/login',
+            type: 'system',
+          });
+        }
+
+        if (isMounted) {
+          setNotifications(items.slice(0, 6));
+        }
+      } catch (_e) {
+        if (isMounted) {
+          setNotifications([
+            {
+              id: 'welcome-notif',
+              title: `Halo, ${appUser.name || 'Pengguna'}`,
+              description: `Anda login sebagai ${getRoleLabel(appUser.role, appUser.staffType)}.`,
+              timeLabel: 'Aktif',
+              to: '/auth/login',
+              type: 'system',
+            },
+          ]);
+        }
+      }
+    };
+
+    loadNotifications();
+    return () => {
+      isMounted = false;
+    };
+  }, [appUser]);
 
   useEffect(() => {
     let isMounted = true;
@@ -44,7 +245,6 @@ export default function AppLayout() {
       try {
         let targetPartnerId = appUser.partnerId;
 
-        // If client or staff doesn't have a specific partnerId yet, check clients & events table
         if (!targetPartnerId || targetPartnerId === 'default-partner') {
           const clientLookupId = appUser.clientId || appUser.id;
           if (clientLookupId) {
@@ -61,7 +261,6 @@ export default function AppLayout() {
           }
         }
 
-        // Lookup Owner / Partner user document by targetPartnerId
         if (targetPartnerId && targetPartnerId !== 'default-partner') {
           const ownerSnap = await getDoc(doc(db, 'users', targetPartnerId));
           if (ownerSnap.exists()) {
@@ -81,7 +280,6 @@ export default function AppLayout() {
           }
         }
 
-        // Check if there is a primary Owner account in the system or createdByName
         if (appUser.createdByName && isMounted) {
           setResolvedBusinessName(appUser.createdByName.replace(/\s*\(.*\)$/, ''));
           return;
@@ -108,6 +306,7 @@ export default function AppLayout() {
       isMounted = false;
     };
   }, [appUser]);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -123,9 +322,15 @@ export default function AppLayout() {
     }
   }, [loading, currentUser, appUser, location.pathname, navigate]);
 
-  const handleLogout = () => {
+  const handleLogoutClick = async () => {
+    setIsProfileDropdownOpen(false);
+    const confirmed = await showConfirm(
+      'Yakin ingin keluar?',
+      'Sesi Anda akan berakhir dan Anda harus login kembali untuk mengakses dashboard.'
+    );
+    if (!confirmed) return;
+
     setIsUserMenuOpen(false);
-    setIsPartnerMenuOpen(false);
     setIsAdminPanelMenuOpen(false);
     setIsServiceInfoMenuOpen(false);
     setIsMobileMenuOpen(false);
@@ -154,8 +359,7 @@ export default function AppLayout() {
           updatedAt: serverTimestamp(),
         };
         await setDoc(doc(db, 'users', userCredential.user.uid), newUser);
-        
-        // Send WhatsApp Notification for new registration
+
         if (phone) {
           import('./lib/fonnte').then(({ sendFonnteMessage }) => {
             const loginUrl = `${window.location.origin}/auth/login`;
@@ -203,12 +407,11 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
         <div className="flex flex-col items-center justify-center space-y-4">
-          <img 
-            src={settings?.faviconUrl || settings?.logoUrl || "/favicon.ico"} 
-            alt="Guestly Logo" 
+          <img
+            src={settings?.faviconUrl || settings?.logoUrl || '/favicon.ico'}
+            alt="Guestly Logo"
             className="w-16 h-16 object-contain animate-pulse"
             onError={(e) => {
-              // Hide image if favicon doesn't exist to prevent broken image icon
               e.currentTarget.style.display = 'none';
             }}
           />
@@ -225,9 +428,9 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
         {/* Left Column - Image */}
         <div className="hidden lg:flex lg:w-1/2 relative bg-gray-900">
           <div className="absolute inset-0">
-            <img 
-              src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?q=80&w=2070&auto=format&fit=crop" 
-              alt="Wedding Event" 
+            <img
+              src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?q=80&w=2070&auto=format&fit=crop"
+              alt="Wedding Event"
               className="w-full h-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-gray-900/90 via-gray-900/40 to-transparent"></div>
@@ -261,18 +464,18 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                 <h1 className="text-3xl font-bold tracking-tight text-indigo-600">Guestly</h1>
               )}
             </div>
-            
+
             <div className="text-center">
               <h2 className="text-2xl font-bold tracking-tight text-gray-900">
                 {isRegistering ? 'Buat Akun Baru' : 'Selamat Datang'}
               </h2>
               <p className="mt-2 text-sm text-gray-500">
-                {isRegistering 
-                  ? 'Daftar untuk mulai mengelola acara dan tamu Anda' 
+                {isRegistering
+                  ? 'Daftar untuk mulai mengelola acara dan tamu Anda'
                   : 'Masuk ke akun Anda untuk mengelola acara dan tamu'}
               </p>
             </div>
-            
+
             <form className="space-y-6" onSubmit={handleEmailAuth}>
               {loginError && (
                 <div className="bg-red-50 border border-red-100 text-red-600 p-3 rounded-lg text-sm flex items-center">
@@ -335,7 +538,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                 disabled={isLoggingIn}
                 className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition-colors"
               >
-                {isLoggingIn ? 'Memproses...' : (isRegistering ? 'Daftar' : 'Masuk')}
+                {isLoggingIn ? 'Memproses...' : isRegistering ? 'Daftar' : 'Masuk'}
               </button>
             </form>
 
@@ -364,417 +567,883 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
     { name: 'White Label', path: '/auth/login/settings', icon: Settings, role: ['superadmin', 'owner', 'partner'] },
   ];
 
-  return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
-      
-      {/* Mobile Sidebar Overlay */}
-      {isMobileMenuOpen && (
-        <div 
-          className="fixed inset-0 z-40 bg-gray-900/50 backdrop-blur-sm md:hidden"
-          onClick={() => setIsMobileMenuOpen(false)}
-        />
-      )}
+  const unreadCount = notifications.filter(n => !readNotifIds.includes(n.id)).length;
 
-      {/* Sidebar */}
-      <aside 
-        className={cn(
-          "fixed inset-y-0 left-0 z-50 transform bg-white flex flex-col border-r border-gray-200 transition-all duration-300 ease-in-out md:relative md:translate-x-0 md:flex-shrink-0",
-          isSidebarCollapsed ? "md:w-20" : "md:w-64",
-          isMobileMenuOpen ? "translate-x-0 w-64" : "-translate-x-full md:translate-x-0"
-        )}
-      >
-        <div className={cn("flex h-16 items-center border-b border-gray-200 md:border-b-0", isSidebarCollapsed ? "justify-center px-0" : "justify-between px-6")}>
-          {!isSidebarCollapsed && (
-            <div className="font-bold text-xl tracking-tight text-indigo-600 truncate">
-              {settings?.logoUrl ? (
-                <img src={settings.logoUrl} alt="Logo" className="h-auto max-h-12 w-auto max-w-[140px] object-contain" />
+  const quickNavigationLinks = [
+    { label: 'Dashboard', path: '/auth/login', keywords: 'dashboard beranda statistik ringkasan' },
+    ...(['superadmin', 'owner', 'partner'].includes(appUser.role)
+      ? [
+          { label: 'Clients (Daftar Klien)', path: '/auth/login/clients', keywords: 'client klien mempelai tambah client' },
+          { label: 'Tambah Client Baru', path: '/auth/login/clients/add', keywords: 'add client tambah klien baru' },
+        ]
+      : []),
+    { label: 'Events (Daftar Acara)', path: '/auth/login/events', keywords: 'events acara pernikahan tamu undangan' },
+    { label: 'Approvals (Persetujuan Tamu)', path: '/auth/login/approvals', keywords: 'approvals persetujuan edit tamu' },
+    { label: 'Profil Saya', path: '/auth/login/profile', keywords: 'profil saya akun password ubah' },
+    ...(!isStaff ? [{ label: 'Changelog', path: '/auth/login/changelog', keywords: 'changelog update versi baru' }] : []),
+  ].filter(item => {
+    if (!globalSearch.trim()) return false;
+    const q = globalSearch.toLowerCase();
+    return item.label.toLowerCase().includes(q) || item.keywords.includes(q);
+  });
+
+  return (
+    <div className="flex flex-col h-screen overflow-hidden bg-gray-50">
+      {/* =================================================================== */}
+      {/* STICKY TOPBAR (Sesuai referensi gambar dashboard.png)               */}
+      {/* =================================================================== */}
+      <header className="sticky top-0 z-30 h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 sm:px-6 shrink-0">
+        {/* Left: Brand Logo + Sidebar Toggle + Search Bar */}
+        <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
+          {/* Brand Logo (menyesuaikan otomatis ke Favicon saat sidebar diperkecil) */}
+          <div
+            className={cn(
+              "flex items-center shrink-0 transition-all duration-300",
+              isSidebarCollapsed ? "md:w-12 md:justify-center" : "md:w-56"
+            )}
+          >
+            <Link
+              to="/auth/login"
+              className="flex items-center gap-2 font-bold text-xl tracking-tight text-indigo-600"
+            >
+              {isSidebarCollapsed ? (
+                <>
+                  {/* Tampilan Desktop saat Sidebar Diperkecil: Gunakan Favicon */}
+                  <span className="hidden md:flex items-center justify-center">
+                    {settings?.faviconUrl || settings?.logoUrl ? (
+                      <img
+                        src={settings?.faviconUrl || '/favicon.ico'}
+                        alt="Favicon"
+                        className="w-9 h-9 object-contain"
+                        onError={(e) => {
+                          if (settings?.logoUrl && e.currentTarget.src !== settings.logoUrl) {
+                            e.currentTarget.src = settings.logoUrl;
+                          }
+                        }}
+                      />
+                    ) : (
+                      <span className="w-9 h-9 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg">
+                        G
+                      </span>
+                    )}
+                  </span>
+                  {/* Tampilan Mobile tetap logo penuh */}
+                  <span className="flex md:hidden items-center">
+                    {settings?.logoUrl ? (
+                      <img
+                        src={settings.logoUrl}
+                        alt="Logo"
+                        className="h-auto max-h-10 w-auto max-w-[140px] object-contain"
+                      />
+                    ) : (
+                      <span>Guestly</span>
+                    )}
+                  </span>
+                </>
+              ) : settings?.logoUrl ? (
+                <img
+                  src={settings.logoUrl}
+                  alt="Logo"
+                  className="h-auto max-h-10 w-auto max-w-[150px] object-contain"
+                />
               ) : (
-                "Guestly"
+                <span>Guestly</span>
+              )}
+            </Link>
+          </div>
+
+          {/* Hamburger Menu Toggle (Desktop Collapse / Mobile Drawer) */}
+          <button
+            type="button"
+            onClick={() => {
+              if (window.innerWidth < 768) {
+                setIsMobileMenuOpen(!isMobileMenuOpen);
+              } else {
+                setIsSidebarCollapsed(!isSidebarCollapsed);
+              }
+            }}
+            className="p-2 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors cursor-pointer shrink-0"
+            title="Toggle Menu Navigasi"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+
+          {/* Search Bar */}
+          <div ref={searchContainerRef} className="relative hidden sm:block flex-1 max-w-md">
+            <div className="relative flex items-center">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3.5 pointer-events-none" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={globalSearch}
+                onFocus={() => {
+                  setIsSearchOpen(true);
+                  setIsNotifDropdownOpen(false);
+                  setIsProfileDropdownOpen(false);
+                }}
+                onChange={(e) => {
+                  setGlobalSearch(e.target.value);
+                  setIsSearchOpen(true);
+                  setIsNotifDropdownOpen(false);
+                  setIsProfileDropdownOpen(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && quickNavigationLinks.length > 0) {
+                    navigate(quickNavigationLinks[0].path);
+                    setIsSearchOpen(false);
+                    setGlobalSearch('');
+                  }
+                }}
+                placeholder="Cari tamu, event, atau informasi..."
+                className="w-full pl-10 pr-16 py-2 text-sm bg-gray-50/90 border border-gray-200 rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:bg-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/15 transition-all"
+              />
+              <div className="absolute right-2.5 flex items-center gap-1 pointer-events-none">
+                <kbd className="px-1.5 py-0.5 text-[10px] font-semibold text-gray-500 bg-white border border-gray-200 rounded shadow-2xs">
+                  Ctrl
+                </kbd>
+                <kbd className="px-1.5 py-0.5 text-[10px] font-semibold text-gray-500 bg-white border border-gray-200 rounded shadow-2xs">
+                  K
+                </kbd>
+              </div>
+            </div>
+
+            {/* Quick Search Suggestions Popup (Smooth Transition) */}
+            <div
+              className={cn(
+                "absolute left-0 right-0 mt-1.5 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 origin-top transition-all duration-200 ease-out",
+                isSearchOpen && globalSearch.trim() !== ''
+                  ? "opacity-100 scale-100 translate-y-0 pointer-events-auto visible"
+                  : "opacity-0 scale-95 -translate-y-1.5 pointer-events-none invisible"
+              )}
+            >
+              {quickNavigationLinks.length > 0 ? (
+                quickNavigationLinks.map((item) => (
+                  <button
+                    key={item.path}
+                    type="button"
+                    onClick={() => {
+                      navigate(item.path);
+                      setIsSearchOpen(false);
+                      setGlobalSearch('');
+                    }}
+                    className="w-full flex items-center justify-between px-4 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors text-left"
+                  >
+                    <span className="font-medium">{item.label}</span>
+                    <span className="text-xs text-gray-400">Buka &rarr;</span>
+                  </button>
+                ))
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigate('/auth/login/events');
+                    setIsSearchOpen(false);
+                  }}
+                  className="w-full px-4 py-2.5 text-xs text-gray-600 hover:bg-gray-50 text-left flex items-center justify-between"
+                >
+                  <span>Cari "{globalSearch}" di halaman Events</span>
+                  <span className="text-indigo-600 font-semibold">Lihat Events &rarr;</span>
+                </button>
               )}
             </div>
-          )}
-          {isSidebarCollapsed && settings?.faviconUrl && (
-             <img src={settings.faviconUrl} alt="Logo" className="w-8 h-8 object-contain" />
-          )}
-          
-          <button 
-            className="hidden md:flex p-1 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md"
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
-          >
-            {isSidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
-          </button>
-          
-          <button 
-            className="md:hidden text-gray-500 hover:text-gray-700"
-            onClick={() => setIsMobileMenuOpen(false)}
-          >
-            <X className="h-6 w-6" />
-          </button>
+          </div>
         </div>
-        <nav className="flex-1 flex flex-col gap-1 p-4 overflow-y-auto">
-          {navItems.filter(item => !item.role || item.role.includes(appUser.role)).map((item) => (
-            <Link
-              key={item.name}
-              to={item.path}
-              title={isSidebarCollapsed ? item.name : undefined}
-              onClick={() => setIsMobileMenuOpen(false)}
+
+        {/* Right: Notification Bell & Person Profile Dropdown */}
+        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+          {/* 1. Notification Bell & Popup (Smooth & Mutually Exclusive) */}
+          <div ref={notifDropdownRef} className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setIsNotifDropdownOpen((prev) => !prev);
+                setIsProfileDropdownOpen(false);
+                setIsSearchOpen(false);
+              }}
               className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                isSidebarCollapsed ? "justify-center px-0" : "",
-                location.pathname === item.path
-                  ? "bg-indigo-50 text-indigo-700"
-                  : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                "relative p-2 rounded-full transition-all duration-200 cursor-pointer",
+                isNotifDropdownOpen
+                  ? "bg-indigo-50 text-indigo-600 ring-2 ring-indigo-500/15"
+                  : "text-gray-600 hover:text-indigo-600 hover:bg-gray-100"
+              )}
+              title="Notifikasi"
+            >
+              <Bell className="w-5 h-5" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center shadow-2xs">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+
+            <div
+              className={cn(
+                "absolute right-0 mt-1.5 w-80 sm:w-96 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 origin-top-right transition-all duration-200 ease-out",
+                isNotifDropdownOpen
+                  ? "opacity-100 scale-100 translate-y-0 pointer-events-auto visible"
+                  : "opacity-0 scale-95 -translate-y-1.5 pointer-events-none invisible"
               )}
             >
-              <item.icon className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
-              {!isSidebarCollapsed && <span>{item.name}</span>}
-            </Link>
-          ))}
-
-           {/* Informasi Layanan Dropdown - Hidden for Staff, Admin, and Clients under a Business/Owner */}
-          {!shouldHideServiceInfo(appUser) && (
-          <div className="mt-2">
-            <button 
-              onClick={() => {
-                if (isSidebarCollapsed) {
-                  setIsSidebarCollapsed(false);
-                  setIsServiceInfoMenuOpen(true);
-                } else {
-                  setIsServiceInfoMenuOpen(!isServiceInfoMenuOpen);
-                }
-              }}
-              title={isSidebarCollapsed ? "Informasi Layanan" : undefined}
-              className={cn("w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors", isSidebarCollapsed ? "justify-center px-0" : "")}
-            >
-              <div className="flex items-center gap-3">
-                 <ShoppingBag className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
-                 {!isSidebarCollapsed && <span>Informasi Layanan</span>}
+              <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
+                <span className="text-sm font-bold text-gray-900">Notifikasi</span>
+                {unreadCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setReadNotifIds(notifications.map(n => n.id))}
+                    className="text-xs font-medium text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                  >
+                    Tandai sudah dibaca
+                  </button>
+                )}
               </div>
-              {!isSidebarCollapsed && (isServiceInfoMenuOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />)}
-            </button>
-            {!isSidebarCollapsed && isServiceInfoMenuOpen && (
-              <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
-                 <Link
-                   to="/auth/login/services/dashboard"
-                   className={cn(
-                     "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                     location.pathname === '/auth/login/services/dashboard' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                   )}
-                 >
-                   <div className="flex items-center gap-2">
-                     <ShoppingBag className="h-4 w-4" />
-                     Dashboard
-                   </div>
-                 </Link>
-                 <Link
-                   to="/auth/login/services/catalog"
-                   className={cn(
-                     "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                     location.pathname === '/auth/login/services/catalog' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                   )}
-                 >
-                   <div className="flex items-center gap-2">
-                     <Package className="h-4 w-4" />
-                     Layanan
-                   </div>
-                 </Link>
-                 <Link
-                   to="/auth/login/invoices/my"
-                   className={cn(
-                     "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                     location.pathname === '/auth/login/invoices/my' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                   )}
-                 >
-                   <div className="flex items-center gap-2">
-                     <Receipt className="h-4 w-4" />
-                     Invoice
-                   </div>
-                 </Link>
-                 
-                 {/* Conditionally display "Layanan Saya" based on active status/quotas */}
-                 {!!(appUser && (
-                    (appUser.eventQuota && appUser.eventQuota > 0) || 
-                    (appUser.eventCredit && appUser.eventCredit > 0) || 
-                    (appUser.clientQuota && appUser.clientQuota > 0) || 
-                    (appUser.clientCredit && appUser.clientCredit > 0) ||
-                    appUser.allowManualEvent ||
-                    appUser.eventManual ||
-                    (appUser.guestQuota && appUser.guestQuota > 0) ||
-                    appUser.activeUntil
-                 )) && (
-                   <Link
-                     to="/auth/login/services/my"
-                     className={cn(
-                       "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                       location.pathname === '/auth/login/services/my' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                     )}
-                   >
-                     <div className="flex items-center gap-2">
-                       <Briefcase className="h-4 w-4" />
-                       Layanan Saya
-                     </div>
-                   </Link>
-                 )}
-              </div>
-            )}
-          </div>
-          )}
 
-
-          {['superadmin', 'owner', 'admin'].includes(appUser.role) && (
-             <>
-               <div className="mt-2">
-               <button 
-                 onClick={() => {
-                   if (isSidebarCollapsed) {
-                     setIsSidebarCollapsed(false);
-                     setIsUserMenuOpen(true);
-                   } else {
-                     setIsUserMenuOpen(!isUserMenuOpen);
-                   }
-                 }}
-                 title={isSidebarCollapsed ? "Manajemen User" : undefined}
-                 className={cn("w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors", isSidebarCollapsed ? "justify-center px-0" : "")}
-               >
-                 <div className="flex items-center gap-3">
-                    <UserCog className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
-                    {!isSidebarCollapsed && <span>Manajemen User</span>}
-                 </div>
-                 {!isSidebarCollapsed && (isUserMenuOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />)}
-               </button>
-               {!isSidebarCollapsed && isUserMenuOpen && (
-                 <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
-                    {appUser.role === 'superadmin' && (
-                      <Link
-                        to="/auth/login/businesses"
-                        className={cn(
-                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                          location.pathname === '/auth/login/businesses' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                        )}
-                      >
-                        Manajemen Bisnis
-                      </Link>
-                    )}
-                    <Link
-                      to="/auth/login/users"
+              <div className="max-h-80 overflow-y-auto divide-y divide-gray-100">
+                {notifications.map((notif) => {
+                  const isRead = readNotifIds.includes(notif.id);
+                  return (
+                    <button
+                      key={notif.id}
+                      type="button"
+                      onClick={() => {
+                        if (!isRead) setReadNotifIds(prev => [...prev, notif.id]);
+                        setIsNotifDropdownOpen(false);
+                        navigate(notif.to);
+                      }}
                       className={cn(
-                        "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        location.pathname === '/auth/login/users' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        "w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors cursor-pointer",
+                        !isRead ? "bg-indigo-50/30" : ""
                       )}
                     >
-                      User & Petugas
-                    </Link>
-                    {['superadmin', 'owner', 'admin'].includes(appUser.role) && (
-                      <Link
-                        to="/auth/login/roles"
+                      <div
                         className={cn(
-                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                          location.pathname === '/auth/login/roles' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                          "p-2 rounded-full shrink-0 mt-0.5",
+                          notif.type === 'approval'
+                            ? "bg-amber-100 text-amber-600"
+                            : notif.type === 'event'
+                            ? "bg-indigo-100 text-indigo-600"
+                            : "bg-emerald-100 text-emerald-600"
                         )}
                       >
-                        Role / Hak Akses
-                      </Link>
-                    )}
-                 </div>
-               )}
-             </div>
+                        {notif.type === 'approval' ? (
+                          <Clock className="w-4 h-4" />
+                        ) : notif.type === 'event' ? (
+                          <CalendarDays className="w-4 h-4" />
+                        ) : (
+                          <CheckCircle2 className="w-4 h-4" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold text-gray-900 truncate">{notif.title}</p>
+                          {!isRead && <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />}
+                        </div>
+                        <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{notif.description}</p>
+                        <p className="text-[11px] text-gray-400 mt-1">{notif.timeLabel}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
 
-             {appUser.role === 'superadmin' && (
-               <div className="mt-2">
-                 <button 
-                   onClick={() => {
-                     if (isSidebarCollapsed) {
-                       setIsSidebarCollapsed(false);
-                       setIsAdminPanelMenuOpen(true);
-                     } else {
-                       setIsAdminPanelMenuOpen(!isAdminPanelMenuOpen);
-                     }
-                   }}
-                   title={isSidebarCollapsed ? "Admin Panel" : undefined}
-                   className={cn("w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors", isSidebarCollapsed ? "justify-center px-0" : "")}
-                 >
-                   <div className="flex items-center gap-3">
-                      <Shield className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
-                      {!isSidebarCollapsed && <span>Admin Panel</span>}
-                   </div>
-                   {!isSidebarCollapsed && (isAdminPanelMenuOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />)}
-                 </button>
-                 {!isSidebarCollapsed && isAdminPanelMenuOpen && (
-                   <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
+          {/* 2. Person Icon + User Info + Dropdown (Smooth & Mutually Exclusive) */}
+          <div ref={profileDropdownRef} className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setIsProfileDropdownOpen((prev) => !prev);
+                setIsNotifDropdownOpen(false);
+                setIsSearchOpen(false);
+              }}
+              className={cn(
+                "flex items-center gap-2.5 py-1.5 px-2 rounded-lg transition-all duration-200 cursor-pointer text-left",
+                isProfileDropdownOpen
+                  ? "bg-indigo-50/80 ring-2 ring-indigo-500/15"
+                  : "hover:bg-gray-100"
+              )}
+              title="Menu Profil"
+            >
+              <div
+                className={cn(
+                  "w-9 h-9 rounded-full border flex items-center justify-center shrink-0 transition-colors duration-200",
+                  isProfileDropdownOpen
+                    ? "bg-indigo-100 border-indigo-200 text-indigo-700"
+                    : "bg-slate-100 border-slate-200 text-slate-700"
+                )}
+              >
+                <User className="w-5 h-5" />
+              </div>
+              <div className="hidden sm:block leading-tight max-w-[160px]">
+                <div className="text-xs font-bold text-gray-900 truncate">
+                  {appUser.name || appUser.email}
+                </div>
+                <div className="text-[11px] text-gray-500 truncate mt-0.5">
+                  {getRoleLabel(appUser.role, appUser.staffType)}
+                </div>
+              </div>
+              <ChevronDown
+                className={cn(
+                  "w-4 h-4 text-gray-500 shrink-0 transition-transform duration-200",
+                  isProfileDropdownOpen ? "rotate-180 text-indigo-600" : ""
+                )}
+              />
+            </button>
+
+            <div
+              className={cn(
+                "absolute right-0 mt-1.5 w-60 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50 origin-top-right transition-all duration-200 ease-out",
+                isProfileDropdownOpen
+                  ? "opacity-100 scale-100 translate-y-0 pointer-events-auto visible"
+                  : "opacity-0 scale-95 -translate-y-1.5 pointer-events-none invisible"
+              )}
+            >
+              {/* Account & Business Info Header */}
+              <div className="px-4 py-3 border-b border-gray-100">
+                <div className="text-xs font-bold text-gray-900 truncate">
+                  {appUser.name || appUser.email}
+                </div>
+                <div className="text-[11px] font-medium text-indigo-600 mt-0.5">
+                  {getRoleLabel(appUser.role, appUser.staffType)}
+                </div>
+                {(appUser.businessName || resolvedBusinessName) && (
+                  <div
+                    className="mt-2 pt-2 border-t border-gray-100 text-[11px] font-medium text-gray-600 flex items-center gap-1.5 truncate"
+                    title={appUser.businessName || resolvedBusinessName}
+                  >
+                    <Building2 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                    <span className="truncate">{appUser.businessName || resolvedBusinessName}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Menu: Profil Saya & Changelog (Saling Bergantian Aktif) */}
+              <div className="py-1">
+                <Link
+                  to="/auth/login/profile"
+                  onClick={() => setIsProfileDropdownOpen(false)}
+                  className={cn(
+                    "flex items-center gap-2.5 px-4 py-2 text-sm font-medium transition-colors",
+                    location.pathname === '/auth/login/profile'
+                      ? "bg-indigo-50 text-indigo-700 font-semibold"
+                      : "text-gray-700 hover:bg-indigo-50 hover:text-indigo-700"
+                  )}
+                >
+                  <User
+                    className={cn(
+                      "w-4 h-4",
+                      location.pathname === '/auth/login/profile' ? "text-indigo-600" : "text-gray-400"
+                    )}
+                  />
+                  <span>Profil Saya</span>
+                </Link>
+                {!isStaff && (
+                  <Link
+                    to="/auth/login/changelog"
+                    onClick={() => setIsProfileDropdownOpen(false)}
+                    className={cn(
+                      "flex items-center gap-2.5 px-4 py-2 text-sm font-medium transition-colors",
+                      location.pathname === '/auth/login/changelog'
+                        ? "bg-indigo-50 text-indigo-700 font-semibold"
+                        : "text-gray-700 hover:bg-indigo-50 hover:text-indigo-700"
+                    )}
+                  >
+                    <FileText
+                      className={cn(
+                        "w-4 h-4",
+                        location.pathname === '/auth/login/changelog' ? "text-indigo-600" : "text-gray-400"
+                      )}
+                    />
+                    <span>Changelog</span>
+                  </Link>
+                )}
+              </div>
+
+              <div className="border-t border-gray-100 my-0.5" />
+
+              {/* Menu: Keluar (with confirmation prompt) */}
+              <div className="py-1">
+                <button
+                  type="button"
+                  onClick={handleLogoutClick}
+                  className="w-full flex items-center gap-2.5 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors cursor-pointer text-left"
+                >
+                  <LogOut className="w-4 h-4 text-red-500" />
+                  <span>Keluar</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* =================================================================== */}
+      {/* BODY AREA: SIDEBAR + MAIN CONTENT                                   */}
+      {/* =================================================================== */}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {/* Mobile Sidebar Overlay */}
+        {isMobileMenuOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-gray-900/50 backdrop-blur-sm md:hidden"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+        )}
+
+        {/* Sidebar (Tanpa Menu Profil Saya & Tanpa Tombol Keluar karena sudah di Dropdown Person) */}
+        <aside
+          className={cn(
+            "fixed inset-y-0 left-0 z-50 md:z-20 transform bg-white flex flex-col border-r border-gray-200 transition-all duration-300 ease-in-out md:relative md:translate-x-0 md:flex-shrink-0",
+            isSidebarCollapsed ? "md:w-20" : "md:w-64",
+            isMobileMenuOpen ? "translate-x-0 w-64" : "-translate-x-full md:translate-x-0"
+          )}
+        >
+          {/* Mobile Drawer Top Header */}
+          <div className="flex md:hidden h-16 items-center justify-between px-6 border-b border-gray-200">
+            <div className="font-bold text-xl tracking-tight text-indigo-600 truncate">
+              {settings?.logoUrl ? (
+                <img src={settings.logoUrl} alt="Logo" className="h-auto max-h-10 w-auto max-w-[140px] object-contain" />
+              ) : (
+                'Guestly'
+              )}
+            </div>
+            <button
+              type="button"
+              className="text-gray-500 hover:text-gray-700"
+              onClick={() => setIsMobileMenuOpen(false)}
+            >
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+
+          <nav className="flex-1 flex flex-col gap-1 p-4 overflow-y-auto">
+            {navItems
+              .filter(item => !item.role || item.role.includes(appUser.role))
+              .map((item) => {
+                const isItemActive =
+                  item.path === '/auth/login'
+                    ? location.pathname === '/auth/login'
+                    : location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
+                return (
+                  <Link
+                    key={item.name}
+                    to={item.path}
+                    title={isSidebarCollapsed ? item.name : undefined}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className={cn(
+                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                      isSidebarCollapsed ? "justify-center px-0" : "",
+                      isItemActive
+                        ? "bg-indigo-50 text-indigo-700"
+                        : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                    )}
+                  >
+                    <item.icon className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                    {!isSidebarCollapsed && <span>{item.name}</span>}
+                  </Link>
+                );
+              })}
+
+            {/* Informasi Layanan Dropdown (Smooth Accordion & Saling Bergantian Aktif) */}
+            {!shouldHideServiceInfo(appUser) && (
+              <div className="mt-2">
+                <button
+                  onClick={() => {
+                    if (isSidebarCollapsed) {
+                      setIsSidebarCollapsed(false);
+                      setIsServiceInfoMenuOpen(true);
+                      setIsUserMenuOpen(false);
+                      setIsAdminPanelMenuOpen(false);
+                    } else {
+                      const nextState = !isServiceInfoMenuOpen;
+                      setIsServiceInfoMenuOpen(nextState);
+                      if (nextState) {
+                        setIsUserMenuOpen(false);
+                        setIsAdminPanelMenuOpen(false);
+                      }
+                    }
+                  }}
+                  title={isSidebarCollapsed ? "Informasi Layanan" : undefined}
+                  className={cn(
+                    "w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                    isSidebarCollapsed ? "justify-center px-0" : "",
+                    isServiceInfoMenuOpen ||
+                      location.pathname.startsWith('/auth/login/services') ||
+                      location.pathname.startsWith('/auth/login/invoices')
+                      ? "bg-indigo-50/70 text-indigo-700"
+                      : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <ShoppingBag className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                    {!isSidebarCollapsed && <span>Informasi Layanan</span>}
+                  </div>
+                  {!isSidebarCollapsed && (
+                    <ChevronRight
+                      className={cn(
+                        "h-4 w-4 transition-transform duration-300 ease-in-out",
+                        isServiceInfoMenuOpen ? "rotate-90 text-indigo-600" : ""
+                      )}
+                    />
+                  )}
+                </button>
+                <div
+                  className={cn(
+                    "grid transition-all duration-300 ease-in-out",
+                    !isSidebarCollapsed && isServiceInfoMenuOpen
+                      ? "grid-rows-[1fr] opacity-100 mt-1"
+                      : "grid-rows-[0fr] opacity-0 mt-0 pointer-events-none"
+                  )}
+                >
+                  <div className="overflow-hidden">
+                    <div className="ml-8 flex flex-col gap-1 space-y-1">
                       <Link
-                        to="/auth/login/admin/services"
+                        to="/auth/login/services/dashboard"
+                        onClick={() => setIsMobileMenuOpen(false)}
                         className={cn(
                           "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                          location.pathname === '/auth/login/admin/services' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                          location.pathname === '/auth/login/services/dashboard'
+                            ? "bg-indigo-50 text-indigo-700"
+                            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                         )}
                       >
                         <div className="flex items-center gap-2">
-                          <Briefcase className="h-4 w-4" />
+                          <ShoppingBag className="h-4 w-4" />
+                          Dashboard
+                        </div>
+                      </Link>
+                      <Link
+                        to="/auth/login/services/catalog"
+                        onClick={() => setIsMobileMenuOpen(false)}
+                        className={cn(
+                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                          location.pathname === '/auth/login/services/catalog'
+                            ? "bg-indigo-50 text-indigo-700"
+                            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Package className="h-4 w-4" />
                           Layanan
                         </div>
                       </Link>
                       <Link
-                        to="/auth/login/admin/invoice"
+                        to="/auth/login/invoices/my"
+                        onClick={() => setIsMobileMenuOpen(false)}
                         className={cn(
                           "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                          location.pathname === '/auth/login/admin/invoice' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                          location.pathname === '/auth/login/invoices/my'
+                            ? "bg-indigo-50 text-indigo-700"
+                            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                         )}
                       >
                         <div className="flex items-center gap-2">
-                          <CreditCard className="h-4 w-4" />
+                          <Receipt className="h-4 w-4" />
                           Invoice
                         </div>
                       </Link>
-                      <Link
-                        to="/auth/login/admin/settings"
-                        className={cn(
-                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                          location.pathname === '/auth/login/admin/settings' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                        )}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Settings className="h-4 w-4" />
-                          Admin Setting
-                        </div>
-                      </Link>
-                      <Link
-                        to="/auth/login/admin/calendar"
-                        className={cn(
-                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                          location.pathname === '/auth/login/admin/calendar' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                        )}
-                      >
-                        <div className="flex items-center gap-2">
-                          <CalendarDays className="h-4 w-4" />
-                          Kalender Acara
-                        </div>
-                      </Link>
-                      <Link
-                        to="/auth/login/admin/wa-templates"
-                        className={cn(
-                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                          location.pathname === '/auth/login/admin/wa-templates' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                        )}
-                      >
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4" />
-                          Template WA
-                        </div>
-                      </Link>
-                      <Link
-                        to="/auth/login/admin/e-invitation-templates"
-                        className={cn(
-                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                          location.pathname === '/auth/login/admin/e-invitation-templates' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                        )}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Sparkles className="h-4 w-4" />
-                          Template E-Invitation
-                        </div>
-                      </Link>
-                   </div>
-                 )}
-               </div>
-             )}
-             </>
-          )}
 
-          {!isStaff && (
-            <Link
-              to="/auth/login/changelog"
-              onClick={() => setIsMobileMenuOpen(false)}
-              title={isSidebarCollapsed ? "Changelog" : undefined}
-              className={cn(
-                "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium mt-1 transition-colors",
-                isSidebarCollapsed ? "justify-center px-0" : "",
-                location.pathname === '/auth/login/changelog' ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
-              )}
-            >
-              <FileText className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
-              {!isSidebarCollapsed && <span>Changelog</span>}
-            </Link>
-          )}
-          <Link
-            to="/auth/login/profile"
-            onClick={() => setIsMobileMenuOpen(false)}
-            title={isSidebarCollapsed ? "Profil Saya" : undefined}
-            className={cn(
-              "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-              isSidebarCollapsed ? "justify-center px-0" : "",
-              location.pathname === '/auth/login/profile' ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
-            )}
-          >
-            <User className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
-            {!isSidebarCollapsed && <span>Profil Saya</span>}
-          </Link>
-
-        </nav>
-        <div className="p-4 border-t border-gray-200">
-          {!isSidebarCollapsed && (
-            <div className="mb-3 px-3.5 py-2.5 bg-indigo-50/70 rounded-xl border border-indigo-100">
-              <div className="text-xs font-semibold text-gray-900 truncate">{appUser.name || appUser.email}</div>
-              <div className="text-[11px] font-medium text-indigo-700 mt-0.5">{getRoleLabel(appUser.role, appUser.staffType)}</div>
-              {(appUser.businessName || resolvedBusinessName) && (
-                <>
-                  <div className="my-2 border-t border-indigo-200/70" />
-                  <div
-                    className="text-[11px] font-semibold text-gray-700 flex items-center gap-1.5 truncate"
-                    title={appUser.businessName || resolvedBusinessName}
-                  >
-                    <Building2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                    <span className="truncate">{appUser.businessName || resolvedBusinessName}</span>
+                      {!!(
+                        appUser &&
+                        ((appUser.eventQuota && appUser.eventQuota > 0) ||
+                          (appUser.eventCredit && appUser.eventCredit > 0) ||
+                          (appUser.clientQuota && appUser.clientQuota > 0) ||
+                          (appUser.clientCredit && appUser.clientCredit > 0) ||
+                          appUser.allowManualEvent ||
+                          appUser.eventManual ||
+                          (appUser.guestQuota && appUser.guestQuota > 0) ||
+                          appUser.activeUntil)
+                      ) && (
+                        <Link
+                          to="/auth/login/services/my"
+                          onClick={() => setIsMobileMenuOpen(false)}
+                          className={cn(
+                            "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                            location.pathname === '/auth/login/services/my'
+                              ? "bg-indigo-50 text-indigo-700"
+                              : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                          )}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Briefcase className="h-4 w-4" />
+                            Layanan Saya
+                          </div>
+                        </Link>
+                      )}
+                    </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {['superadmin', 'owner', 'admin'].includes(appUser.role) && (
+              <>
+                <div className="mt-2">
+                  <button
+                    onClick={() => {
+                      if (isSidebarCollapsed) {
+                        setIsSidebarCollapsed(false);
+                        setIsUserMenuOpen(true);
+                        setIsServiceInfoMenuOpen(false);
+                        setIsAdminPanelMenuOpen(false);
+                      } else {
+                        const nextState = !isUserMenuOpen;
+                        setIsUserMenuOpen(nextState);
+                        if (nextState) {
+                          setIsServiceInfoMenuOpen(false);
+                          setIsAdminPanelMenuOpen(false);
+                        }
+                      }
+                    }}
+                    title={isSidebarCollapsed ? "Manajemen User" : undefined}
+                    className={cn(
+                      "w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                      isSidebarCollapsed ? "justify-center px-0" : "",
+                      isUserMenuOpen ||
+                        location.pathname.startsWith('/auth/login/users') ||
+                        location.pathname.startsWith('/auth/login/businesses') ||
+                        location.pathname === '/auth/login/roles'
+                        ? "bg-indigo-50/70 text-indigo-700"
+                        : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                    )}
+                  >
+                    <div className="flex items-center gap-3">
+                      <UserCog className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                      {!isSidebarCollapsed && <span>Manajemen User</span>}
+                    </div>
+                    {!isSidebarCollapsed && (
+                      <ChevronRight
+                        className={cn(
+                          "h-4 w-4 transition-transform duration-300 ease-in-out",
+                          isUserMenuOpen ? "rotate-90 text-indigo-600" : ""
+                        )}
+                      />
+                    )}
+                  </button>
+                  <div
+                    className={cn(
+                      "grid transition-all duration-300 ease-in-out",
+                      !isSidebarCollapsed && isUserMenuOpen
+                        ? "grid-rows-[1fr] opacity-100 mt-1"
+                        : "grid-rows-[0fr] opacity-0 mt-0 pointer-events-none"
+                    )}
+                  >
+                    <div className="overflow-hidden">
+                      <div className="ml-8 flex flex-col gap-1 space-y-1">
+                        {appUser.role === 'superadmin' && (
+                          <Link
+                            to="/auth/login/businesses"
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={cn(
+                              "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                              location.pathname.startsWith('/auth/login/businesses')
+                                ? "bg-indigo-50 text-indigo-700"
+                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                            )}
+                          >
+                            Manajemen Bisnis
+                          </Link>
+                        )}
+                        <Link
+                          to="/auth/login/users"
+                          onClick={() => setIsMobileMenuOpen(false)}
+                          className={cn(
+                            "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                            location.pathname.startsWith('/auth/login/users')
+                              ? "bg-indigo-50 text-indigo-700"
+                              : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                          )}
+                        >
+                          User & Petugas
+                        </Link>
+                        {['superadmin', 'owner', 'admin'].includes(appUser.role) && (
+                          <Link
+                            to="/auth/login/roles"
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={cn(
+                              "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                              location.pathname === '/auth/login/roles'
+                                ? "bg-indigo-50 text-indigo-700"
+                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                            )}
+                          >
+                            Role / Hak Akses
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {appUser.role === 'superadmin' && (
+                  <div className="mt-2">
+                    <button
+                      onClick={() => {
+                        if (isSidebarCollapsed) {
+                          setIsSidebarCollapsed(false);
+                          setIsAdminPanelMenuOpen(true);
+                          setIsServiceInfoMenuOpen(false);
+                          setIsUserMenuOpen(false);
+                        } else {
+                          const nextState = !isAdminPanelMenuOpen;
+                          setIsAdminPanelMenuOpen(nextState);
+                          if (nextState) {
+                            setIsServiceInfoMenuOpen(false);
+                            setIsUserMenuOpen(false);
+                          }
+                        }
+                      }}
+                      title={isSidebarCollapsed ? "Admin Panel" : undefined}
+                      className={cn(
+                        "w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                        isSidebarCollapsed ? "justify-center px-0" : "",
+                        isAdminPanelMenuOpen || location.pathname.startsWith('/auth/login/admin')
+                          ? "bg-indigo-50/70 text-indigo-700"
+                          : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Shield className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                        {!isSidebarCollapsed && <span>Admin Panel</span>}
+                      </div>
+                      {!isSidebarCollapsed && (
+                        <ChevronRight
+                          className={cn(
+                            "h-4 w-4 transition-transform duration-300 ease-in-out",
+                            isAdminPanelMenuOpen ? "rotate-90 text-indigo-600" : ""
+                          )}
+                        />
+                      )}
+                    </button>
+                    <div
+                      className={cn(
+                        "grid transition-all duration-300 ease-in-out",
+                        !isSidebarCollapsed && isAdminPanelMenuOpen
+                          ? "grid-rows-[1fr] opacity-100 mt-1"
+                          : "grid-rows-[0fr] opacity-0 mt-0 pointer-events-none"
+                      )}
+                    >
+                      <div className="overflow-hidden">
+                        <div className="ml-8 flex flex-col gap-1 space-y-1">
+                          <Link
+                            to="/auth/login/admin/services"
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={cn(
+                              "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                              location.pathname === '/auth/login/admin/services'
+                                ? "bg-indigo-50 text-indigo-700"
+                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <Briefcase className="h-4 w-4" />
+                              Layanan
+                            </div>
+                          </Link>
+                          <Link
+                            to="/auth/login/admin/invoice"
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={cn(
+                              "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                              location.pathname === '/auth/login/admin/invoice'
+                                ? "bg-indigo-50 text-indigo-700"
+                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <CreditCard className="h-4 w-4" />
+                              Invoice
+                            </div>
+                          </Link>
+                          <Link
+                            to="/auth/login/admin/settings"
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={cn(
+                              "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                              location.pathname === '/auth/login/admin/settings'
+                                ? "bg-indigo-50 text-indigo-700"
+                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <Settings className="h-4 w-4" />
+                              Admin Setting
+                            </div>
+                          </Link>
+                          <Link
+                            to="/auth/login/admin/calendar"
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={cn(
+                              "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                              location.pathname === '/auth/login/admin/calendar'
+                                ? "bg-indigo-50 text-indigo-700"
+                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <CalendarDays className="h-4 w-4" />
+                              Kalender Acara
+                            </div>
+                          </Link>
+                          <Link
+                            to="/auth/login/admin/wa-templates"
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={cn(
+                              "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                              location.pathname === '/auth/login/admin/wa-templates'
+                                ? "bg-indigo-50 text-indigo-700"
+                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <FileText className="h-4 w-4" />
+                              Template WA
+                            </div>
+                          </Link>
+                          <Link
+                            to="/auth/login/admin/e-invitation-templates"
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={cn(
+                              "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                              location.pathname === '/auth/login/admin/e-invitation-templates'
+                                ? "bg-indigo-50 text-indigo-700"
+                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <Sparkles className="h-4 w-4" />
+                              Template E-Invitation
+                            </div>
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </nav>
+        </aside>
+
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">
+            <div className="w-full">
+              {(shouldHideServiceInfo(appUser) &&
+                (location.pathname.startsWith('/auth/login/services') ||
+                  location.pathname.startsWith('/auth/login/invoices'))) ||
+              (appUser.role !== 'superadmin' &&
+                (location.pathname.startsWith('/auth/login/admin') ||
+                  location.pathname.startsWith('/auth/login/businesses'))) ? (
+                <Navigate to="/auth/login" replace />
+              ) : (
+                <>
+                  <RouteBreadcrumbs />
+                  <Outlet />
                 </>
               )}
             </div>
-          )}
-          <button
-            onClick={handleLogout}
-            title={isSidebarCollapsed ? "Keluar" : undefined}
-            className={cn(
-              "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors",
-              isSidebarCollapsed ? "justify-center px-0" : ""
-            )}
-          >
-            <LogOut className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
-            {!isSidebarCollapsed && <span>Keluar</span>}
-          </button>
+          </main>
         </div>
-      </aside>
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Mobile Header */}
-        <header className="md:hidden flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200">
-          <div className="font-bold text-lg tracking-tight text-indigo-600">
-            {settings?.logoUrl ? (
-              <img src={settings.logoUrl} alt="Logo" className="h-auto max-h-10 w-auto max-w-[140px] object-contain" />
-            ) : (
-              "Guestly"
-            )}
-          </div>
-          <button 
-            onClick={() => setIsMobileMenuOpen(true)}
-            className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md"
-          >
-            <Menu className="h-6 w-6" />
-          </button>
-        </header>
-
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">
-          <div className="w-full">
-            {(shouldHideServiceInfo(appUser) &&
-              (location.pathname.startsWith('/auth/login/services') ||
-                location.pathname.startsWith('/auth/login/invoices'))) ||
-            (appUser.role !== 'superadmin' &&
-              (location.pathname.startsWith('/auth/login/admin') ||
-                location.pathname.startsWith('/auth/login/businesses'))) ? (
-              <Navigate to="/auth/login" replace />
-            ) : (
-              <Outlet />
-            )}
-          </div>
-        </main>
       </div>
     </div>
   );

@@ -115,16 +115,6 @@ export default function AdminCalendar() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight flex items-center gap-2">
-            <CalendarIcon className="w-6 h-6 text-indigo-600" />
-            Kalender Acara
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">Pantau semua jadwal acara pada sistem</p>
-        </div>
-      </div>
-      
       <div className="flex flex-col md:flex-row gap-6">
         {/* Main Calendar View */}
         <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">

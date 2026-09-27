@@ -2,16 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { collection, query, getDocs, where, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, deleteField, runTransaction, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { EventRecord, Client, User, EInviteTemplate } from '../types';
-import { parseFirestoreDate, canUserAccessEvent, canUserCreateEvent, getUserBusinessId, getRoleLabel, isPartnerBusinessRegistered } from '../lib/utils';
+import { EventRecord, Client, User, EInviteTemplate, SeatingTable, Guest } from '../types';
+import { parseFirestoreDate, canUserAccessEvent, canUserCreateEvent, getUserBusinessId, getRoleLabel, isPartnerBusinessRegistered, resolveMediaUrl } from '../lib/utils';
 import { format } from 'date-fns';
-import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Image as ImageIcon, Trash2, Edit, ScanLine, Eye, ArrowUp, ArrowDown, Gift, Building2, Lock, Sparkles, Check } from 'lucide-react';
+import { Link, useNavigate, useLocation, useParams } from 'react-router-dom';
+import { Plus, Image as ImageIcon, Trash2, Edit, ScanLine, Eye, ArrowUp, ArrowDown, Gift, Building2, Lock, Sparkles, Check, MapPin, ExternalLink, Crown, Users, Search, Armchair } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { MediaUploader } from '../components/media/MediaUploader';
 import { EInvitationCard, splitCoupleNames } from '../components/EInvitationCard';
 import { eInviteTemplateService, DEFAULT_EINVITE_TEMPLATES } from '../services/eInviteTemplateService';
-import { showAlert, showConfirm } from '../lib/alerts';
+import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 
 export default function EventsList() {
   const { appUser } = useAuth();
@@ -26,7 +26,7 @@ export default function EventsList() {
   const [isCreating, setIsCreating] = useState(false);
   const [isPartnerNoticeOpen, setIsPartnerNoticeOpen] = useState(false);
   const [ownerBusinessProfile, setOwnerBusinessProfile] = useState<Partial<User> | null>(null);
-  const [activeTab, setActiveTab] = useState<'info' | 'frame' | 'categories' | 'theme' | 'einvite'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'frame' | 'categories' | 'theme' | 'einvite' | 'tables'>('info');
   
   // Event Form State
   const [newEventTitle, setNewEventTitle] = useState('');
@@ -58,6 +58,7 @@ export default function EventsList() {
   const [eInviteBrideName, setEInviteBrideName] = useState<string>('');
   const [eInviteVenueName, setEInviteVenueName] = useState<string>('');
   const [eInviteVenueAddress, setEInviteVenueAddress] = useState<string>('');
+  const [eInviteMapsUrl, setEInviteMapsUrl] = useState<string>('');
   const [eInviteGreetingText, setEInviteGreetingText] = useState<string>(
     'Dengan hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara pernikahan kami.'
   );
@@ -67,6 +68,19 @@ export default function EventsList() {
   const [quickTemplateName, setQuickTemplateName] = useState('');
   const [quickTemplateUrl, setQuickTemplateUrl] = useState('');
   const [quickTemplateKey, setQuickTemplateKey] = useState('');
+
+  // Manajemen Meja (Beta) State
+  const [seatingTables, setSeatingTables] = useState<SeatingTable[]>([]);
+  const [newTableName, setNewTableName] = useState('');
+  const [newTableZone, setNewTableZone] = useState<'VVIP' | 'VIP' | 'Keluarga' | 'Reguler'>('VIP');
+  const [newTableCapacity, setNewTableCapacity] = useState<string>('10');
+  const [newTableShape, setNewTableShape] = useState<'round' | 'long'>('round');
+  const [newTableLocationNote, setNewTableLocationNote] = useState('');
+  const [modalEventGuests, setModalEventGuests] = useState<Guest[]>([]);
+  const [loadingModalGuests, setLoadingModalGuests] = useState(false);
+  const [tableGuestSearch, setTableGuestSearch] = useState('');
+  const [tableGuestFilter, setTableGuestFilter] = useState<'all' | 'vip_vvip' | 'unassigned' | 'assigned'>('vip_vvip');
+  const [updatingGuestSeatId, setUpdatingGuestSeatId] = useState<string | null>(null);
 
   useEffect(() => {
     eInviteTemplateService.getTemplates().then((list) => {
@@ -106,10 +120,20 @@ export default function EventsList() {
     setEInviteBrideName('');
     setEInviteVenueName('');
     setEInviteVenueAddress('');
+    setEInviteMapsUrl('');
     setEInviteGreetingText('Dengan hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara pernikahan kami.');
     setEInviteFooterText('ATAS KEHADIRAN DAN DOA RESTUNYA');
     setEInviteMode('full');
     setIsQuickUploadingTemplate(false);
+    setSeatingTables([]);
+    setNewTableName('');
+    setNewTableZone('VIP');
+    setNewTableCapacity('10');
+    setNewTableShape('round');
+    setNewTableLocationNote('');
+    setModalEventGuests([]);
+    setTableGuestSearch('');
+    setTableGuestFilter('vip_vvip');
     setEditingEventId(null);
     setActiveTab('info');
   };
@@ -150,9 +174,22 @@ export default function EventsList() {
       setNewEventClientId(clients[0].id!);
     }
     setIsCreating(true);
+    if (!location.pathname.endsWith('/events/add')) {
+      navigate('/auth/login/events/add');
+    }
   };
 
-  const openEditModal = (event: EventRecord) => {
+  const closeEventModal = (showCancel = false) => {
+    setIsCreating(false);
+    if (location.pathname !== '/auth/login/events') {
+      navigate('/auth/login/events');
+    }
+    if (showCancel) {
+      showCancelAlert(editingEventId ? 'Perubahan data acara telah dibatalkan.' : 'Pembuatan acara baru telah dibatalkan.');
+    }
+  };
+
+  const populateEditModal = (event: EventRecord, initialTab: 'info' | 'tables' = 'info') => {
     setEditingEventId(event.id || null);
     setNewEventTitle(event.title);
     setNewEventCoupleName(event.coupleName || '');
@@ -181,6 +218,7 @@ export default function EventsList() {
     setEInviteBrideName(event.eInviteBrideName || parsedCouple.bride || '');
     setEInviteVenueName(event.eInviteVenueName || '');
     setEInviteVenueAddress(event.eInviteVenueAddress || '');
+    setEInviteMapsUrl(event.eInviteMapsUrl || event.mapsUrl || '');
     setEInviteGreetingText(
       event.eInviteGreetingText ||
         'Dengan hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara pernikahan kami.'
@@ -188,11 +226,68 @@ export default function EventsList() {
     setEInviteFooterText(event.eInviteFooterText || 'ATAS KEHADIRAN DAN DOA RESTUNYA');
     setEInviteMode(event.eInviteMode || 'full');
     setIsQuickUploadingTemplate(false);
-    setActiveTab('info');
+    setSeatingTables(Array.isArray(event.seatingTables) ? event.seatingTables : []);
+    setNewTableName('');
+    setNewTableZone('VIP');
+    setNewTableCapacity('10');
+    setNewTableShape('round');
+    setNewTableLocationNote('');
+    setTableGuestSearch('');
+    setTableGuestFilter('vip_vvip');
+    setActiveTab(initialTab);
     setIsCreating(true);
+
+    if (event.id) {
+      setLoadingModalGuests(true);
+      getDocs(collection(db, 'events', event.id, 'guests'))
+        .then((snap) => {
+          const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Guest));
+          setModalEventGuests(list);
+        })
+        .catch(() => setModalEventGuests([]))
+        .finally(() => setLoadingModalGuests(false));
+    } else {
+      setModalEventGuests([]);
+    }
+  };
+
+  const openEditModal = (event: EventRecord, initialTab: 'info' | 'tables' = 'info') => {
+    populateEditModal(event, initialTab);
+    if (event.id) {
+      navigate(initialTab === 'tables' ? `/auth/login/events/${event.id}/tables` : `/auth/login/events/${event.id}/edit`);
+    }
   }; // Used the same modal
 
   const navigate = useNavigate();
+  const location = useLocation();
+  const { eventId: routeEventId } = useParams<{ eventId?: string }>();
+
+  // Sync URL sub-routes (/events/add, /events/:eventId/edit, /events/:eventId/tables) with modal state
+  useEffect(() => {
+    if (loading) return;
+    const path = location.pathname;
+    if (path.endsWith('/events/add')) {
+      if (!isCreating || editingEventId !== null) {
+        resetForm();
+        if (clients.length > 0) {
+          setNewEventClientId(clients[0].id!);
+        }
+        setIsCreating(true);
+      }
+    } else if (routeEventId && (path.endsWith('/edit') || path.endsWith('/tables'))) {
+      const targetTab = path.endsWith('/tables') ? 'tables' : 'info';
+      const found = events.find(ev => ev.id === routeEventId);
+      if (found) {
+        if (!isCreating || editingEventId !== found.id) {
+          populateEditModal(found, targetTab);
+        } else if (path.endsWith('/tables') && activeTab !== 'tables') {
+          setActiveTab('tables');
+        }
+      }
+    } else if (path === '/auth/login/events' && isCreating) {
+      setIsCreating(false);
+    }
+  }, [location.pathname, routeEventId, events, loading]);
 
   useEffect(() => {
     let unsubscribeEvents: () => void;
@@ -377,8 +472,15 @@ export default function EventsList() {
       if (newEventFrame) payload.frameOverlayUrl = newEventFrame;
       else if (editingEventId) payload.frameOverlayUrl = deleteField();
       
-      if (newEventThumbnail) payload.thumbnailUrl = newEventThumbnail;
-      else if (editingEventId) payload.thumbnailUrl = deleteField();
+      if (newEventThumbnail) {
+        payload.thumbnailUrl = newEventThumbnail;
+        payload.eInvitePhotoUrl = newEventThumbnail;
+        payload.coverImage = newEventThumbnail;
+      } else if (editingEventId) {
+        payload.thumbnailUrl = deleteField();
+        payload.eInvitePhotoUrl = deleteField();
+        payload.coverImage = deleteField();
+      }
       
       if (newEventTheme) payload.rsvpTheme = newEventTheme;
       else if (editingEventId) payload.rsvpTheme = deleteField();
@@ -402,9 +504,13 @@ export default function EventsList() {
       payload.eInviteBrideName = eInviteBrideName.trim();
       payload.eInviteVenueName = eInviteVenueName.trim();
       payload.eInviteVenueAddress = eInviteVenueAddress.trim();
+      payload.eInviteMapsUrl = eInviteMapsUrl.trim();
+      payload.mapsUrl = eInviteMapsUrl.trim();
       payload.eInviteGreetingText = eInviteGreetingText.trim();
       payload.eInviteFooterText = eInviteFooterText.trim();
       payload.eInviteMode = eInviteMode;
+      payload.seatingTables = seatingTables;
+      payload.enableSeatingManagement = seatingTables.length > 0;
 
       if (editingEventId) {
         await updateDoc(doc(db, 'events', editingEventId), payload);
@@ -413,6 +519,7 @@ export default function EventsList() {
           ev.id === editingEventId ? { ...ev, ...payload, updatedAt: new Date() } : ev
         ));
         setIsCreating(false);
+        navigate('/auth/login/events', { replace: true });
         showAlert('Berhasil', 'Acara berhasil diperbarui!', 'success');
       } else {
         payload.status = 'published';
@@ -489,6 +596,126 @@ export default function EventsList() {
     setSessions(sessions.filter(s => s !== session));
   };
 
+  const handleAddSeatingTable = () => {
+    const cleanName = newTableName.trim();
+    if (!cleanName) {
+      showAlert('Peringatan', 'Nama / Nomor Meja wajib diisi (contoh: Meja VVIP 1).', 'warning');
+      return;
+    }
+    if (seatingTables.some((t) => t.name.toLowerCase() === cleanName.toLowerCase())) {
+      showAlert('Peringatan', `Meja dengan nama "${cleanName}" sudah ada.`, 'warning');
+      return;
+    }
+    const cap = Math.max(1, parseInt(newTableCapacity, 10) || 10);
+    const created: SeatingTable = {
+      id: `tbl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
+      name: cleanName,
+      zone: newTableZone,
+      capacity: cap,
+      shape: newTableShape,
+      locationNote: newTableLocationNote.trim() || undefined,
+    };
+    setSeatingTables((prev) => [...prev, created]);
+    setNewTableName('');
+    setNewTableLocationNote('');
+  };
+
+  const handleGenerateVipPresetTables = () => {
+    const presets: SeatingTable[] = [
+      {
+        id: `tbl-vvip-1`,
+        name: 'Meja VVIP 1',
+        zone: 'VVIP',
+        capacity: 10,
+        shape: 'round',
+        locationNote: 'Depan Pelaminan Sisi Kanan',
+      },
+      {
+        id: `tbl-vvip-2`,
+        name: 'Meja VVIP 2',
+        zone: 'VVIP',
+        capacity: 10,
+        shape: 'round',
+        locationNote: 'Depan Pelaminan Sisi Kiri',
+      },
+      {
+        id: `tbl-vip-1`,
+        name: 'Meja VIP 1',
+        zone: 'VIP',
+        capacity: 10,
+        shape: 'round',
+        locationNote: 'Baris Kedua Tengah Kanan',
+      },
+      {
+        id: `tbl-vip-2`,
+        name: 'Meja VIP 2',
+        zone: 'VIP',
+        capacity: 10,
+        shape: 'round',
+        locationNote: 'Baris Kedua Tengah Kiri',
+      },
+      {
+        id: `tbl-kel-1`,
+        name: 'Meja Keluarga Inti',
+        zone: 'Keluarga',
+        capacity: 12,
+        shape: 'long',
+        locationNote: 'Samping Pelaminan',
+      },
+    ];
+    const existingNames = new Set(seatingTables.map((t) => t.name.toLowerCase()));
+    const toAdd = presets.filter((p) => !existingNames.has(p.name.toLowerCase()));
+    if (toAdd.length === 0) {
+      showAlert('Info', 'Preset meja VVIP & VIP sudah ada di daftar meja.', 'info');
+      return;
+    }
+    setSeatingTables((prev) => [...prev, ...toAdd]);
+    if (!guestCategories.some((c) => c.toUpperCase() === 'VVIP')) {
+      setGuestCategories((prev) => ['VVIP', ...prev]);
+    }
+  };
+
+  const handleRemoveSeatingTable = (id: string) => {
+    setSeatingTables((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const handleAssignGuestToTable = async (guest: Guest, tableName: string) => {
+    if (!editingEventId || !guest.id) return;
+    const cleanTable = tableName.trim();
+    if (cleanTable) {
+      const targetTable = seatingTables.find((t) => t.name === cleanTable);
+      if (targetTable) {
+        const currentOccupied = modalEventGuests
+          .filter((g) => g.id !== guest.id && (g.tableNumber || '') === cleanTable && g.rsvpStatus !== 'declined')
+          .reduce((acc, g) => acc + Math.max(1, Number(g.pax) || 1), 0);
+        const guestPax = Math.max(1, Number(guest.pax) || 1);
+        if (currentOccupied + guestPax > targetTable.capacity) {
+          showAlert(
+            'Kapasitas Meja Penuh',
+            `${targetTable.name} memiliki kapasitas ${targetTable.capacity} kursi (terisi ${currentOccupied} kursi). Tamu "${guest.name}" membutuhkan ${guestPax} kursi.`,
+            'warning'
+          );
+          return;
+        }
+      }
+    }
+    setUpdatingGuestSeatId(guest.id);
+    try {
+      await updateDoc(doc(db, 'events', editingEventId, 'guests', guest.id), {
+        tableNumber: cleanTable || '',
+        updatedAt: serverTimestamp(),
+      });
+      setModalEventGuests((prev) =>
+        prev.map((g) => (g.id === guest.id ? { ...g, tableNumber: cleanTable || undefined } : g))
+      );
+    } catch (err) {
+      console.error('Failed to assign table:', err);
+      showAlert('Gagal', 'Gagal menyimpan penempatan meja tamu.', 'error');
+    } finally {
+      setUpdatingGuestSeatId(null);
+    }
+  };
+
   const [eventToDelete, setEventToDelete] = useState<string | null>(null);
 
   const handleDeleteEvent = async () => {
@@ -515,11 +742,8 @@ export default function EventsList() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            {appUser?.role === 'staff' ? 'Acara Tugas Anda' : 'Events'}
-          </h1>
           {appUser?.role === 'staff' && (
-            <p className="text-sm text-gray-500 mt-1">
+            <p className="text-sm text-gray-500">
               Anda masuk sebagai <span className="font-semibold text-indigo-600">{getRoleLabel(appUser.role, appUser.staffType)}</span>. Hanya menampilkan acara yang ditugaskan kepada Anda.
             </p>
           )}
@@ -599,44 +823,90 @@ export default function EventsList() {
         </div>
       </Modal>
 
-      <Modal isOpen={isCreating} onClose={() => setIsCreating(false)} title={editingEventId ? "Edit Acara" : "Buat Acara Baru"}>
+      <Modal
+        isOpen={isCreating}
+        onClose={closeEventModal}
+        title={editingEventId ? "Edit Acara" : "Buat Acara Baru"}
+        maxWidth="max-w-5xl"
+      >
         <div className="mb-6 border-b border-gray-200 overflow-x-auto">
           <nav className="-mb-px flex space-x-5" aria-label="Tabs">
             <button
               type="button"
-              onClick={() => setActiveTab('info')}
+              onClick={() => {
+                setActiveTab('info');
+                if (editingEventId && location.pathname.endsWith('/tables')) {
+                  navigate(`/auth/login/events/${editingEventId}/edit`, { replace: true });
+                }
+              }}
               className={`${activeTab === 'info' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors cursor-pointer`}
             >
               Info Acara
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('frame')}
+              onClick={() => {
+                setActiveTab('frame');
+                if (editingEventId && location.pathname.endsWith('/tables')) {
+                  navigate(`/auth/login/events/${editingEventId}/edit`, { replace: true });
+                }
+              }}
               className={`${activeTab === 'frame' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors cursor-pointer`}
             >
               Frame Layar
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('categories')}
+              onClick={() => {
+                setActiveTab('categories');
+                if (editingEventId && location.pathname.endsWith('/tables')) {
+                  navigate(`/auth/login/events/${editingEventId}/edit`, { replace: true });
+                }
+              }}
               className={`${activeTab === 'categories' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors cursor-pointer`}
             >
               Kategori & Sesi
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('theme')}
+              onClick={() => {
+                setActiveTab('theme');
+                if (editingEventId && location.pathname.endsWith('/tables')) {
+                  navigate(`/auth/login/events/${editingEventId}/edit`, { replace: true });
+                }
+              }}
               className={`${activeTab === 'theme' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors cursor-pointer`}
             >
               Tema RSVP
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('einvite')}
+              onClick={() => {
+                setActiveTab('einvite');
+                if (editingEventId && location.pathname.endsWith('/tables')) {
+                  navigate(`/auth/login/events/${editingEventId}/edit`, { replace: true });
+                }
+              }}
               className={`${activeTab === 'einvite' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-semibold text-sm transition-colors flex items-center gap-1.5 cursor-pointer`}
             >
               <Sparkles className="w-4 h-4 text-indigo-600" />
               <span>E-Invitation</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('tables');
+                if (editingEventId && !location.pathname.endsWith('/tables')) {
+                  navigate(`/auth/login/events/${editingEventId}/tables`, { replace: true });
+                }
+              }}
+              className={`${activeTab === 'tables' ? 'border-amber-500 text-amber-700' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-semibold text-sm transition-colors flex items-center gap-1.5 cursor-pointer`}
+            >
+              <Crown className="w-4 h-4 text-amber-500" />
+              <span>Manajemen Meja</span>
+              <span className="px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                Beta
+              </span>
             </button>
           </nav>
         </div>
@@ -726,7 +996,7 @@ export default function EventsList() {
                 {newEventThumbnail ? (
                   <div className="flex items-center gap-3 pt-1">
                     <img
-                      src={newEventThumbnail}
+                      src={resolveMediaUrl(newEventThumbnail)}
                       alt="Preview Thumbnail"
                       className="w-14 h-14 rounded-lg object-cover border border-indigo-200 shadow-xs shrink-0 bg-white"
                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
@@ -942,101 +1212,205 @@ export default function EventsList() {
               </div>
 
               {/* Dynamic Variables Form */}
-              <div className="space-y-3.5 border border-gray-200 rounded-xl p-4 bg-white">
-                <h4 className="text-sm font-bold text-slate-900">
-                  2. Data Dinamis Kartu E-Invitation
-                </h4>
+              <div className="space-y-4 border border-slate-200 rounded-xl p-4 sm:p-5 bg-white shadow-2xs">
+                <div className="border-b border-slate-100 pb-2.5">
+                  <h4 className="text-sm font-bold text-slate-900">
+                    2. Data Dinamis Kartu E-Invitation
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Sesuaikan informasi mempelai, lokasi gedung, tautan Google Maps, serta teks undangan pada kartu.
+                  </p>
+                </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* Row 1: Judul Atas Kartu & Mode Tampilan */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Judul Atas Kartu
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Judul Atas Kartu
+                      </label>
+                      <span className="text-[10px] font-mono text-slate-400">Header</span>
+                    </div>
                     <input
                       type="text"
                       value={eInviteHeaderText}
                       onChange={(e) => setEInviteHeaderText(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
                       placeholder="THE WEDDING OF"
                     />
                   </div>
+
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Mempelai Pria ({'{{GROOM_NAME}}'})
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Mode Tampilan Halaman Link Tamu
+                      </label>
+                      <span className="text-[10px] font-mono text-slate-400">Layout</span>
+                    </div>
+                    <select
+                      value={eInviteMode}
+                      onChange={(e) => setEInviteMode(e.target.value as 'full' | 'compact')}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-indigo-500 focus:border-indigo-500"
+                    >
+                      <option value="full">Lengkap (Kartu E-Invitation + Form RSVP)</option>
+                      <option value="compact">Ringkas (Fokus Kartu E-Invitation &amp; QR Saja)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Row 2: Mempelai Pria & Mempelai Wanita */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Nama Mempelai Pria
+                      </label>
+                      <code className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">
+                        {'{{GROOM_NAME}}'}
+                      </code>
+                    </div>
                     <input
                       type="text"
                       value={eInviteGroomName}
                       onChange={(e) => setEInviteGroomName(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
-                      placeholder="Contoh: Rizky"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="Contoh: Laras"
                     />
                   </div>
+
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Mempelai Wanita ({'{{BRIDE_NAME}}'})
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Nama Mempelai Wanita
+                      </label>
+                      <code className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">
+                        {'{{BRIDE_NAME}}'}
+                      </code>
+                    </div>
                     <input
                       type="text"
                       value={eInviteBrideName}
                       onChange={(e) => setEInviteBrideName(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
-                      placeholder="Contoh: Aulia"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="Contoh: Huda"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Row 3: Nama Gedung/Venue & Alamat Venue */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Nama Gedung / Venue ({'{{VENUE_NAME}}'})
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Nama Gedung / Venue
+                      </label>
+                      <code className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">
+                        {'{{VENUE_NAME}}'}
+                      </code>
+                    </div>
                     <input
                       type="text"
                       value={eInviteVenueName}
                       onChange={(e) => setEInviteVenueName(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
-                      placeholder={newEventLocation || 'Contoh: Gedung Serbaguna Graha Anugerah'}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder={newEventLocation || 'Contoh: Gedung Graha Pusennif'}
                     />
                   </div>
+
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Alamat Venue ({'{{VENUE_ADDRESS}}'})
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Alamat Lengkap Venue
+                      </label>
+                      <code className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">
+                        {'{{VENUE_ADDRESS}}'}
+                      </code>
+                    </div>
                     <input
                       type="text"
                       value={eInviteVenueAddress}
                       onChange={(e) => setEInviteVenueAddress(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
                       placeholder="Contoh: Jl. Melati No. 25, Semarang"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Kalimat Undangan di Bawah Nama Tamu
+                {/* Row 4: Field Maps (Google Maps Link) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Link Google Maps Lokasi Acara</span>
                     </label>
+                    <code className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">
+                      {'{{MAPS_URL}}'}
+                    </code>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="url"
+                      value={eInviteMapsUrl}
+                      onChange={(e) => setEInviteMapsUrl(e.target.value)}
+                      className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="Contoh: https://maps.app.goo.gl/... atau https://www.google.com/maps/..."
+                    />
+                    {eInviteMapsUrl.trim() && (
+                      <a
+                        href={
+                          /^https?:\/\//i.test(eInviteMapsUrl.trim())
+                            ? eInviteMapsUrl.trim()
+                            : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                                eInviteMapsUrl.trim()
+                              )}`
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg shrink-0 transition-colors"
+                        title="Cek Link Maps"
+                      >
+                        <span>Cek Maps</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Digunakan pada tombol <strong>Buka Google Maps</strong> di halaman undangan tamu. Jika dikosongkan, sistem otomatis mengarahkan ke pencarian Nama &amp; Alamat Venue.
+                  </p>
+                </div>
+
+                {/* Row 5: Kalimat Undangan & Teks Penutup Footer */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Kalimat Undangan di Bawah Nama Tamu
+                      </label>
+                      <span className="text-[10px] font-mono text-slate-400">Greeting</span>
+                    </div>
                     <input
                       type="text"
                       value={eInviteGreetingText}
                       onChange={(e) => setEInviteGreetingText(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="Dengan hormat, kami mengundang Bapak/Ibu/Saudara/i..."
                     />
                   </div>
+
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Mode Tampilan Halaman Link Tamu
-                    </label>
-                    <select
-                      value={eInviteMode}
-                      onChange={(e) => setEInviteMode(e.target.value as 'full' | 'compact')}
-                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white"
-                    >
-                      <option value="full">Lengkap (Kartu E-Invitation + Form Konfirmasi RSVP)</option>
-                      <option value="compact">Ringkas (Fokus Kartu E-Invitation &amp; QR Check-In Saja)</option>
-                    </select>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Teks Penutup Footer Kartu
+                      </label>
+                      <span className="text-[10px] font-mono text-slate-400">Footer</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={eInviteFooterText}
+                      onChange={(e) => setEInviteFooterText(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="ATAS KEHADIRAN DAN DOA RESTUNYA"
+                    />
                   </div>
                 </div>
               </div>
@@ -1070,6 +1444,7 @@ export default function EventsList() {
                     eInviteBrideName,
                     eInviteVenueName,
                     eInviteVenueAddress,
+                    eInviteMapsUrl,
                     eInviteGreetingText,
                     eInviteFooterText,
                   }}
@@ -1246,12 +1621,426 @@ export default function EventsList() {
               </div>
             </div>
           )}
+
+          {activeTab === 'tables' && (
+            <div className="space-y-5">
+              {/* Header Banner */}
+              <div className="bg-gradient-to-r from-amber-50 via-orange-50/60 to-indigo-50/50 border border-amber-200/80 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <Crown className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-bold text-slate-900">
+                        Manajemen Meja Tamu VIP / VVIP &amp; Tempat Duduk
+                      </h4>
+                      <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full bg-amber-200/80 text-amber-900">
+                        Beta
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
+                      Atur daftar meja (VVIP, VIP, Keluarga) beserta kapasitas kursi. Saat QR tamu di-scan oleh petugas penerima tamu (Usher), nomor meja &amp; jumlah kursi akan otomatis muncul di layar Scanner.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGenerateVipPresetTables}
+                  className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-amber-900 bg-white hover:bg-amber-100/70 border border-amber-300 rounded-lg shadow-2xs transition-colors cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                  <span>+ Buat Preset Meja VVIP &amp; VIP</span>
+                </button>
+              </div>
+
+              {/* 1. Form Tambah Meja Baru */}
+              <div className="border border-slate-200 rounded-xl p-4 sm:p-5 bg-white shadow-2xs space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      1. Tambah &amp; Konfigurasi Daftar Meja
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      Tentukan nama/nomor meja, zona kategori, kapasitas maksimal kursi (Pax), dan catatan posisi untuk Usher.
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg">
+                    Total: {seatingTables.length} Meja ({seatingTables.reduce((a, t) => a + (Number(t.capacity) || 0), 0)} Kursi)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                  <div className="sm:col-span-3">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Nama / Kode Meja *
+                    </label>
+                    <input
+                      type="text"
+                      value={newTableName}
+                      onChange={(e) => setNewTableName(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddSeatingTable())}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="Contoh: Meja VVIP 1"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Zona Meja
+                    </label>
+                    <select
+                      value={newTableZone}
+                      onChange={(e) => setNewTableZone(e.target.value as any)}
+                      className="w-full border border-slate-300 rounded-lg px-2.5 py-2 text-sm bg-white focus:ring-indigo-500 focus:border-indigo-500"
+                    >
+                      <option value="VVIP">👑 VVIP</option>
+                      <option value="VIP">⭐ VIP</option>
+                      <option value="Keluarga">👨‍👩‍👧‍👦 Keluarga</option>
+                      <option value="Reguler">🪑 Reguler</option>
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Kapasitas (Kursi)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={newTableCapacity}
+                      onChange={(e) => setNewTableCapacity(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="10"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Bentuk Meja
+                    </label>
+                    <select
+                      value={newTableShape}
+                      onChange={(e) => setNewTableShape(e.target.value as 'round' | 'long')}
+                      className="w-full border border-slate-300 rounded-lg px-2.5 py-2 text-sm bg-white focus:ring-indigo-500 focus:border-indigo-500"
+                    >
+                      <option value="round">Round Table</option>
+                      <option value="long">Long Table</option>
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Catatan Posisi (Panduan Usher)
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newTableLocationNote}
+                        onChange={(e) => setNewTableLocationNote(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddSeatingTable())}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                        placeholder="Depan Pelaminan Kanan"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddSeatingTable}
+                        className="shrink-0 inline-flex items-center gap-1 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Tambah</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Daftar Kartu Visual Meja */}
+                {seatingTables.length === 0 ? (
+                  <div className="text-center py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                    <Armchair className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+                    <p className="text-sm font-semibold text-slate-700">
+                      Belum ada meja yang dikonfigurasi
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Klik tombol <strong>+ Buat Preset Meja VVIP &amp; VIP</strong> di kanan atas atau tambahkan meja secara manual di atas.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+                    {seatingTables.map((tbl) => {
+                      const assignedGuests = modalEventGuests.filter(
+                        (g) => (g.tableNumber || '') === tbl.name && g.rsvpStatus !== 'declined'
+                      );
+                      const occupiedSeats = assignedGuests.reduce(
+                        (acc, g) => acc + Math.max(1, Number(g.pax) || 1),
+                        0
+                      );
+                      const checkedInSeats = assignedGuests
+                        .filter((g) => g.attended)
+                        .reduce((acc, g) => acc + Math.max(1, Number(g.pax) || 1), 0);
+                      const ratio = Math.min(100, Math.round((occupiedSeats / Math.max(1, tbl.capacity)) * 100));
+                      const isFull = occupiedSeats >= tbl.capacity;
+
+                      const badgeClass =
+                        tbl.zone === 'VVIP'
+                          ? 'bg-amber-100 text-amber-900 border-amber-300'
+                          : tbl.zone === 'VIP'
+                          ? 'bg-indigo-100 text-indigo-900 border-indigo-300'
+                          : tbl.zone === 'Keluarga'
+                          ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                          : 'bg-slate-100 text-slate-700 border-slate-300';
+
+                      return (
+                        <div
+                          key={tbl.id}
+                          className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 flex flex-col justify-between space-y-3 hover:border-indigo-300 transition-colors"
+                        >
+                          <div>
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-sm font-bold text-slate-900">{tbl.name}</span>
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badgeClass}`}>
+                                    {tbl.zone}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  {tbl.shape === 'long' ? 'Long Table' : 'Round Table'}
+                                  {tbl.locationNote ? ` • 📍 ${tbl.locationNote}` : ''}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveSeatingTable(tbl.id)}
+                                className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-50 transition-colors cursor-pointer"
+                                title="Hapus Meja"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            {/* Capacity Bar */}
+                            <div className="mt-3">
+                              <div className="flex items-center justify-between text-xs mb-1">
+                                <span className="font-semibold text-slate-700">
+                                  Terisi: <strong className={isFull ? 'text-rose-600' : 'text-indigo-700'}>{occupiedSeats}</strong> / {tbl.capacity} Kursi
+                                </span>
+                                {editingEventId && (
+                                  <span className="text-[11px] text-emerald-700 font-medium">
+                                    Hadir: {checkedInSeats} org
+                                  </span>
+                                )}
+                              </div>
+                              <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all ${
+                                    isFull
+                                      ? 'bg-rose-500'
+                                      : ratio >= 80
+                                      ? 'bg-amber-500'
+                                      : 'bg-emerald-500'
+                                  }`}
+                                  style={{ width: `${ratio}%` }}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Assigned Guests Pills */}
+                            {editingEventId && (
+                              <div className="mt-2.5 pt-2 border-t border-slate-200/80">
+                                {assignedGuests.length === 0 ? (
+                                  <p className="text-[11px] text-slate-400 italic">
+                                    Belum ada tamu di meja ini
+                                  </p>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                                    {assignedGuests.map((ag) => (
+                                      <span
+                                        key={ag.id}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-white border border-slate-200 text-slate-800 shadow-2xs"
+                                      >
+                                        <span className="truncate max-w-[120px]">{ag.name}</span>
+                                        <span className="text-[10px] font-bold text-indigo-600">
+                                          ({Math.max(1, Number(ag.pax) || 1)})
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleAssignGuestToTable(ag, '')}
+                                          className="text-slate-400 hover:text-rose-600 ml-0.5 cursor-pointer"
+                                          title="Lepas dari meja"
+                                        >
+                                          ×
+                                        </button>
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Penentuan Tempat Duduk Tamu (Muncul saat Edit Acara) */}
+              <div className="border border-slate-200 rounded-xl p-4 sm:p-5 bg-white shadow-2xs space-y-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                      <Users className="w-4 h-4 text-indigo-600" />
+                      <span>2. Penentuan Meja &amp; Tempat Duduk Tamu</span>
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Pilih meja untuk masing-masing tamu VIP/VVIP. Perubahan penempatan meja langsung tersimpan otomatis ke data tamu.
+                    </p>
+                  </div>
+
+                  {editingEventId && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={tableGuestFilter}
+                        onChange={(e) => setTableGuestFilter(e.target.value as any)}
+                        className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-white text-slate-700"
+                      >
+                        <option value="vip_vvip">👑 Filter: Tamu VIP &amp; VVIP</option>
+                        <option value="unassigned">⏳ Belum Dapat Meja</option>
+                        <option value="assigned">✅ Sudah Dapat Meja</option>
+                        <option value="all">📋 Semua Tamu ({modalEventGuests.length})</option>
+                      </select>
+
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={tableGuestSearch}
+                          onChange={(e) => setTableGuestSearch(e.target.value)}
+                          placeholder="Cari nama tamu..."
+                          className="pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg w-44 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {!editingEventId ? (
+                  <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200 text-xs text-amber-900">
+                    💡 <strong>Tips:</strong> Simpan acara baru ini terlebih dahulu, lalu tambahkan daftar tamu. Setelah itu Anda dapat langsung menempatkan tamu ke meja yang sudah disiapkan.
+                  </div>
+                ) : loadingModalGuests ? (
+                  <p className="text-xs text-slate-500 py-6 text-center">
+                    Memuat daftar tamu acara...
+                  </p>
+                ) : modalEventGuests.length === 0 ? (
+                  <p className="text-xs text-slate-500 py-6 text-center italic">
+                    Belum ada data tamu pada acara ini. Silakan tambahkan atau import tamu terlebih dahulu di halaman Detail Acara.
+                  </p>
+                ) : (
+                  <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
+                    {(() => {
+                      const filtered = modalEventGuests.filter((g) => {
+                        const matchSearch =
+                          !tableGuestSearch.trim() ||
+                          (g.name || '').toLowerCase().includes(tableGuestSearch.trim().toLowerCase()) ||
+                          (g.category || '').toLowerCase().includes(tableGuestSearch.trim().toLowerCase()) ||
+                          (g.tableNumber || '').toLowerCase().includes(tableGuestSearch.trim().toLowerCase());
+                        if (!matchSearch) return false;
+                        if (tableGuestFilter === 'vip_vvip') {
+                          return /vip|vvip|keluarga/i.test(g.category || '');
+                        }
+                        if (tableGuestFilter === 'unassigned') {
+                          return !g.tableNumber;
+                        }
+                        if (tableGuestFilter === 'assigned') {
+                          return Boolean(g.tableNumber);
+                        }
+                        return true;
+                      });
+
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="py-6 text-center text-xs text-slate-500">
+                            Tidak ada tamu pada filter ini. Coba ubah filter ke <strong>Semua Tamu</strong>.
+                          </div>
+                        );
+                      }
+
+                      return filtered.slice(0, 100).map((g) => {
+                        const gPax = Math.max(1, Number(g.pax) || 1);
+                        return (
+                          <div
+                            key={g.id}
+                            className="px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-slate-50"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-slate-900 truncate">
+                                  {g.name}
+                                </span>
+                                {g.category && (
+                                  <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                    {g.category}
+                                  </span>
+                                )}
+                                <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-slate-100 text-slate-700">
+                                  {gPax} Kursi (Pax)
+                                </span>
+                              </div>
+                              {g.address && (
+                                <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                                  {g.address}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <select
+                                value={g.tableNumber || ''}
+                                disabled={updatingGuestSeatId === g.id || seatingTables.length === 0}
+                                onChange={(e) => handleAssignGuestToTable(g, e.target.value)}
+                                className={`border rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                                  g.tableNumber
+                                    ? 'border-amber-400 bg-amber-50/70 text-amber-900'
+                                    : 'border-slate-300 bg-white text-slate-700'
+                                }`}
+                              >
+                                <option value="">-- Belum Pilih Meja --</option>
+                                {seatingTables.map((tbl) => {
+                                  const used = modalEventGuests
+                                    .filter(
+                                      (other) =>
+                                        other.id !== g.id &&
+                                        (other.tableNumber || '') === tbl.name &&
+                                        other.rsvpStatus !== 'declined'
+                                    )
+                                    .reduce((acc, other) => acc + Math.max(1, Number(other.pax) || 1), 0);
+                                  const remaining = Math.max(0, tbl.capacity - used);
+                                  return (
+                                    <option key={tbl.id} value={tbl.name}>
+                                      {tbl.name} ({tbl.zone}) — Sisa {remaining}/{tbl.capacity} kursi
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-8 pt-5 border-t border-gray-100 flex justify-end gap-3">
           <button 
             type="button" 
-            onClick={() => setIsCreating(false)} 
+            onClick={() => closeEventModal(true)} 
             className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
           >
             Batal
@@ -1273,7 +2062,10 @@ export default function EventsList() {
         <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-100">
           <button 
             type="button" 
-            onClick={() => setEventToDelete(null)} 
+            onClick={() => {
+              setEventToDelete(null);
+              showCancelAlert('Penghapusan acara telah dibatalkan.');
+            }} 
             className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
           >
             Batal

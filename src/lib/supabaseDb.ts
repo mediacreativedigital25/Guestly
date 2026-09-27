@@ -84,11 +84,12 @@ export const supabaseDb = {
   },
 
   async getGuestByTicket(eventId: string, ticketCode: string): Promise<Guest | null> {
+    const cleanCode = String(ticketCode || '').trim().split('?')[0].split('#')[0];
     const { data, error } = await supabase
       .from('guests')
       .select('*')
       .eq('event_id', eventId)
-      .eq('ticket_code', ticketCode)
+      .ilike('ticket_code', cleanCode)
       .maybeSingle();
 
     if (error) {
@@ -271,27 +272,34 @@ export const supabaseDb = {
 function rowToEvent(row: any): EventRecord {
   const extra = row.settings && typeof row.settings === 'object' ? row.settings : {};
   return {
+    ...extra,
     id: row.id,
     title: row.title || extra.title,
-    coupleName: row.couple_name ?? extra.coupleName,
-    slug: row.slug ?? extra.slug,
+    coupleName: row.couple_name || extra.coupleName,
+    slug: row.slug || extra.slug,
     partnerId: row.partner_id || extra.partnerId || '',
     clientId: row.client_id || extra.clientId || '',
     date: row.date || extra.date || '',
-    time: row.time ?? extra.time,
-    location: row.location ?? extra.location,
+    time: row.time || extra.time,
+    location: row.location || extra.location,
     rsvpTheme: row.rsvp_theme || row.theme || extra.rsvpTheme || 'default',
-    thumbnailUrl: row.thumbnail_url || extra.thumbnailUrl || row.cover_image || extra.coverImage,
-    frameOverlayUrl: row.frame_overlay_url || extra.frameOverlayUrl,
-    digitalInviteLink: row.digital_invite_link || extra.digitalInviteLink,
-    invitationUrl: row.invitation_url || extra.invitationUrl,
+    thumbnailUrl:
+      row.thumbnail_url ||
+      extra.thumbnailUrl ||
+      row.cover_image ||
+      extra.coverImage ||
+      extra.eInvitePhotoUrl ||
+      '',
+    frameOverlayUrl: row.frame_overlay_url || extra.frameOverlayUrl || '',
+    digitalInviteLink: row.digital_invite_link || extra.digitalInviteLink || '',
+    invitationUrl: row.invitation_url || extra.invitationUrl || '',
     status: row.status || extra.status || 'published',
     sessions: row.sessions || extra.sessions || [],
     guestCategories: row.guest_categories || extra.guestCategories || ['VIP', 'Keluarga', 'Reguler'],
     invitationTypes: row.invitation_types || extra.invitationTypes || ['Undangan Fisik', 'Undangan Cetak', 'Undangan Digital'],
     souvenirTypes: row.souvenir_types || extra.souvenirTypes || [],
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
   };
 }
 

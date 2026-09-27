@@ -168,10 +168,9 @@ export default function MediaLibrary() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="max-w-7xl mx-auto">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Media Library</h1>
           <p className="text-sm text-gray-500">Kelola semua file R2 Anda di sini.</p>
         </div>
         <button 

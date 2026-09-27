@@ -3,7 +3,7 @@ import { UploadCloud, Link as LinkIcon, MessageSquare, CreditCard, Image as Imag
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useSettings } from '../../SettingsContext';
-import { showAlert, showConfirm } from '../../lib/alerts';
+import { showAlert, showConfirm, showCancelAlert } from '../../lib/alerts';
 import AdminSalespageSettings from './AdminSalespageSettings';
 import { MediaUploader } from '../../components/media/MediaUploader';
 
@@ -104,10 +104,6 @@ export default function AdminSettings() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Admin Setting</h1>
-      </div>
-
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         <div className="flex border-b border-gray-200">
           <button
@@ -191,7 +187,21 @@ export default function AdminSettings() {
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-gray-100 flex justify-end">
+              <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => {
+                    if (settings) {
+                      setLogoUrl(settings.logoUrl || '');
+                      setFaviconUrl(settings.faviconUrl || '');
+                    }
+                    showCancelAlert('Perubahan pengaturan branding telah dibatalkan.');
+                  }}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
+                >
+                  Batal
+                </button>
                 <button type="button" onClick={() => handleSave('branding')} disabled={isSaving} className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors disabled:opacity-50">
                   {isSaving ? 'Menyimpan...' : 'Simpan Branding'}
                 </button>
@@ -251,7 +261,22 @@ export default function AdminSettings() {
                   </div>
                 </div>
               </div>
-              <div className="pt-4 border-t border-gray-100 flex justify-end">
+              <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => {
+                    if (settings) {
+                      setTemplateOrderCreated(settings.fonnteTemplates?.orderCreated || '');
+                      setTemplateOrderPaid(settings.fonnteTemplates?.orderPaid || '');
+                      setTemplateOrderCancelled(settings.fonnteTemplates?.orderCancelled || '');
+                    }
+                    showCancelAlert('Perubahan pengaturan Fonnte telah dibatalkan.');
+                  }}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
+                >
+                  Batal
+                </button>
                 <button type="button" onClick={() => handleSave('fonnte')} disabled={isSaving} className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors disabled:opacity-50">
                   {isSaving ? 'Menyimpan...' : 'Simpan Pengaturan Fonnte'}
                 </button>
@@ -336,7 +361,25 @@ export default function AdminSettings() {
                   </div>
                 </div>
               </div>
-              <div className="pt-4 border-t border-gray-100 flex justify-end">
+              <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => {
+                    if (settings) {
+                      setActivePaymentMethod(settings.activePaymentMethod || 'manual');
+                      setClientKey(settings.paymentGateway?.clientKey || '');
+                      setBankName(settings.manualPayment?.bankName || '');
+                      setAccountNumber(settings.manualPayment?.accountNumber || '');
+                      setAccountName(settings.manualPayment?.accountName || '');
+                      setInstructions(settings.manualPayment?.instructions || '');
+                    }
+                    showCancelAlert('Perubahan pengaturan metode pembayaran telah dibatalkan.');
+                  }}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
+                >
+                  Batal
+                </button>
                 <button type="button" onClick={() => handleSave('payment_methods')} disabled={isSaving} className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors disabled:opacity-50">
                   {isSaving ? 'Menyimpan...' : 'Simpan Pengaturan Pembayaran'}
                 </button>
@@ -356,7 +399,20 @@ export default function AdminSettings() {
                 data={salespageData} 
                 updateData={updateSP} 
               />
-              <div className="pt-4 border-t border-gray-100 flex justify-end">
+              <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => {
+                    if (settings?.salespage) {
+                      setSalespageData(settings.salespage);
+                    }
+                    showCancelAlert('Perubahan pengaturan Salespage telah dibatalkan.');
+                  }}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
+                >
+                  Batal
+                </button>
                 <button type="button" onClick={() => handleSave('salespage')} disabled={isSaving} className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors disabled:opacity-50">
                   {isSaving ? 'Menyimpan...' : 'Simpan Halaman Salespage'}
                 </button>

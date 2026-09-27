@@ -92,13 +92,6 @@ export default function RolesSettings() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Arsitektur Role, Bisnis & Hak Akses (RBAC)</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Struktur pendelegasian wewenang berjenjang, pengelompokan bisnis (Multi-Tenant WO), dan proteksi fitur.
-        </p>
-      </div>
-
       {/* Visual Hierarchy Flow */}
       <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm space-y-4">
         <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-700">

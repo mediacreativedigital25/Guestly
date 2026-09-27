@@ -4,7 +4,7 @@ import { updatePassword } from 'firebase/auth';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { User, Lock, Save } from 'lucide-react';
-import { showAlert } from '../lib/alerts';
+import { showAlert, showCancelAlert } from '../lib/alerts';
 
 export default function UserProfile() {
   const { currentUser, appUser } = useAuth();
@@ -71,10 +71,6 @@ export default function UserProfile() {
 
   return (
     <div className="space-y-6 max-w-4xl">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Profil Saya</h1>
-      </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
           <div className="border-b border-gray-200 px-6 py-4 flex items-center gap-2">
@@ -122,11 +118,23 @@ export default function UserProfile() {
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white"
                 />
               </div>
-              <div className="pt-2">
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="button"
+                  disabled={isSavingProfile}
+                  onClick={() => {
+                    setName(appUser.name || '');
+                    setPhone(appUser.phone || '');
+                    showCancelAlert('Perubahan profil telah dibatalkan.');
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-50"
+                >
+                  Batal
+                </button>
                 <button
                   type="submit"
                   disabled={isSavingProfile}
-                  className="flex items-center justify-center gap-2 w-full px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                  className="flex-[2] flex items-center justify-center gap-2 px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
                 >
                   <Save className="h-4 w-4" />
                   {isSavingProfile ? 'Menyimpan...' : 'Simpan Profil'}

@@ -49,13 +49,25 @@ export default function App() {
           <Route path="/auth/login" element={<AppLayout />}>
             <Route index element={<Dashboard />} />
             <Route path="events" element={<EventsList />} />
+            <Route path="events/add" element={<EventsList />} />
+            <Route path="events/:eventId/edit" element={<EventsList />} />
+            <Route path="events/:eventId/tables" element={<EventsList />} />
             <Route path="events/:eventId" element={<EventDetails />} />
+            <Route path="events/:eventId/guests/add" element={<EventDetails />} />
+            <Route path="events/:eventId/guests/:guestId/edit" element={<EventDetails />} />
             <Route path="events/:eventId/scan" element={<Scanner />} />
             <Route path="clients" element={<ClientsList />} />
+            <Route path="clients/add" element={<ClientsList />} />
+            <Route path="clients/:clientId/edit" element={<ClientsList />} />
+            <Route path="clients/:clientId/view" element={<ClientsList />} />
             <Route path="approvals" element={<Approvals />} />
             <Route path="settings" element={<WhiteLabelSettings />} />
             <Route path="businesses" element={<BusinessesList />} />
+            <Route path="businesses/add" element={<BusinessesList />} />
+            <Route path="businesses/:businessId/edit" element={<BusinessesList />} />
             <Route path="users" element={<UsersList />} />
+            <Route path="users/add" element={<UsersList />} />
+            <Route path="users/:userId/edit" element={<UsersList />} />
             <Route path="roles" element={<RolesSettings />} />
             <Route path="changelog" element={<Changelog />} />
             

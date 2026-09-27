@@ -26,7 +26,7 @@ import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { SouvenirItem, SouvenirLog, Guest, EventRecord } from '../types';
 import { parseFirestoreDate } from '../lib/utils';
-import { showAlert, showConfirm } from '../lib/alerts';
+import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 import { souvenirStorage } from '../services/souvenirStorage';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -1278,7 +1278,10 @@ export default function SouvenirManagement({
               <div className="pt-3 border-t border-gray-100 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsAddModalOpen(false)}
+                  onClick={() => {
+                    setIsAddModalOpen(false);
+                    showCancelAlert('Penambahan souvenir baru telah dibatalkan.');
+                  }}
                   className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                 >
                   Batal
@@ -1368,7 +1371,10 @@ export default function SouvenirManagement({
               <div className="pt-3 border-t border-gray-100 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsEditModalOpen(false)}
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    showCancelAlert('Perubahan data souvenir telah dibatalkan.');
+                  }}
                   className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                 >
                   Batal
@@ -1497,7 +1503,10 @@ export default function SouvenirManagement({
               <div className="pt-3 border-t border-gray-100 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsAuditModalOpen(false)}
+                  onClick={() => {
+                    setIsAuditModalOpen(false);
+                    showCancelAlert('Pemeriksaan stok fisik (Stock Opname) telah dibatalkan.');
+                  }}
                   className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                 >
                   Batal

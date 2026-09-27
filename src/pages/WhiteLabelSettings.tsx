@@ -4,6 +4,7 @@ import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Building2, UploadCloud, Link as LinkIcon, Phone, Image as ImageIcon, MapPin, Lock, CheckCircle2 } from 'lucide-react';
 import { MediaUploader } from '../components/media/MediaUploader';
+import { showAlert, showCancelAlert } from '../lib/alerts';
 
 export default function WhiteLabelSettings() {
   const { appUser } = useAuth();
@@ -71,9 +72,11 @@ export default function WhiteLabelSettings() {
       appUser.brandingImageUrl = brandingImageUrl;
       
       setMessage({ text: 'Pengaturan branding berhasil disimpan.', type: 'success' });
+      showAlert('Berhasil', 'Pengaturan branding berhasil disimpan.', 'success');
     } catch (error: any) {
       console.error(error);
       setMessage({ text: error.message || 'Gagal menyimpan pengaturan.', type: 'error' });
+      showAlert('Gagal', error.message || 'Gagal menyimpan pengaturan.', 'error');
     } finally {
       setIsSaving(false);
     }
@@ -85,10 +88,6 @@ export default function WhiteLabelSettings() {
 
   return (
     <div className="w-full space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">White Label & Profil Partner</h1>
-      </div>
-
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="p-6 sm:p-8 space-y-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-5">
@@ -341,7 +340,26 @@ export default function WhiteLabelSettings() {
               </div>
             </div>
 
-            <div className="pt-4 border-t border-gray-100 flex justify-end">
+            <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={() => {
+                  if (appUser) {
+                    setBusinessName(appUser.businessName || '');
+                    setBusinessAddress(appUser.businessAddress || '');
+                    setBusinessCity(appUser.businessCity || '');
+                    setPhone(appUser.phone || '');
+                    setLogoUrl(appUser.logoUrl || '');
+                    setBannerUrl(appUser.bannerUrl || '');
+                    setBrandingImageUrl(appUser.brandingImageUrl || '');
+                  }
+                  showCancelAlert('Perubahan pengaturan White Label dibatalkan.');
+                }}
+                className="px-5 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 font-medium disabled:opacity-50 transition-colors"
+              >
+                Batal
+              </button>
               <button
                 type="submit"
                 disabled={isSaving}

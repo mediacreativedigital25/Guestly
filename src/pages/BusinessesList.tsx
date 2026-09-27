@@ -28,12 +28,16 @@ import {
   Lock
 } from 'lucide-react';
 import { useAuth } from '../AuthContext';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { Modal } from '../components/Modal';
-import { showAlert, showConfirm } from '../lib/alerts';
+import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 import { getRoleLabel, isPartnerBusinessRegistered } from '../lib/utils';
 
 export default function BusinessesList() {
   const { appUser } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { businessId: routeBusinessId } = useParams<{ businessId?: string }>();
   const [users, setUsers] = useState<User[]>([]);
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -185,9 +189,32 @@ export default function BusinessesList() {
     setEventCredit(5);
     setAllowManualEvent(false);
     setIsAdding(true);
+    if (!location.pathname.endsWith('/businesses/add')) {
+      navigate('/auth/login/businesses/add');
+    }
   };
 
-  const handleOpenEditModal = (owner: User) => {
+  const closeAddBusinessModal = (showCancel = false) => {
+    setIsAdding(false);
+    if (location.pathname !== '/auth/login/businesses') {
+      navigate('/auth/login/businesses');
+    }
+    if (showCancel) {
+      showCancelAlert('Pendaftaran bisnis partner baru telah dibatalkan.');
+    }
+  };
+
+  const closeEditBusinessModal = (showCancel = false) => {
+    setIsEditing(false);
+    if (location.pathname !== '/auth/login/businesses') {
+      navigate('/auth/login/businesses');
+    }
+    if (showCancel) {
+      showCancelAlert('Perubahan data bisnis partner telah dibatalkan.');
+    }
+  };
+
+  const handleOpenEditModal = (owner: User, skipNavigate = false) => {
     setError('');
     setEditingOwnerId(owner.id!);
     setEditBusinessName(owner.businessName || '');
@@ -201,7 +228,29 @@ export default function BusinessesList() {
     setEditEventCredit(owner.eventCredit !== undefined ? owner.eventCredit : (owner.eventQuota || 0));
     setEditAllowManualEvent(Boolean(owner.allowManualEvent ?? owner.eventManual));
     setIsEditing(true);
+    if (!skipNavigate && owner.id) {
+      navigate(`/auth/login/businesses/${owner.id}/edit`);
+    }
   };
+
+  // Sync URL sub-routes (/businesses/add, /businesses/:businessId/edit) with modal state
+  useEffect(() => {
+    if (loading) return;
+    const path = location.pathname;
+    if (path.endsWith('/businesses/add')) {
+      if (!isAdding) {
+        handleOpenAddModal();
+      }
+    } else if (routeBusinessId && path.endsWith('/edit')) {
+      const found = partnerBusinesses.find(u => u.id === routeBusinessId);
+      if (found && (!isEditing || editingOwnerId !== found.id)) {
+        handleOpenEditModal(found, true);
+      }
+    } else if (path === '/auth/login/businesses') {
+      if (isAdding) setIsAdding(false);
+      if (isEditing) setIsEditing(false);
+    }
+  }, [location.pathname, routeBusinessId, partnerBusinesses, loading]);
 
   const syncDownstreamUsersBusinessName = async (partnerId: string, ownerId: string, newBizName: string) => {
     try {
@@ -330,6 +379,7 @@ Anda kini dapat membuat dan mengelola acara serta menambahkan tim Admin & Staff 
 
         await fetchData();
         setIsAdding(false);
+        navigate('/auth/login/businesses', { replace: true });
         showAlert('Berhasil', `Partner Guestly "${businessName.trim()}" beserta akun Owner berhasil didaftarkan!`, 'success');
       }
     } catch (err: any) {
@@ -378,6 +428,7 @@ Anda kini dapat membuat dan mengelola acara serta menambahkan tim Admin & Staff 
 
       await fetchData();
       setIsEditing(false);
+      navigate('/auth/login/businesses', { replace: true });
       showAlert('Berhasil', `Data Partner "${editBusinessName.trim()}" berhasil diperbarui & disinkronkan!`, 'success');
     } catch (err: any) {
       console.error('Error updating business:', err);
@@ -421,8 +472,7 @@ Anda kini dapat membuat dan mengelola acara serta menambahkan tim Admin & Staff 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Manajemen Bisnis & Partner Guestly</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="text-sm text-gray-500">
             Pendaftaran dan verifikasi resmi identitas usaha (Nama Usaha & Alamat Lengkap) untuk Partner Guestly (WO / EO / Agensi).
           </p>
         </div>
@@ -706,7 +756,7 @@ Anda kini dapat membuat dan mengelola acara serta menambahkan tim Admin & Staff 
       {/* Modal: Daftarkan Partner / Bisnis Baru */}
       <Modal
         isOpen={isAdding}
-        onClose={() => setIsAdding(false)}
+        onClose={closeAddBusinessModal}
         title="Daftarkan Partner / Bisnis Guestly Baru"
       >
         <form onSubmit={handleRegisterBusiness} className="space-y-4">
@@ -943,7 +993,7 @@ Anda kini dapat membuat dan mengelola acara serta menambahkan tim Admin & Staff 
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
             <button
               type="button"
-              onClick={() => setIsAdding(false)}
+              onClick={() => closeAddBusinessModal(true)}
               className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium"
             >
               Batal
@@ -962,7 +1012,7 @@ Anda kini dapat membuat dan mengelola acara serta menambahkan tim Admin & Staff 
       {/* Modal: Edit / Verifikasi Bisnis Partner */}
       <Modal
         isOpen={isEditing}
-        onClose={() => setIsEditing(false)}
+        onClose={closeEditBusinessModal}
         title="Edit & Verifikasi Data Bisnis Partner"
       >
         <form onSubmit={handleSaveEditBusiness} className="space-y-4">
@@ -1117,7 +1167,7 @@ Anda kini dapat membuat dan mengelola acara serta menambahkan tim Admin & Staff 
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
             <button
               type="button"
-              onClick={() => setIsEditing(false)}
+              onClick={() => closeEditBusinessModal(true)}
               className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium"
             >
               Batal

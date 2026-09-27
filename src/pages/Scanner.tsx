@@ -138,6 +138,8 @@ export default function Scanner() {
     message: string;
     guestName?: string;
     category?: string;
+    tableNumber?: string;
+    pax?: number;
     souvenirNotice?: string;
     operatorName?: string;
   } | null>(null);
@@ -670,12 +672,12 @@ export default function Scanner() {
   const processTicket = async (decodedText: string) => {
     if (isProcessingRef.current) return;
     
-    // Parse the decodedText to handle URLs or raw codes
+    // Parse the decodedText to handle URLs or raw codes (including ?v=... query or #... hash)
     let code = decodedText.trim();
     console.log("Scanned QR raw text:", code);
     
     try {
-      if (code.startsWith('http')) {
+      if (/^https?:\/\//i.test(code)) {
         const url = new URL(code);
         const ticketParam = url.searchParams.get('ticket') || url.searchParams.get('code');
         if (ticketParam) {
@@ -686,15 +688,23 @@ export default function Scanner() {
              code = pathSegments[pathSegments.length - 1];
           }
         }
-      } else if (code.includes('/')) {
-        const segments = code.split('/');
-        code = segments[segments.length - 1];
+      } else {
+        // Strip query params (?v=...) and hash fragments first before splitting path
+        const withoutQuery = code.split('?')[0].split('#')[0];
+        if (withoutQuery.includes('/')) {
+          const segments = withoutQuery.split('/').filter(Boolean);
+          if (segments.length > 0) {
+            code = segments[segments.length - 1];
+          }
+        } else {
+          code = withoutQuery;
+        }
       }
     } catch (e) {
       console.warn("Failed to parse URL from QR, using raw text", e);
     }
     
-    code = (code || '').toUpperCase();
+    code = (code || '').split('?')[0].split('#')[0].trim().toUpperCase();
     console.log("Extracted ticket code:", code);
     
     if (lastScannedCodeRef.current === code) {
@@ -833,11 +843,19 @@ export default function Scanner() {
           successMessage = `✓ ${transactionResult.name} berhasil check-in & 🎁 Souvenir "${transactionResult.souvenirName}" diserahkan!${offlineBadge}`;
         }
 
+        const matchedGuestObj = allGuests.find(
+          (g) => g.id === transactionResult.guestDocId || (g.ticketCode || '').toUpperCase() === code
+        );
+        const guestTable = matchedGuestObj?.tableNumber || '';
+        const guestPax = matchedGuestObj?.pax ? Math.max(1, Number(matchedGuestObj.pax)) : undefined;
+
         setScanResult({ 
           status: 'success', 
           message: successMessage,
           guestName: transactionResult.name,
           category: transactionResult.category,
+          tableNumber: guestTable || undefined,
+          pax: guestPax,
           souvenirNotice: transactionResult.souvenirGiven ? `Souvenir: ${transactionResult.souvenirName}` : undefined,
           operatorName: currentOperator
         });
@@ -1647,17 +1665,35 @@ export default function Scanner() {
             {scanResult.status === 'success' ? <CheckCircle className="w-6 h-6" /> : <AlertCircle className="w-6 h-6" />}
           </div>
           <div className="flex-1">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 className="text-base font-bold">
                 {scanResult.status === 'success' 
                   ? (stationMode === 'souvenir_only' ? '✓ Souvenir Berhasil Diserahkan' : '✓ Check-in Berhasil') 
                   : '✕ Verifikasi Gagal'}
               </h4>
-              {scanResult.category && (
-                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
-                  {scanResult.category}
-                </span>
-              )}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {scanResult.category && (
+                  <span className={`text-xs font-bold px-2.5 py-0.5 rounded border ${
+                    /vvip/i.test(scanResult.category)
+                      ? 'bg-amber-100 text-amber-900 border-amber-300'
+                      : /vip/i.test(scanResult.category)
+                      ? 'bg-indigo-100 text-indigo-900 border-indigo-300'
+                      : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                  }`}>
+                    {/vvip|vip/i.test(scanResult.category) ? `👑 ${scanResult.category}` : scanResult.category}
+                  </span>
+                )}
+                {scanResult.tableNumber && (
+                  <span className="text-xs font-bold px-2.5 py-0.5 rounded bg-amber-500 text-white shadow-2xs">
+                    🪑 Meja: {scanResult.tableNumber}
+                  </span>
+                )}
+                {scanResult.pax && (
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-white/80 text-slate-800 border border-slate-300">
+                    {scanResult.pax} Kursi (Pax)
+                  </span>
+                )}
+              </div>
             </div>
             <p className="text-sm font-medium mt-1 leading-relaxed">
               {scanResult.message}

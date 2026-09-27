@@ -19,8 +19,9 @@ import {
   UserCheck
 } from 'lucide-react';
 import { useAuth } from '../AuthContext';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { Modal } from '../components/Modal';
-import { showAlert, showConfirm } from '../lib/alerts';
+import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 import { getRoleLabel, canUserAccessEvent, getUserBusinessId, shouldHideServiceInfo, isPartnerBusinessRegistered } from '../lib/utils';
 
 export default function UsersList() {
@@ -79,6 +80,9 @@ export default function UsersList() {
   const [editUserHideServiceInfo, setEditUserHideServiceInfo] = useState<boolean>(true);
 
   const { appUser } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { userId: routeUserId } = useParams<{ userId?: string }>();
 
   const canManageUsers = Boolean(appUser && ['superadmin', 'owner', 'admin', 'partner'].includes(appUser.role));
 
@@ -308,9 +312,32 @@ export default function UsersList() {
     }
 
     setIsAddingUser(true);
+    if (!location.pathname.endsWith('/users/add')) {
+      navigate('/auth/login/users/add');
+    }
   };
 
-  const handleOpenEdit = (user: User) => {
+  const closeAddUserModal = (showCancel = false) => {
+    setIsAddingUser(false);
+    if (location.pathname !== '/auth/login/users') {
+      navigate('/auth/login/users');
+    }
+    if (showCancel) {
+      showCancelAlert('Penambahan user / petugas baru telah dibatalkan.');
+    }
+  };
+
+  const closeEditUserModal = (showCancel = false) => {
+    setIsEditingUser(false);
+    if (location.pathname !== '/auth/login/users') {
+      navigate('/auth/login/users');
+    }
+    if (showCancel) {
+      showCancelAlert('Perubahan data user / petugas telah dibatalkan.');
+    }
+  };
+
+  const handleOpenEdit = (user: User, skipNavigate = false) => {
     if (!canModifyTargetUser(user)) {
       showAlert('Akses Ditolak', 'Anda tidak memiliki wewenang untuk mengubah pengguna ini.', 'warning');
       return;
@@ -333,7 +360,29 @@ export default function UsersList() {
     setEditUserHideServiceInfo(shouldHideServiceInfo(user));
     setEditUserPassword('');
     setIsEditingUser(true);
+    if (!skipNavigate && user.id) {
+      navigate(`/auth/login/users/${user.id}/edit`);
+    }
   };
+
+  // Sync URL sub-routes (/users/add, /users/:userId/edit) with modal state
+  useEffect(() => {
+    if (loading) return;
+    const path = location.pathname;
+    if (path.endsWith('/users/add')) {
+      if (!isAddingUser) {
+        handleOpenAddModal();
+      }
+    } else if (routeUserId && path.endsWith('/edit')) {
+      const found = users.find(u => u.id === routeUserId);
+      if (found && (!isEditingUser || editingUserId !== found.id)) {
+        handleOpenEdit(found, true);
+      }
+    } else if (path === '/auth/login/users') {
+      if (isAddingUser) setIsAddingUser(false);
+      if (isEditingUser) setIsEditingUser(false);
+    }
+  }, [location.pathname, routeUserId, users, loading]);
 
   const handleEditUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -419,6 +468,7 @@ export default function UsersList() {
 
       setUsers(users.map(u => (u.id === editingUserId ? { ...u, ...updateData } : u)));
       setIsEditingUser(false);
+      navigate('/auth/login/users', { replace: true });
       showAlert('Berhasil', 'Data pengguna, bisnis naungan & penugasan berhasil diperbarui!', 'success');
     } catch (err: any) {
       console.error('Error editing user:', err);
@@ -533,6 +583,7 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
       }
 
       setIsAddingUser(false);
+      navigate('/auth/login/users', { replace: true });
       showAlert('Berhasil', 'User / Petugas berhasil ditambahkan!', 'success');
     } catch (err: any) {
       console.error('Error adding user:', err);
@@ -647,8 +698,7 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Manajemen User, Bisnis & Petugas</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <p className="text-sm text-gray-500">
             {appUser?.role === 'superadmin' &&
               'Kelola seluruh Bisnis (Owner), Admin, Staff Lapangan, dan Client beserta pengelompokan bisnisnya.'}
             {(appUser?.role === 'owner' || appUser?.role === 'partner') &&
@@ -742,7 +792,7 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
       {/* Add User Modal */}
       <Modal
         isOpen={isAddingUser}
-        onClose={() => setIsAddingUser(false)}
+        onClose={closeAddUserModal}
         title={appUser?.role === 'admin' ? 'Tambah Petugas Staff Baru' : 'Tambah User / Petugas Baru'}
       >
         <form onSubmit={handleAddUser} className="space-y-4">
@@ -1100,7 +1150,7 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
           <div className="flex justify-end pt-4 mt-6 border-t border-gray-100">
             <button
               type="button"
-              onClick={() => setIsAddingUser(false)}
+              onClick={() => closeAddUserModal(true)}
               className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium mr-3"
             >
               Batal
@@ -1123,7 +1173,7 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
       {/* Edit User Modal */}
       <Modal
         isOpen={isEditingUser}
-        onClose={() => setIsEditingUser(false)}
+        onClose={closeEditUserModal}
         title="Edit User, Bisnis Naungan & Penugasan"
       >
         <form onSubmit={handleEditUser} className="space-y-4">
@@ -1363,7 +1413,7 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
           <div className="flex justify-end pt-4 mt-6 border-t border-gray-100">
             <button
               type="button"
-              onClick={() => setIsEditingUser(false)}
+              onClick={() => closeEditUserModal(true)}
               className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium mr-3"
             >
               Batal

@@ -357,18 +357,24 @@ function rowToEventModel(row: any): any {
     ...extra,
     id: row.id,
     title: row.title || extra.title || '',
-    coupleName: row.couple_name ?? extra.coupleName ?? '',
-    slug: row.slug ?? extra.slug ?? null,
-    partnerId: row.partner_id ?? extra.partnerId ?? '',
-    clientId: row.client_id ?? extra.clientId ?? '',
-    date: row.date ?? extra.date ?? '',
-    time: row.time ?? extra.time ?? '',
-    location: row.location ?? extra.location ?? '',
-    rsvpTheme: row.rsvp_theme ?? row.theme ?? extra.rsvpTheme ?? 'default',
-    thumbnailUrl: row.thumbnail_url ?? extra.thumbnailUrl ?? row.cover_image ?? extra.coverImage ?? '',
-    frameOverlayUrl: row.frame_overlay_url ?? extra.frameOverlayUrl ?? '',
-    digitalInviteLink: row.digital_invite_link ?? extra.digitalInviteLink ?? '',
-    invitationUrl: row.invitation_url ?? extra.invitationUrl ?? '',
+    coupleName: row.couple_name || extra.coupleName || '',
+    slug: row.slug || extra.slug || null,
+    partnerId: row.partner_id || extra.partnerId || '',
+    clientId: row.client_id || extra.clientId || '',
+    date: row.date || extra.date || '',
+    time: row.time || extra.time || '',
+    location: row.location || extra.location || '',
+    rsvpTheme: row.rsvp_theme || row.theme || extra.rsvpTheme || 'default',
+    thumbnailUrl:
+      row.thumbnail_url ||
+      extra.thumbnailUrl ||
+      row.cover_image ||
+      extra.coverImage ||
+      extra.eInvitePhotoUrl ||
+      '',
+    frameOverlayUrl: row.frame_overlay_url || extra.frameOverlayUrl || '',
+    digitalInviteLink: row.digital_invite_link || extra.digitalInviteLink || '',
+    invitationUrl: row.invitation_url || extra.invitationUrl || '',
     status: row.status || extra.status || 'published',
     sessions: row.sessions || extra.sessions || [],
     guestCategories: row.guest_categories || extra.guestCategories || ['VIP', 'Keluarga', 'Reguler'],
@@ -670,6 +676,12 @@ function evaluateWhere(docData: any, id: string, field: string, op: string, val:
 
   switch (op) {
     case '==':
+      if (field === 'ticketCode') {
+        return (
+          String(fieldVal || '').trim().toUpperCase() ===
+          String(targetVal || '').trim().toUpperCase()
+        );
+      }
       return fieldVal === targetVal;
     case '!=':
       return fieldVal !== targetVal;
@@ -737,7 +749,7 @@ export async function getDocs(queryOrRef: any): Promise<QuerySnapshot> {
       for (const c of constraints) {
         if (c.__type === 'where' && c.op === '==') {
           if (c.field === 'eventId') q = q.eq('event_id', c.value);
-          else if (c.field === 'ticketCode') q = q.eq('ticket_code', c.value);
+          else if (c.field === 'ticketCode') q = q.ilike('ticket_code', String(c.value || '').trim());
           else if (c.field === 'attended') q = q.eq('attended', c.value);
           else if (c.field === 'rsvpStatus') q = q.eq('rsvp_status', c.value);
         }

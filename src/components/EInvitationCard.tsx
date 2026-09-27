@@ -4,7 +4,7 @@ import { Calendar, MapPin, Heart } from 'lucide-react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { EventRecord, Guest, EInviteTemplate } from '../types';
-import { parseFirestoreDate, resolveMediaUrl } from '../lib/utils';
+import { parseFirestoreDate, getMediaFallbackUrls } from '../lib/utils';
 import { useSettings } from '../SettingsContext';
 import { useAuth } from '../AuthContext';
 
@@ -136,13 +136,36 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
   const { settings } = useSettings();
   const { appUser } = useAuth();
   const [partnerLogoUrl, setPartnerLogoUrl] = useState<string | null>(null);
-  const [logoLoadError, setLogoLoadError] = useState(false);
-  const [emblemLoadError, setEmblemLoadError] = useState(false);
+  const [couplePhotoIdx, setCouplePhotoIdx] = useState(0);
+  const [logoIdx, setLogoIdx] = useState(0);
+  const [emblemIdx, setEmblemIdx] = useState(0);
+  const [templateIdx, setTemplateIdx] = useState(0);
+
+  const rawCoupleUrlKey = [
+    event?.eInvitePhotoUrl,
+    event?.thumbnailUrl,
+    (event as any)?.coverImage,
+    (event as any)?.cover_image,
+    event?.frameOverlayUrl,
+  ]
+    .filter(Boolean)
+    .join('|');
 
   useEffect(() => {
-    setLogoLoadError(false);
-    setEmblemLoadError(false);
-  }, [appLogoUrl, settings?.logoUrl, settings?.faviconUrl, partnerLogoUrl]);
+    setCouplePhotoIdx(0);
+  }, [rawCoupleUrlKey]);
+
+  useEffect(() => {
+    setLogoIdx(0);
+  }, [appLogoUrl, settings?.logoUrl, partnerLogoUrl, appUser?.logoUrl]);
+
+  useEffect(() => {
+    setEmblemIdx(0);
+  }, [appFaviconUrl, settings?.faviconUrl, settings?.logoUrl]);
+
+  useEffect(() => {
+    setTemplateIdx(0);
+  }, [template?.imageUrl, event?.eInviteTemplateUrl]);
 
   useEffect(() => {
     const targetPartnerId = event?.partnerId;
@@ -221,16 +244,25 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
       ? '#3B6652'
       : '#C27D7A');
 
-  const templateImageUrl = resolveMediaUrl(
-    template?.imageUrl || event?.eInviteTemplateUrl || ''
-  );
+  const templateCandidates = getMediaFallbackUrls([
+    template?.imageUrl,
+    event?.eInviteTemplateUrl,
+  ]);
+  const templateImageUrl =
+    templateIdx < templateCandidates.length ? templateCandidates[templateIdx] : '';
 
-  const couplePhotoUrl = resolveMediaUrl(
-    event?.eInvitePhotoUrl ||
-      event?.thumbnailUrl ||
-      event?.frameOverlayUrl ||
-      DEFAULT_COUPLE_PHOTO
-  );
+  const couplePhotoCandidates = [
+    ...getMediaFallbackUrls([
+      event?.thumbnailUrl,
+      event?.eInvitePhotoUrl,
+      (event as any)?.coverImage,
+      (event as any)?.cover_image,
+      event?.frameOverlayUrl,
+    ]),
+    DEFAULT_COUPLE_PHOTO,
+  ];
+  const couplePhotoUrl =
+    couplePhotoCandidates[Math.min(couplePhotoIdx, couplePhotoCandidates.length - 1)];
 
   const headerText = (event?.eInviteHeaderText || 'THE WEDDING OF').toUpperCase();
   const { groom, bride } = splitCoupleNames(
@@ -289,16 +321,30 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
 
   const brandName = appBrandName || 'Guestly';
   const tagline = appTagline || 'Buku Tamu Digital';
-  const resolvedLogoUrl = resolveMediaUrl(
-    appLogoUrl || partnerLogoUrl || appUser?.logoUrl || settings?.logoUrl || ''
-  );
+  const logoCandidates = getMediaFallbackUrls([
+    appLogoUrl,
+    settings?.logoUrl,
+    partnerLogoUrl,
+    appUser?.logoUrl,
+  ]);
+  const resolvedLogoUrl = logoIdx < logoCandidates.length ? logoCandidates[logoIdx] : '';
+
   const domFaviconHref =
     typeof document !== 'undefined'
       ? (document.querySelector("link[rel~='icon']") as HTMLLinkElement | null)?.href || ''
       : '';
-  const resolvedQrEmblemUrl = resolveMediaUrl(
-    appFaviconUrl || settings?.faviconUrl || domFaviconHref || resolvedLogoUrl || ''
-  );
+  const validDomFavicon =
+    domFaviconHref && !domFaviconHref.endsWith('/favicon.ico') ? domFaviconHref : '';
+
+  const emblemCandidates = getMediaFallbackUrls([
+    appFaviconUrl,
+    settings?.faviconUrl,
+    validDomFavicon,
+    settings?.logoUrl,
+    resolvedLogoUrl,
+  ]);
+  const resolvedQrEmblemUrl =
+    emblemIdx < emblemCandidates.length ? emblemCandidates[emblemIdx] : '';
 
   return (
     <div
@@ -410,8 +456,8 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
             src={templateImageUrl}
             data-export-role="template-bg"
             alt={template?.name || 'Template E-Invitation'}
-            onError={(e) => {
-              (e.currentTarget as HTMLImageElement).style.display = 'none';
+            onError={() => {
+              setTemplateIdx((prev) => prev + 1);
             }}
             className="absolute inset-0 w-full h-full object-cover z-[1] pointer-events-none"
           />
@@ -430,11 +476,10 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
             src={couplePhotoUrl}
             data-export-role="arch-photo"
             alt={`${groom} & ${bride}`}
-            onError={(e) => {
-              const target = e.currentTarget as HTMLImageElement;
-              if (target.src !== DEFAULT_COUPLE_PHOTO) {
-                target.src = DEFAULT_COUPLE_PHOTO;
-              }
+            onError={() => {
+              setCouplePhotoIdx((prev) =>
+                prev < couplePhotoCandidates.length - 1 ? prev + 1 : prev
+              );
             }}
             className="w-full h-full object-cover object-top"
           />
@@ -606,20 +651,20 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
               backdropFilter: 'blur(10px)',
             }}
           >
-            {resolvedLogoUrl && !logoLoadError ? (
+            {resolvedLogoUrl ? (
               <img
                 src={resolvedLogoUrl}
                 alt={brandName}
-                onError={() => setLogoLoadError(true)}
+                onError={() => setLogoIdx((prev) => prev + 1)}
                 className="h-[60px] max-h-[62px] max-w-[256px] w-auto object-contain"
               />
             ) : (
               <div className="flex items-center justify-center gap-3 w-full">
-                {resolvedQrEmblemUrl && !emblemLoadError ? (
+                {resolvedQrEmblemUrl ? (
                   <img
                     src={resolvedQrEmblemUrl}
                     alt={brandName}
-                    onError={() => setEmblemLoadError(true)}
+                    onError={() => setEmblemIdx((prev) => prev + 1)}
                     className="w-12 h-12 object-contain shrink-0"
                   />
                 ) : (
@@ -651,11 +696,11 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
               />
               {/* Center QR Guestly Favicon Emblem (44x44px = ~5.3% area, safe under Level H 30% error correction) */}
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[44px] h-[44px] rounded-xl bg-white shadow-xs flex items-center justify-center p-1 border border-gray-200">
-                {resolvedQrEmblemUrl && !emblemLoadError ? (
+                {resolvedQrEmblemUrl ? (
                   <img
                     src={resolvedQrEmblemUrl}
                     alt={`${brandName} Favicon`}
-                    onError={() => setEmblemLoadError(true)}
+                    onError={() => setEmblemIdx((prev) => prev + 1)}
                     className="w-full h-full object-contain"
                   />
                 ) : (

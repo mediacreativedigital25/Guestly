@@ -117,7 +117,22 @@ export async function onRequestPost(context: any) {
     const reqCategory = formData.get('category');
     
     // Validasi: Category sesuai enum, Tidak boleh menerima Null Byte, Script Injection dll
-    const allowedCategories = ['attachment', 'avatar', 'logo', 'banner', 'thumbnail', 'favicon', 'library', 'frame', 'document', 'gallery', 'testimonial'];
+    const allowedCategories = [
+      'attachment',
+      'avatar',
+      'logo',
+      'banner',
+      'thumbnail',
+      'favicon',
+      'library',
+      'frame',
+      'document',
+      'gallery',
+      'testimonial',
+      'branding',
+      'general',
+      'E-Invitation',
+    ];
     category = reqCategory && typeof reqCategory === 'string' ? reqCategory : 'attachment';
     if (!allowedCategories.includes(category)) {
       statusCode = 400;
