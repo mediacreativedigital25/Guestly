@@ -3,7 +3,7 @@ import { useAuth } from '../AuthContext';
 import { collection, query, getDocs, where, addDoc, serverTimestamp, doc, setDoc, deleteDoc, updateDoc, runTransaction, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, createAuthUserSilently } from '../lib/firebase';
 import { Client, User } from '../types';
-import { parseFirestoreDate } from '../lib/utils';
+import { parseFirestoreDate, getUserBusinessId } from '../lib/utils';
 import { format } from 'date-fns';
 import { Plus, Trash2, Edit, Eye } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -46,43 +46,62 @@ export default function ClientsList() {
     const fetchData = async () => {
       try {
         const clientsRef = collection(db, 'clients');
-        const eventsRef = collection(db, 'events');
-        let qClients = query(clientsRef);
-        let qEvents = query(eventsRef);
-        
-        const isFullManagement = appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'admin';
-        if (!isFullManagement) {
-          if (!appUser?.partnerId && appUser?.role !== 'partner') {
+        const qClients = query(clientsRef);
+
+        const isSuperAdmin = appUser?.role === 'superadmin';
+        const myBizIds = new Set<string>(
+          [appUser?.id, appUser?.partnerId, getUserBusinessId(appUser)].filter(Boolean) as string[]
+        );
+
+        const usersRef = collection(db, 'users');
+        const allUsersSnap = await getDocs(usersRef);
+
+        if (!isSuperAdmin) {
+          const safePid = getUserBusinessId(appUser) || appUser?.id || '';
+          if (!safePid) {
             setClients([]);
+            setLoading(false);
             return;
           }
-          const pid = appUser?.role === 'partner' ? appUser.id : appUser?.partnerId;
-          const safePid = pid || '';
-          if (appUser?.role === 'partner') {
-             setPartners([{id: appUser.id!, name: appUser.businessName || appUser.name, logoUrl: appUser.logoUrl}]);
-          }
-          qClients = query(clientsRef, where('partnerId', '==', safePid));
-          qEvents = query(eventsRef, where('partnerId', '==', safePid));
+          allUsersSnap.docs.forEach(uDoc => {
+            const u = uDoc.data();
+            if (
+              (u.partnerId && myBizIds.has(u.partnerId)) ||
+              (u.createdBy && myBizIds.has(u.createdBy)) ||
+              myBizIds.has(uDoc.id)
+            ) {
+              myBizIds.add(uDoc.id);
+              if (u.partnerId) myBizIds.add(u.partnerId);
+            }
+          });
+          setPartners([{ id: safePid, name: appUser?.businessName || appUser?.name || 'Partner', logoUrl: appUser?.logoUrl }]);
+          setSelectedPartnerId(safePid);
         } else {
-          // Fetch partners for superadmin/owner/admin
-          const usersRef = collection(db, 'users');
-          const qPartners = query(usersRef, where('role', '==', 'partner'));
-          const partnersSnap = await getDocs(qPartners);
-          const partnersData = partnersSnap.docs.map(doc => ({ id: doc.id, name: doc.data().businessName || doc.data().name, logoUrl: doc.data().logoUrl }));
+          // Fetch businesses (owners & partners) for superadmin
+          const partnersData = allUsersSnap.docs
+            .filter(d => ['owner', 'partner'].includes(d.data().role))
+            .map(doc => ({
+              id: doc.data().partnerId || doc.id,
+              name: doc.data().businessName || doc.data().name,
+              logoUrl: doc.data().logoUrl
+            }));
           setPartners(partnersData);
           if (partnersData.length > 0) {
-             setSelectedPartnerId(partnersData[0].id);
+            setSelectedPartnerId(partnersData[0].id);
           }
         }
 
-                try {
+        try {
           const { getDocs, limit } = await import('firebase/firestore');
-          const qLimited = query(qClients, limit(50));
+          const qLimited = query(qClients, limit(100));
           const clientsSnap = await getDocs(qLimited);
-          const data = clientsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
+          let data = clientsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
+          if (!isSuperAdmin && myBizIds.size > 0) {
+            data = data.filter(c => c.partnerId && myBizIds.has(c.partnerId));
+          }
           setClients(data);
           setLastVisible(clientsSnap.docs[clientsSnap.docs.length - 1]);
-          setHasMore(clientsSnap.docs.length === 50);
+          setHasMore(clientsSnap.docs.length === 100);
           setLoading(false);
           const { getCountFromServer, collection, where } = await import('firebase/firestore');
           const eventsRef = collection(db, 'events');
@@ -176,7 +195,9 @@ export default function ClientsList() {
     setError('');
 
     const isFullManagement = appUser.role === 'superadmin' || appUser.role === 'owner' || appUser.role === 'admin';
-    const partnerId = isFullManagement ? (selectedPartnerId || appUser.id || 'default-partner') : (appUser.role === 'partner' ? appUser.id : appUser.partnerId || 'default-partner');
+    const partnerId = appUser.role === 'superadmin'
+      ? (selectedPartnerId || appUser.id || 'default-partner')
+      : (getUserBusinessId(appUser) || selectedPartnerId || appUser.id || 'default-partner');
 
     try {
       if (createAccount) {
@@ -225,12 +246,18 @@ export default function ClientsList() {
       
       if (createAccount) {
          const uid = await createAuthUserSilently(newClientEmail, newClientPassword);
+         const matchedPartner = partners.find(p => p.id === partnerId);
+         const resolvedBizName = matchedPartner?.name || appUser.businessName || undefined;
          const newUserDoc: User = {
             name: newClientName,
             email: newClientEmail,
             role: 'client',
             partnerId: partnerId,
             clientId: newDocId,
+            businessName: resolvedBizName,
+            hideServiceInfo: true,
+            createdBy: appUser.id,
+            createdByName: appUser.name || appUser.email,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp()
          };

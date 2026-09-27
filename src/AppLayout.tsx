@@ -1,23 +1,113 @@
 import React, { useState, useEffect } from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
+import { Outlet, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { useSettings } from './SettingsContext';
-import { LayoutDashboard, Users, CalendarDays, Settings, LogOut, FileText, ChevronDown, ChevronRight, ChevronLeft, UserCog, Menu, X, Shield, User, Briefcase, CreditCard, ShoppingBag, Package, Receipt, PanelLeftClose, PanelLeftOpen, Image as ImageIcon } from 'lucide-react';
-import { cn, getRoleLabel } from './lib/utils';
+import { LayoutDashboard, Users, CalendarDays, Settings, LogOut, FileText, ChevronDown, ChevronRight, ChevronLeft, UserCog, Menu, X, Shield, User, Briefcase, CreditCard, ShoppingBag, Package, Receipt, PanelLeftClose, PanelLeftOpen, Image as ImageIcon, Building2, Sparkles } from 'lucide-react';
+import { cn, getRoleLabel, shouldHideServiceInfo } from './lib/utils';
 import { auth, db } from './lib/firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, query, where, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export default function AppLayout() {
   const { currentUser, appUser, loading, logout } = useAuth();
   const { settings } = useSettings();
   const location = useLocation();
+  const navigate = useNavigate();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isPartnerMenuOpen, setIsPartnerMenuOpen] = useState(false);
   const [isAdminPanelMenuOpen, setIsAdminPanelMenuOpen] = useState(false);
   const [isServiceInfoMenuOpen, setIsServiceInfoMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [resolvedBusinessName, setResolvedBusinessName] = useState<string>('');
+
+  useEffect(() => {
+    let isMounted = true;
+    const resolveNaungan = async () => {
+      if (!appUser) {
+        if (isMounted) setResolvedBusinessName('');
+        return;
+      }
+      if (appUser.businessName || appUser.brandName) {
+        if (isMounted) setResolvedBusinessName(appUser.businessName || appUser.brandName || '');
+        return;
+      }
+      if (appUser.role === 'superadmin') {
+        if (isMounted) setResolvedBusinessName('Guestly Official (Super Admin)');
+        return;
+      }
+      if (appUser.role === 'owner' || appUser.role === 'partner') {
+        if (isMounted) setResolvedBusinessName(appUser.businessName || appUser.name || 'Owner WO');
+        return;
+      }
+
+      try {
+        let targetPartnerId = appUser.partnerId;
+
+        // If client or staff doesn't have a specific partnerId yet, check clients & events table
+        if (!targetPartnerId || targetPartnerId === 'default-partner') {
+          const clientLookupId = appUser.clientId || appUser.id;
+          if (clientLookupId) {
+            const clientSnap = await getDoc(doc(db, 'clients', clientLookupId));
+            if (clientSnap.exists() && clientSnap.data()?.partnerId && clientSnap.data()?.partnerId !== 'default-partner') {
+              targetPartnerId = clientSnap.data().partnerId;
+            } else {
+              const evSnap = await getDocs(query(collection(db, 'events'), where('clientId', '==', clientLookupId)));
+              const evWithPartner = evSnap.docs.find(d => d.data()?.partnerId && d.data()?.partnerId !== 'default-partner');
+              if (evWithPartner) {
+                targetPartnerId = evWithPartner.data().partnerId;
+              }
+            }
+          }
+        }
+
+        // Lookup Owner / Partner user document by targetPartnerId
+        if (targetPartnerId && targetPartnerId !== 'default-partner') {
+          const ownerSnap = await getDoc(doc(db, 'users', targetPartnerId));
+          if (ownerSnap.exists()) {
+            const oData = ownerSnap.data();
+            const nameFound = oData.businessName || oData.brandName || oData.name;
+            if (nameFound && isMounted) {
+              setResolvedBusinessName(nameFound);
+              return;
+            }
+          }
+          const partnerQuerySnap = await getDocs(query(collection(db, 'users'), where('partnerId', '==', targetPartnerId)));
+          const ownerDoc = partnerQuerySnap.docs.find(d => ['owner', 'partner'].includes(d.data()?.role));
+          if (ownerDoc && isMounted) {
+            const oData = ownerDoc.data();
+            setResolvedBusinessName(oData.businessName || oData.brandName || oData.name || 'Guestly Official');
+            return;
+          }
+        }
+
+        // Check if there is a primary Owner account in the system or createdByName
+        if (appUser.createdByName && isMounted) {
+          setResolvedBusinessName(appUser.createdByName.replace(/\s*\(.*\)$/, ''));
+          return;
+        }
+
+        const allUsersSnap = await getDocs(collection(db, 'users'));
+        const primaryOwner = allUsersSnap.docs.find(d => d.data()?.role === 'owner' || d.data()?.role === 'partner');
+        if (primaryOwner && isMounted) {
+          const pData = primaryOwner.data();
+          setResolvedBusinessName(pData.businessName || pData.brandName || pData.name || 'Guestly Official');
+          return;
+        }
+
+        if (isMounted) {
+          setResolvedBusinessName('Guestly Official');
+        }
+      } catch (_err) {
+        if (isMounted) setResolvedBusinessName('Guestly Official');
+      }
+    };
+
+    resolveNaungan();
+    return () => {
+      isMounted = false;
+    };
+  }, [appUser]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -25,6 +115,23 @@ export default function AppLayout() {
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
+
+  // Ensure URL resets to /auth/login whenever user is logged out
+  useEffect(() => {
+    if (!loading && (!currentUser || !appUser) && location.pathname !== '/auth/login') {
+      navigate('/auth/login', { replace: true });
+    }
+  }, [loading, currentUser, appUser, location.pathname, navigate]);
+
+  const handleLogout = () => {
+    setIsUserMenuOpen(false);
+    setIsPartnerMenuOpen(false);
+    setIsAdminPanelMenuOpen(false);
+    setIsServiceInfoMenuOpen(false);
+    setIsMobileMenuOpen(false);
+    navigate('/auth/login', { replace: true });
+    logout();
+  };
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,6 +191,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }
+      navigate('/auth/login', { replace: true });
     } catch (error: any) {
       setLoginError(error.message || 'Otentikasi gagal. Periksa kembali data Anda.');
     } finally {
@@ -324,8 +432,8 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
             </Link>
           ))}
 
-           {/* Informasi Layanan Dropdown - Hidden for Staff & Admin */}
-          {!['staff', 'admin'].includes(appUser.role) && (
+           {/* Informasi Layanan Dropdown - Hidden for Staff, Admin, and Clients under a Business/Owner */}
+          {!shouldHideServiceInfo(appUser) && (
           <div className="mt-2">
             <button 
               onClick={() => {
@@ -437,6 +545,17 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                </button>
                {!isSidebarCollapsed && isUserMenuOpen && (
                  <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
+                    {appUser.role === 'superadmin' && (
+                      <Link
+                        to="/auth/login/businesses"
+                        className={cn(
+                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                          location.pathname === '/auth/login/businesses' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        )}
+                      >
+                        Manajemen Bisnis
+                      </Link>
+                    )}
                     <Link
                       to="/auth/login/users"
                       className={cn(
@@ -446,7 +565,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     >
                       User & Petugas
                     </Link>
-                    {['superadmin', 'owner'].includes(appUser.role) && (
+                    {['superadmin', 'owner', 'admin'].includes(appUser.role) && (
                       <Link
                         to="/auth/login/roles"
                         className={cn(
@@ -461,28 +580,28 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                )}
              </div>
 
-             <div className="mt-2">
-               <button 
-                 onClick={() => {
-                   if (isSidebarCollapsed) {
-                     setIsSidebarCollapsed(false);
-                     setIsAdminPanelMenuOpen(true);
-                   } else {
-                     setIsAdminPanelMenuOpen(!isAdminPanelMenuOpen);
-                   }
-                 }}
-                 title={isSidebarCollapsed ? "Admin Panel" : undefined}
-                 className={cn("w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors", isSidebarCollapsed ? "justify-center px-0" : "")}
-               >
-                 <div className="flex items-center gap-3">
-                    <Shield className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
-                    {!isSidebarCollapsed && <span>Admin Panel</span>}
-                 </div>
-                 {!isSidebarCollapsed && (isAdminPanelMenuOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />)}
-               </button>
-               {!isSidebarCollapsed && isAdminPanelMenuOpen && (
-                 <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
-                    {appUser.role === 'superadmin' && (
+             {appUser.role === 'superadmin' && (
+               <div className="mt-2">
+                 <button 
+                   onClick={() => {
+                     if (isSidebarCollapsed) {
+                       setIsSidebarCollapsed(false);
+                       setIsAdminPanelMenuOpen(true);
+                     } else {
+                       setIsAdminPanelMenuOpen(!isAdminPanelMenuOpen);
+                     }
+                   }}
+                   title={isSidebarCollapsed ? "Admin Panel" : undefined}
+                   className={cn("w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors", isSidebarCollapsed ? "justify-center px-0" : "")}
+                 >
+                   <div className="flex items-center gap-3">
+                      <Shield className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                      {!isSidebarCollapsed && <span>Admin Panel</span>}
+                   </div>
+                   {!isSidebarCollapsed && (isAdminPanelMenuOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />)}
+                 </button>
+                 {!isSidebarCollapsed && isAdminPanelMenuOpen && (
+                   <div className="ml-8 mt-1 flex flex-col gap-1 space-y-1">
                       <Link
                         to="/auth/login/admin/services"
                         className={cn(
@@ -495,8 +614,6 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                           Layanan
                         </div>
                       </Link>
-                    )}
-                    {['superadmin', 'owner'].includes(appUser.role) && (
                       <Link
                         to="/auth/login/admin/invoice"
                         className={cn(
@@ -509,8 +626,6 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                           Invoice
                         </div>
                       </Link>
-                    )}
-                    {appUser.role === 'superadmin' && (
                       <Link
                         to="/auth/login/admin/settings"
                         className={cn(
@@ -523,52 +638,56 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                           Admin Setting
                         </div>
                       </Link>
-                    )}
-                    <Link
-                      to="/auth/login/admin/calendar"
-                      className={cn(
-                        "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        location.pathname === '/auth/login/admin/calendar' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <CalendarDays className="h-4 w-4" />
-                        Kalender Acara
-                      </div>
-                    </Link>
-                    <Link
-                      to="/auth/login/admin/wa-templates"
-                      className={cn(
-                        "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        location.pathname === '/auth/login/admin/wa-templates' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <FileText className="h-4 w-4" />
-                        Template WA
-                      </div>
-                    </Link>
-                 </div>
-               )}
-             </div>
+                      <Link
+                        to="/auth/login/admin/calendar"
+                        className={cn(
+                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                          location.pathname === '/auth/login/admin/calendar' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <CalendarDays className="h-4 w-4" />
+                          Kalender Acara
+                        </div>
+                      </Link>
+                      <Link
+                        to="/auth/login/admin/wa-templates"
+                        className={cn(
+                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                          location.pathname === '/auth/login/admin/wa-templates' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4" />
+                          Template WA
+                        </div>
+                      </Link>
+                      <Link
+                        to="/auth/login/admin/e-invitation-templates"
+                        className={cn(
+                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                          location.pathname === '/auth/login/admin/e-invitation-templates' ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-4 w-4" />
+                          Template E-Invitation
+                        </div>
+                      </Link>
+                   </div>
+                 )}
+               </div>
+             )}
              </>
           )}
 
-        </nav>
-        <div className="p-4 border-t border-gray-200">
-          {!isSidebarCollapsed && (
-            <div className="mb-3 px-3 py-2 bg-indigo-50/70 rounded-lg border border-indigo-100">
-              <div className="text-xs font-semibold text-gray-900 truncate">{appUser.name || appUser.email}</div>
-              <div className="text-[11px] font-medium text-indigo-700 mt-0.5">{getRoleLabel(appUser.role, appUser.staffType)}</div>
-            </div>
-          )}
           {!isStaff && (
             <Link
               to="/auth/login/changelog"
               onClick={() => setIsMobileMenuOpen(false)}
               title={isSidebarCollapsed ? "Changelog" : undefined}
               className={cn(
-                "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium mb-1 transition-colors",
+                "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium mt-1 transition-colors",
                 isSidebarCollapsed ? "justify-center px-0" : "",
                 location.pathname === '/auth/login/changelog' ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
               )}
@@ -579,9 +698,10 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
           )}
           <Link
             to="/auth/login/profile"
+            onClick={() => setIsMobileMenuOpen(false)}
             title={isSidebarCollapsed ? "Profil Saya" : undefined}
             className={cn(
-              "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium mb-1 transition-colors",
+              "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
               isSidebarCollapsed ? "justify-center px-0" : "",
               location.pathname === '/auth/login/profile' ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
             )}
@@ -589,8 +709,29 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
             <User className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
             {!isSidebarCollapsed && <span>Profil Saya</span>}
           </Link>
+
+        </nav>
+        <div className="p-4 border-t border-gray-200">
+          {!isSidebarCollapsed && (
+            <div className="mb-3 px-3.5 py-2.5 bg-indigo-50/70 rounded-xl border border-indigo-100">
+              <div className="text-xs font-semibold text-gray-900 truncate">{appUser.name || appUser.email}</div>
+              <div className="text-[11px] font-medium text-indigo-700 mt-0.5">{getRoleLabel(appUser.role, appUser.staffType)}</div>
+              {(appUser.businessName || resolvedBusinessName) && (
+                <>
+                  <div className="my-2 border-t border-indigo-200/70" />
+                  <div
+                    className="text-[11px] font-semibold text-gray-700 flex items-center gap-1.5 truncate"
+                    title={appUser.businessName || resolvedBusinessName}
+                  >
+                    <Building2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span className="truncate">{appUser.businessName || resolvedBusinessName}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           <button
-            onClick={logout}
+            onClick={handleLogout}
             title={isSidebarCollapsed ? "Keluar" : undefined}
             className={cn(
               "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors",
@@ -622,7 +763,16 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">
           <div className="w-full">
-            <Outlet />
+            {(shouldHideServiceInfo(appUser) &&
+              (location.pathname.startsWith('/auth/login/services') ||
+                location.pathname.startsWith('/auth/login/invoices'))) ||
+            (appUser.role !== 'superadmin' &&
+              (location.pathname.startsWith('/auth/login/admin') ||
+                location.pathname.startsWith('/auth/login/businesses'))) ? (
+              <Navigate to="/auth/login" replace />
+            ) : (
+              <Outlet />
+            )}
           </div>
         </main>
       </div>

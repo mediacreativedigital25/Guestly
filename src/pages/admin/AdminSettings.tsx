@@ -150,7 +150,14 @@ export default function AdminSettings() {
                       maxSize={2 * 1024 * 1024}
                       allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
                       defaultValue={logoUrl}
-                      onUploadSuccess={(data) => setLogoUrl(data.url)}
+                      onUploadSuccess={async (data) => {
+                        setLogoUrl(data.url);
+                        try {
+                          await setDoc(doc(db, 'settings', 'global'), { logoUrl: data.url }, { merge: true });
+                        } catch {
+                          // ignore auto-save error
+                        }
+                      }}
                       onUploadError={(err) => showAlert('Gagal', `Gagal mengunggah logo: ${err}`, 'error')}
                     />
                     <div className="text-sm text-gray-500 mt-2">Ukuran yang disarankan: 365 x 70 piksel.</div>
@@ -169,7 +176,14 @@ export default function AdminSettings() {
                       maxSize={512 * 1024}
                       allowedMimeTypes={['image/png', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/webp', '.ico']}
                       defaultValue={faviconUrl}
-                      onUploadSuccess={(data) => setFaviconUrl(data.url)}
+                      onUploadSuccess={async (data) => {
+                        setFaviconUrl(data.url);
+                        try {
+                          await setDoc(doc(db, 'settings', 'global'), { faviconUrl: data.url }, { merge: true });
+                        } catch {
+                          // ignore auto-save error
+                        }
+                      }}
                       onUploadError={(err) => showAlert('Gagal', `Gagal mengunggah favicon: ${err}`, 'error')}
                     />
                     <div className="text-sm text-gray-500 mt-2">Ukuran yang disarankan: 256 x 256 piksel.</div>

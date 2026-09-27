@@ -51,3 +51,28 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
+
+// Register Offline-First Service Worker in production; in dev mode, purge stale SW caches so module edits take effect immediately
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  if (import.meta.env.DEV) {
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      registrations.forEach((reg) => reg.unregister());
+    }).catch(() => {});
+    if ('caches' in window) {
+      caches.keys().then((keys) => {
+        keys.forEach((k) => {
+          if (k.startsWith('guestly-offline-shell')) {
+            caches.delete(k);
+          }
+        });
+      }).catch(() => {});
+    }
+  } else {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {
+        // Ignore registration error in restricted environments
+      });
+    });
+  }
+}
+

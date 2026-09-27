@@ -5,6 +5,7 @@ import { EventRecord, Guest } from '../types';
 import { parseFirestoreDate } from '../lib/utils';
 import { useSettings } from '../SettingsContext';
 import { ScanLine } from 'lucide-react';
+import { offlineSyncService } from '../services/offlineSyncService';
 
 export default function GreetingScreen() {
   const { eventId } = useParams();
@@ -18,63 +19,116 @@ export default function GreetingScreen() {
   
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const triggerGreetingDisplay = (newRecord: any) => {
+    if (!newRecord || !newRecord.attended) return;
+    const guest: Guest = {
+      id: newRecord.id,
+      eventId: newRecord.event_id || eventId || '',
+      name: newRecord.name,
+      ticketCode: newRecord.ticket_code || newRecord.ticketCode || '',
+      category: newRecord.category,
+      tableNumber: newRecord.seat || newRecord.tableNumber,
+      pax: newRecord.pax,
+      session: newRecord.session,
+      rsvpStatus: newRecord.rsvp_status || newRecord.rsvpStatus,
+      attended: true,
+      attendedAt: newRecord.check_in_time || newRecord.attendedAt || new Date().toISOString(),
+      wishes: newRecord.wishes,
+      createdAt: newRecord.created_at,
+      updatedAt: newRecord.updated_at
+    };
+
+    setLatestGuest(guest);
+    setShowGreeting(true);
+
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+
+    // Hide greeting after 8 seconds and return to waiting screen
+    timeoutRef.current = setTimeout(() => {
+      setShowGreeting(false);
+    }, 8000);
+  };
+
   // Fetch Event Info and Latest Guest
   useEffect(() => {
     if (!eventId) return;
+
+    // 0. Load cached offline snapshot immediately if available
+    const cachedSnapshot = offlineSyncService.getEventSnapshot(eventId);
+    if (cachedSnapshot?.event) {
+      setEventData(cachedSnapshot.event);
+      if (cachedSnapshot.partnerLogoUrl) {
+        setPartnerLogoUrl(cachedSnapshot.partnerLogoUrl);
+      }
+    }
     
     // 1. Initial Load of Event from Supabase
     supabaseDb.getEvent(eventId).then(async (data) => {
       if (data) {
         setEventData(data);
+        let resolvedLogo: string | null = null;
         if (data.partnerId) {
-          const partner = await supabaseDb.getUser(data.partnerId);
-          if (partner && (partner as any).logoUrl) {
-            setPartnerLogoUrl((partner as any).logoUrl);
+          try {
+            const partner = await supabaseDb.getUser(data.partnerId);
+            if (partner && (partner as any).logoUrl) {
+              resolvedLogo = (partner as any).logoUrl;
+              setPartnerLogoUrl(resolvedLogo);
+            }
+          } catch {
+            // ignore partner fetch error when offline
           }
         }
+        offlineSyncService.saveEventSnapshot(eventId, data, resolvedLogo);
       }
     }).catch(err => {
-      console.error("Error fetching event data from Supabase:", err);
-      setErrorInfo('Gagal memuat data acara dari Supabase.');
+      console.warn("Error fetching event data from Supabase, checking offline snapshot:", err);
+      const fallback = offlineSyncService.getEventSnapshot(eventId);
+      if (fallback?.event) {
+        setEventData(fallback.event);
+        if (fallback.partnerLogoUrl) setPartnerLogoUrl(fallback.partnerLogoUrl);
+      } else {
+        setErrorInfo('Gagal memuat data acara dari Supabase (Periksa koneksi internet).');
+      }
     });
 
     // 2. Realtime WebSocket subscription to Supabase guests table
     const unsubscribeGuests = supabaseDb.subscribeToGuests(eventId, (payload) => {
-      const newRecord = payload.new;
-      if (newRecord && newRecord.attended) {
-        const guest: Guest = {
-          id: newRecord.id,
-          eventId: newRecord.event_id,
-          name: newRecord.name,
-          ticketCode: newRecord.ticket_code,
-          category: newRecord.category,
-          tableNumber: newRecord.seat,
-          pax: newRecord.pax,
-          session: newRecord.session,
-          rsvpStatus: newRecord.rsvp_status,
-          attended: true,
-          attendedAt: newRecord.check_in_time || new Date().toISOString(),
-          wishes: newRecord.wishes,
-          createdAt: newRecord.created_at,
-          updatedAt: newRecord.updated_at
-        };
-
-        setLatestGuest(guest);
-        setShowGreeting(true);
-
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-        }
-
-        // Hide greeting after 8 seconds and return to waiting screen
-        timeoutRef.current = setTimeout(() => {
-          setShowGreeting(false);
-        }, 8000);
-      }
+      triggerGreetingDisplay(payload.new);
     });
+
+    // 3. Offline same-device BroadcastChannel & Storage listener
+    let bc: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        bc = new BroadcastChannel(`guestly_greeting_${eventId}`);
+        bc.onmessage = (ev) => {
+          if (ev.data?.type === 'GUEST_ARRIVAL' && ev.data?.payload) {
+            triggerGreetingDisplay(ev.data.payload);
+          }
+        };
+      } catch {
+        // ignore BroadcastChannel init error
+      }
+    }
+
+    const handleStoragePing = (e: StorageEvent) => {
+      if (e.key === `guestly_local_greeting_ping_${eventId}` && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          triggerGreetingDisplay(parsed);
+        } catch {
+          // ignore parse error
+        }
+      }
+    };
+    window.addEventListener('storage', handleStoragePing);
 
     return () => {
       unsubscribeGuests();
+      if (bc) bc.close();
+      window.removeEventListener('storage', handleStoragePing);
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }

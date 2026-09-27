@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { collection, query, getDocs, where, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, deleteField, runTransaction, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { EventRecord, Client } from '../types';
-import { parseFirestoreDate, canUserAccessEvent, getRoleLabel } from '../lib/utils';
+import { EventRecord, Client, User, EInviteTemplate } from '../types';
+import { parseFirestoreDate, canUserAccessEvent, canUserCreateEvent, getUserBusinessId, getRoleLabel, isPartnerBusinessRegistered } from '../lib/utils';
 import { format } from 'date-fns';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Image as ImageIcon, Trash2, Edit, ScanLine, Eye, ArrowUp, ArrowDown, Gift } from 'lucide-react';
+import { Plus, Image as ImageIcon, Trash2, Edit, ScanLine, Eye, ArrowUp, ArrowDown, Gift, Building2, Lock, Sparkles, Check } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { MediaUploader } from '../components/media/MediaUploader';
+import { EInvitationCard, splitCoupleNames } from '../components/EInvitationCard';
+import { eInviteTemplateService, DEFAULT_EINVITE_TEMPLATES } from '../services/eInviteTemplateService';
 import { showAlert, showConfirm } from '../lib/alerts';
 
 export default function EventsList() {
@@ -22,7 +24,9 @@ export default function EventsList() {
   const [loadingMore, setLoadingMore] = useState(false);
 
   const [isCreating, setIsCreating] = useState(false);
-  const [activeTab, setActiveTab] = useState<'info' | 'frame' | 'categories' | 'theme'>('info');
+  const [isPartnerNoticeOpen, setIsPartnerNoticeOpen] = useState(false);
+  const [ownerBusinessProfile, setOwnerBusinessProfile] = useState<Partial<User> | null>(null);
+  const [activeTab, setActiveTab] = useState<'info' | 'frame' | 'categories' | 'theme' | 'einvite'>('info');
   
   // Event Form State
   const [newEventTitle, setNewEventTitle] = useState('');
@@ -45,6 +49,36 @@ export default function EventsList() {
   const [newSession, setNewSession] = useState('');
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
 
+  // E-Invitation Tab State
+  const [eInviteTemplates, setEInviteTemplates] = useState<EInviteTemplate[]>(DEFAULT_EINVITE_TEMPLATES);
+  const [selectedEInviteTemplateId, setSelectedEInviteTemplateId] = useState<string>('default-blush-arch');
+  const [selectedEInviteTemplateUrl, setSelectedEInviteTemplateUrl] = useState<string>('');
+  const [eInviteHeaderText, setEInviteHeaderText] = useState<string>('THE WEDDING OF');
+  const [eInviteGroomName, setEInviteGroomName] = useState<string>('');
+  const [eInviteBrideName, setEInviteBrideName] = useState<string>('');
+  const [eInviteVenueName, setEInviteVenueName] = useState<string>('');
+  const [eInviteVenueAddress, setEInviteVenueAddress] = useState<string>('');
+  const [eInviteGreetingText, setEInviteGreetingText] = useState<string>(
+    'Dengan hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara pernikahan kami.'
+  );
+  const [eInviteFooterText, setEInviteFooterText] = useState<string>('ATAS KEHADIRAN DAN DOA RESTUNYA');
+  const [eInviteMode, setEInviteMode] = useState<'full' | 'compact'>('full');
+  const [isQuickUploadingTemplate, setIsQuickUploadingTemplate] = useState(false);
+  const [quickTemplateName, setQuickTemplateName] = useState('');
+  const [quickTemplateUrl, setQuickTemplateUrl] = useState('');
+  const [quickTemplateKey, setQuickTemplateKey] = useState('');
+
+  useEffect(() => {
+    eInviteTemplateService.getTemplates().then((list) => {
+      setEInviteTemplates(list);
+      const def = list.find((t) => t.isDefault) || list[0];
+      if (def && !editingEventId) {
+        setSelectedEInviteTemplateId(def.id);
+        setSelectedEInviteTemplateUrl(def.imageUrl || '');
+      }
+    });
+  }, [editingEventId]);
+
   const resetForm = () => {
     setNewEventTitle('');
     setNewEventCoupleName('');
@@ -64,15 +98,36 @@ export default function EventsList() {
     setNewInvitationType('');
     setSessions(['Akad Nikah', 'Resepsi']);
     setNewSession('');
+    const defTpl = eInviteTemplates.find((t) => t.isDefault) || eInviteTemplates[0] || DEFAULT_EINVITE_TEMPLATES[0];
+    setSelectedEInviteTemplateId(defTpl.id);
+    setSelectedEInviteTemplateUrl(defTpl.imageUrl || '');
+    setEInviteHeaderText('THE WEDDING OF');
+    setEInviteGroomName('');
+    setEInviteBrideName('');
+    setEInviteVenueName('');
+    setEInviteVenueAddress('');
+    setEInviteGreetingText('Dengan hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara pernikahan kami.');
+    setEInviteFooterText('ATAS KEHADIRAN DAN DOA RESTUNYA');
+    setEInviteMode('full');
+    setIsQuickUploadingTemplate(false);
     setEditingEventId(null);
     setActiveTab('info');
   };
 
+  const isPartnerVerified = isPartnerBusinessRegistered(appUser, ownerBusinessProfile);
+
   const openCreateModal = () => {
-    if (appUser?.role === 'staff') {
-      showAlert('Akses Ditolak', 'Staff hanya dapat mengakses acara yang telah ditugaskan.', 'warning');
+    if (!canUserCreateEvent(appUser)) {
+      showAlert('Akses Ditolak', 'Role Anda tidak memiliki akses untuk membuat acara baru.', 'warning');
       return;
     }
+
+    // Check if Partner / Owner / Admin has a verified Business Profile (Nama Usaha + Alamat Lengkap) registered by Super Admin
+    if (appUser && ['owner', 'partner', 'admin'].includes(appUser.role) && !isPartnerVerified) {
+      setIsPartnerNoticeOpen(true);
+      return;
+    }
+
     let hasAccess = false;
 
     if (appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'admin' || appUser?.allowManualEvent || appUser?.eventManual) {
@@ -91,9 +146,7 @@ export default function EventsList() {
     }
 
     resetForm();
-    if (appUser?.role === 'client') {
-      setNewEventClientId(appUser.id || '');
-    } else if (clients.length > 0) {
+    if (clients.length > 0) {
       setNewEventClientId(clients[0].id!);
     }
     setIsCreating(true);
@@ -119,6 +172,22 @@ export default function EventsList() {
     setNewInvitationType('');
     setSessions(event.sessions || []);
     setNewSession('');
+    const defTpl = eInviteTemplates.find((t) => t.isDefault) || eInviteTemplates[0] || DEFAULT_EINVITE_TEMPLATES[0];
+    setSelectedEInviteTemplateId(event.eInviteTemplateId || defTpl.id);
+    setSelectedEInviteTemplateUrl(event.eInviteTemplateUrl || '');
+    setEInviteHeaderText(event.eInviteHeaderText || 'THE WEDDING OF');
+    const parsedCouple = splitCoupleNames(event.coupleName, event.eInviteGroomName, event.eInviteBrideName, event.title);
+    setEInviteGroomName(event.eInviteGroomName || parsedCouple.groom || '');
+    setEInviteBrideName(event.eInviteBrideName || parsedCouple.bride || '');
+    setEInviteVenueName(event.eInviteVenueName || '');
+    setEInviteVenueAddress(event.eInviteVenueAddress || '');
+    setEInviteGreetingText(
+      event.eInviteGreetingText ||
+        'Dengan hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara pernikahan kami.'
+    );
+    setEInviteFooterText(event.eInviteFooterText || 'ATAS KEHADIRAN DAN DOA RESTUNYA');
+    setEInviteMode(event.eInviteMode || 'full');
+    setIsQuickUploadingTemplate(false);
     setActiveTab('info');
     setIsCreating(true);
   }; // Used the same modal
@@ -136,46 +205,93 @@ export default function EventsList() {
         let q = query(eventsRef);
         let cQuery = query(clientsRef);
         
-        if (appUser?.role === 'partner') {
-          const partnerId = appUser.id || '';
-          q = query(eventsRef, where('partnerId', '==', partnerId));
-          cQuery = query(clientsRef, where('partnerId', '==', partnerId));
-        } else if (appUser?.role === 'client') {
+        if (appUser?.role === 'client') {
           const targetClientId = appUser?.clientId || appUser?.id || '';
           if (!targetClientId) {
             setEvents([]);
+            setLoading(false);
             return;
           }
           q = query(eventsRef, where('clientId', '==', targetClientId));
-          // No need to fetch all clients for a client user, just their own record if needed, but we don't necessarily need the list for the dropdown since they can't create events.
+        }
+
+        const { getDocs, getDoc, limit } = await import('firebase/firestore');
+
+        let clientsData: Client[] = [];
+        const myBizIds = new Set<string>(
+          [appUser?.id, appUser?.partnerId, getUserBusinessId(appUser)].filter(Boolean) as string[]
+        );
+        const myClientIds = new Set<string>();
+
+        if (appUser?.role !== 'client' && appUser?.role !== 'staff') {
+          try {
+            const [snapClients, snapUsers] = await Promise.all([
+              getDocs(cQuery),
+              getDocs(collection(db, 'users')),
+            ]);
+
+            if (appUser && ['owner', 'partner', 'admin'].includes(appUser.role)) {
+              snapUsers.docs.forEach(uDoc => {
+                const u = uDoc.data() as User;
+                if (
+                  (u.partnerId && myBizIds.has(u.partnerId)) ||
+                  (u.createdBy && myBizIds.has(u.createdBy)) ||
+                  myBizIds.has(uDoc.id)
+                ) {
+                  myBizIds.add(uDoc.id);
+                  if (u.partnerId) myBizIds.add(u.partnerId);
+                }
+              });
+
+              const targetOwnerId = appUser.role === 'admin' ? (appUser.partnerId || '') : (appUser.id || '');
+              if (targetOwnerId) {
+                const foundOwner = snapUsers.docs.find(d => d.id === targetOwnerId || d.data()?.partnerId === targetOwnerId);
+                if (foundOwner) {
+                  setOwnerBusinessProfile({ id: foundOwner.id, ...(foundOwner.data() as User) });
+                } else {
+                  const ownerSnap = await getDoc(doc(db, 'users', targetOwnerId));
+                  if (ownerSnap.exists()) {
+                    setOwnerBusinessProfile({ id: ownerSnap.id, ...(ownerSnap.data() as User) });
+                  }
+                }
+              }
+            }
+
+            clientsData = snapClients.docs.map(d => ({ id: d.id, ...d.data() } as Client));
+            if (appUser?.role !== 'superadmin' && myBizIds.size > 0) {
+              clientsData = clientsData.filter(c => c.partnerId && myBizIds.has(c.partnerId));
+            }
+            clientsData.forEach(c => {
+              if (c.id) myClientIds.add(c.id);
+            });
+            setClients(clientsData);
+          } catch (error) {
+            console.error("Error fetching clients for events list:", error);
+          }
+        } else {
+          setClients([]);
         }
 
         try {
-          const { getDocs, limit } = await import('firebase/firestore');
-          const qLimited = query(q, limit(50));
+          const qLimited = query(q, limit(100));
           const snapshot = await getDocs(qLimited);
-          const rawData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventRecord));
-          const data = rawData.filter(ev => canUserAccessEvent(appUser, ev.id));
+          const rawData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as EventRecord));
+          const allowedPartnerIds = Array.from(myBizIds);
+          const userPrimaryBizId = getUserBusinessId(appUser) || appUser?.id || '';
+          const data = rawData.filter(ev => {
+            const effectivePartnerId =
+              ev.clientId && myClientIds.has(ev.clientId)
+                ? userPrimaryBizId
+                : ev.partnerId;
+            return canUserAccessEvent(appUser, ev.id, effectivePartnerId, allowedPartnerIds);
+          });
           setEvents(data);
           setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
-          setHasMore(snapshot.docs.length === 50);
+          setHasMore(snapshot.docs.length === 100);
           setLoading(false);
         } catch(error) {
           handleFirestoreError(error, OperationType.GET, 'events');
           setLoading(false);
-        }
-
-        if (appUser?.role === 'client' || appUser?.role === 'staff') {
-           setClients([]);
-        } else {
-           try {
-             const { getDocs } = await import('firebase/firestore');
-             const snapClients = await getDocs(cQuery);
-             const clientsData = snapClients.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
-             setClients(clientsData);
-           } catch(error) {
-             console.error("Error fetching clients for events list:", error);
-           }
         }
       } catch (error) {
         handleFirestoreError(error, OperationType.GET, 'events');
@@ -205,7 +321,7 @@ export default function EventsList() {
       const qLimited = query(q, startAfter(lastVisible), limit(50));
       const snapshot = await getDocs(qLimited);
       const rawData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventRecord));
-      const data = rawData.filter(ev => canUserAccessEvent(appUser, ev.id));
+      const data = rawData.filter(ev => canUserAccessEvent(appUser, ev.id, ev.partnerId));
       setEvents(prev => [...prev, ...data]);
       setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
       setHasMore(snapshot.docs.length === 50);
@@ -217,7 +333,15 @@ export default function EventsList() {
   };
 
   const handleSaveEvent = async () => {
-    if (!appUser) return;
+    if (!appUser || !canUserCreateEvent(appUser)) {
+      showAlert('Akses Ditolak', 'Role Anda tidak memiliki akses untuk membuat atau mengubah acara.', 'warning');
+      return;
+    }
+    if (!editingEventId && ['owner', 'partner', 'admin'].includes(appUser.role) && !isPartnerVerified) {
+      setIsCreating(false);
+      setIsPartnerNoticeOpen(true);
+      return;
+    }
     if (!newEventTitle || !newEventDate || !newEventClientId) {
       showAlert('Peringatan', 'Nama acara, tanggal, dan client wajib diisi.', 'warning');
       return;
@@ -227,7 +351,7 @@ export default function EventsList() {
     if (!confirmed) return;
     
     const selectedClient = clients.find(c => c.id === newEventClientId);
-    const partnerId = selectedClient?.partnerId || (appUser.role === 'partner' ? appUser.id : (appUser.partnerId || 'default-partner'));
+    const partnerId = selectedClient?.partnerId || getUserBusinessId(appUser) || appUser.id || 'default-partner';
     
     try {
       const payload: any = {
@@ -269,6 +393,18 @@ export default function EventsList() {
 
       if (sessions && sessions.length > 0) payload.sessions = sessions;
       else if (editingEventId) payload.sessions = deleteField();
+
+      // Save E-Invitation Settings
+      payload.eInviteTemplateId = selectedEInviteTemplateId || 'default-blush-arch';
+      payload.eInviteTemplateUrl = selectedEInviteTemplateUrl || '';
+      payload.eInviteHeaderText = eInviteHeaderText.trim() || 'THE WEDDING OF';
+      payload.eInviteGroomName = eInviteGroomName.trim();
+      payload.eInviteBrideName = eInviteBrideName.trim();
+      payload.eInviteVenueName = eInviteVenueName.trim();
+      payload.eInviteVenueAddress = eInviteVenueAddress.trim();
+      payload.eInviteGreetingText = eInviteGreetingText.trim();
+      payload.eInviteFooterText = eInviteFooterText.trim();
+      payload.eInviteMode = eInviteMode;
 
       if (editingEventId) {
         await updateDoc(doc(db, 'events', editingEventId), payload);
@@ -388,7 +524,7 @@ export default function EventsList() {
             </p>
           )}
         </div>
-        {appUser?.role !== 'staff' && (
+        {canUserCreateEvent(appUser) && (
           <button 
             onClick={openCreateModal}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium self-start sm:self-auto"
@@ -399,32 +535,108 @@ export default function EventsList() {
         )}
       </div>
 
-      <Modal isOpen={isCreating} onClose={() => setIsCreating(false)} title={editingEventId ? "Edit Acara" : "Buat Acara Baru"}>
-        <div className="mb-6 border-b border-gray-200">
-          <nav className="-mb-px flex space-x-6" aria-label="Tabs">
+      {/* Warning banner if Owner / Partner / Admin business has not yet been registered with Name & Address by Super Admin */}
+      {appUser && ['owner', 'partner', 'admin'].includes(appUser.role) && !loading && !isPartnerVerified && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+          <div className="p-2 bg-amber-100 text-amber-700 rounded-lg shrink-0 mt-0.5">
+            <Lock className="w-5 h-5" />
+          </div>
+          <div className="text-xs text-amber-900 space-y-1">
+            <div className="font-bold text-sm">
+              Data Partner Guestly Belum Terdaftar Lengkap (Create Event Terkunci)
+            </div>
+            <p>
+              Untuk membuat acara sebagai <strong>Partner Guestly</strong>, identitas <strong>Nama Usaha beserta Alamat Lengkap Usaha</strong> Anda wajib didaftarkan terlebih dahulu oleh <strong>Super Admin Guestly</strong>. Silakan hubungi Super Admin untuk memverifikasi data bisnis Anda.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Notification when Partner Business is not yet registered by Super Admin */}
+      <Modal
+        isOpen={isPartnerNoticeOpen}
+        onClose={() => setIsPartnerNoticeOpen(false)}
+        title="Verifikasi Partner Guestly Diperlukan"
+      >
+        <div className="space-y-4">
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+            <div className="p-2 bg-amber-100 text-amber-700 rounded-lg shrink-0">
+              <Building2 className="w-6 h-6" />
+            </div>
+            <div className="space-y-1.5 text-sm text-amber-950">
+              <div className="font-bold">Data Usaha Partner Belum Didaftarkan oleh Super Admin</div>
+              <p className="text-xs text-amber-900 leading-relaxed">
+                Sesuai kebijakan <strong>Partner Guestly</strong>, sebelum membuat acara baru (<em>Create Event</em>), data resmi usaha Anda meliputi <strong>Nama Usaha</strong> dan <strong>Alamat Lengkap Usaha</strong> wajib didaftarkan serta diverifikasi oleh <strong>Super Admin Guestly</strong>.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-gray-50 p-3.5 rounded-lg border border-gray-200 text-xs text-gray-700 space-y-1.5">
+            <div className="font-semibold text-gray-900">Status Data Usaha Saat Ini:</div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Nama Usaha:</span>
+              <span className="font-semibold text-gray-900">
+                {(ownerBusinessProfile?.businessName || appUser?.businessName || '').trim() || 'Belum Terdaftar'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Alamat Lengkap Usaha:</span>
+              <span className="font-semibold text-red-600">
+                {(ownerBusinessProfile?.businessAddress || appUser?.businessAddress || '').trim() || 'Belum Didaftarkan oleh Super Admin'}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-3 border-t border-gray-100">
             <button
+              type="button"
+              onClick={() => setIsPartnerNoticeOpen(false)}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
+            >
+              Mengerti
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={isCreating} onClose={() => setIsCreating(false)} title={editingEventId ? "Edit Acara" : "Buat Acara Baru"}>
+        <div className="mb-6 border-b border-gray-200 overflow-x-auto">
+          <nav className="-mb-px flex space-x-5" aria-label="Tabs">
+            <button
+              type="button"
               onClick={() => setActiveTab('info')}
-              className={`${activeTab === 'info' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors`}
+              className={`${activeTab === 'info' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors cursor-pointer`}
             >
               Info Acara
             </button>
             <button
+              type="button"
               onClick={() => setActiveTab('frame')}
-              className={`${activeTab === 'frame' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors`}
+              className={`${activeTab === 'frame' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors cursor-pointer`}
             >
               Frame Layar
             </button>
             <button
+              type="button"
               onClick={() => setActiveTab('categories')}
-              className={`${activeTab === 'categories' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors`}
+              className={`${activeTab === 'categories' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors cursor-pointer`}
             >
               Kategori & Sesi
             </button>
             <button
+              type="button"
               onClick={() => setActiveTab('theme')}
-              className={`${activeTab === 'theme' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors`}
+              className={`${activeTab === 'theme' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors cursor-pointer`}
             >
               Tema RSVP
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('einvite')}
+              className={`${activeTab === 'einvite' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-semibold text-sm transition-colors flex items-center gap-1.5 cursor-pointer`}
+            >
+              <Sparkles className="w-4 h-4 text-indigo-600" />
+              <span>E-Invitation</span>
             </button>
           </nav>
         </div>
@@ -565,6 +777,308 @@ export default function EventsList() {
                   <option value="gold">Gold</option>
                   <option value="tiktok">Tiktok</option>
                 </select>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'einvite' && (
+            <div className="space-y-5">
+              {/* Template Selection Section */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      1. Pilih Template Kartu E-Invitation
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      Desain diambil dari katalog Cloudflare R2 (<code className="text-indigo-600">guestly-storage/E-Invitation/</code>).
+                    </p>
+                  </div>
+                  {appUser?.role === 'superadmin' && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsQuickUploadingTemplate(!isQuickUploadingTemplate)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Upload Template Baru</span>
+                      </button>
+                      <Link
+                        to="/auth/login/admin/e-invitation-templates"
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors"
+                      >
+                        <span>Kelola Katalog</span>
+                      </Link>
+                    </div>
+                  )}
+                </div>
+
+                {/* Quick Upload Form for Super Admin */}
+                {appUser?.role === 'superadmin' && isQuickUploadingTemplate && (
+                  <div className="p-3.5 bg-white border border-indigo-200 rounded-xl space-y-3">
+                    <div className="text-xs font-bold text-indigo-900">
+                      Upload Cepat Template ke <code className="font-mono">guestly-storage/E-Invitation/</code>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Nama Template *
+                      </label>
+                      <input
+                        type="text"
+                        value={quickTemplateName}
+                        onChange={(e) => setQuickTemplateName(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-xs"
+                        placeholder="Contoh: Card 1 - Blush Floral Arch"
+                      />
+                    </div>
+                    <MediaUploader
+                      category="E-Invitation"
+                      maxSize={15 * 1024 * 1024}
+                      allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
+                      defaultValue={quickTemplateUrl || undefined}
+                      onUploadSuccess={(data) => {
+                        setQuickTemplateUrl(data.url);
+                        setQuickTemplateKey(data.key);
+                      }}
+                      onUploadError={(err) => showAlert('Gagal Upload', err, 'error')}
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsQuickUploadingTemplate(false)}
+                        className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!quickTemplateName.trim() || !quickTemplateUrl.trim()) {
+                            showAlert('Peringatan', 'Nama dan file gambar template wajib diisi.', 'warning');
+                            return;
+                          }
+                          const newTpl: EInviteTemplate = {
+                            id: `tpl-${Date.now().toString(36)}`,
+                            name: quickTemplateName.trim(),
+                            imageUrl: quickTemplateUrl.trim(),
+                            r2Key: quickTemplateKey || undefined,
+                            primaryColor: '#153B31',
+                            accentColor: '#C98583',
+                            guestBoxBg: '#F3E4E2',
+                            footerColor: '#C27D7A',
+                            isDefault: false,
+                            createdAt: new Date().toISOString(),
+                          };
+                          const updated = [...eInviteTemplates, newTpl];
+                          await eInviteTemplateService.saveTemplates(updated);
+                          setEInviteTemplates(updated);
+                          setSelectedEInviteTemplateId(newTpl.id);
+                          setSelectedEInviteTemplateUrl(newTpl.imageUrl);
+                          setQuickTemplateName('');
+                          setQuickTemplateUrl('');
+                          setQuickTemplateKey('');
+                          setIsQuickUploadingTemplate(false);
+                          showAlert('Berhasil', 'Template baru berhasil ditambahkan ke katalog!', 'success');
+                        }}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Simpan & Gunakan Template</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Template Selector Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {eInviteTemplates.map((tpl) => {
+                    const isSelected = selectedEInviteTemplateId === tpl.id;
+                    return (
+                      <button
+                        key={tpl.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedEInviteTemplateId(tpl.id);
+                          setSelectedEInviteTemplateUrl(tpl.imageUrl || '');
+                        }}
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-white border-indigo-600 ring-2 ring-indigo-500/20 shadow-xs'
+                            : 'bg-white/70 border-slate-200 hover:bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="text-xs font-bold text-slate-800 truncate">
+                            {tpl.name}
+                          </span>
+                          {isSelected && (
+                            <span className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                              <Check className="w-2.5 h-2.5" />
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-2">
+                          <span
+                            className="w-3 h-3 rounded-full border border-gray-300"
+                            style={{ backgroundColor: tpl.primaryColor || '#153B31' }}
+                          />
+                          <span
+                            className="w-3 h-3 rounded-full border border-gray-300"
+                            style={{ backgroundColor: tpl.accentColor || '#C98583' }}
+                          />
+                          <span
+                            className="w-3 h-3 rounded-full border border-gray-300"
+                            style={{ backgroundColor: tpl.footerColor || '#C27D7A' }}
+                          />
+                          <span className="text-[10px] text-slate-400 ml-auto">
+                            {tpl.imageUrl ? 'Cloudflare R2' : 'Built-in'}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Dynamic Variables Form */}
+              <div className="space-y-3.5 border border-gray-200 rounded-xl p-4 bg-white">
+                <h4 className="text-sm font-bold text-slate-900">
+                  2. Data Dinamis Kartu E-Invitation
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      Judul Atas Kartu
+                    </label>
+                    <input
+                      type="text"
+                      value={eInviteHeaderText}
+                      onChange={(e) => setEInviteHeaderText(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                      placeholder="THE WEDDING OF"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      Mempelai Pria ({'{{GROOM_NAME}}'})
+                    </label>
+                    <input
+                      type="text"
+                      value={eInviteGroomName}
+                      onChange={(e) => setEInviteGroomName(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                      placeholder="Contoh: Rizky"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      Mempelai Wanita ({'{{BRIDE_NAME}}'})
+                    </label>
+                    <input
+                      type="text"
+                      value={eInviteBrideName}
+                      onChange={(e) => setEInviteBrideName(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                      placeholder="Contoh: Aulia"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      Nama Gedung / Venue ({'{{VENUE_NAME}}'})
+                    </label>
+                    <input
+                      type="text"
+                      value={eInviteVenueName}
+                      onChange={(e) => setEInviteVenueName(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                      placeholder={newEventLocation || 'Contoh: Gedung Serbaguna Graha Anugerah'}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      Alamat Venue ({'{{VENUE_ADDRESS}}'})
+                    </label>
+                    <input
+                      type="text"
+                      value={eInviteVenueAddress}
+                      onChange={(e) => setEInviteVenueAddress(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                      placeholder="Contoh: Jl. Melati No. 25, Semarang"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      Kalimat Undangan di Bawah Nama Tamu
+                    </label>
+                    <input
+                      type="text"
+                      value={eInviteGreetingText}
+                      onChange={(e) => setEInviteGreetingText(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      Mode Tampilan Halaman Link Tamu
+                    </label>
+                    <select
+                      value={eInviteMode}
+                      onChange={(e) => setEInviteMode(e.target.value as 'full' | 'compact')}
+                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white"
+                    >
+                      <option value="full">Lengkap (Kartu E-Invitation + Form Konfirmasi RSVP)</option>
+                      <option value="compact">Ringkas (Fokus Kartu E-Invitation &amp; QR Check-In Saja)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Live Preview inside Tab */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                    Pratinjau Langsung Kartu E-Invitation
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    Foto mempelai diambil dari Thumbnail WA / Foto Mempelai di Tab Info Acara
+                  </span>
+                </div>
+                <EInvitationCard
+                  template={
+                    eInviteTemplates.find((t) => t.id === selectedEInviteTemplateId) ||
+                    DEFAULT_EINVITE_TEMPLATES[0]
+                  }
+                  event={{
+                    title: newEventTitle || 'The Wedding Of Rizky & Aulia',
+                    coupleName: newEventCoupleName || 'Rizky & Aulia',
+                    date: newEventDate || '2026-12-15',
+                    time: newEventTime || '09.00 - 14.00 WIB',
+                    location: newEventLocation || 'Gedung Serbaguna Graha Anugerah',
+                    thumbnailUrl: newEventThumbnail || undefined,
+                    eInviteTemplateId: selectedEInviteTemplateId,
+                    eInviteTemplateUrl: selectedEInviteTemplateUrl,
+                    eInviteHeaderText,
+                    eInviteGroomName,
+                    eInviteBrideName,
+                    eInviteVenueName,
+                    eInviteVenueAddress,
+                    eInviteGreetingText,
+                    eInviteFooterText,
+                  }}
+                  guest={{
+                    name: 'Bpk. Adi Putro & Keluarga',
+                    ticketCode: 'GUEST123456',
+                    category: 'VIP',
+                  }}
+                />
               </div>
             </div>
           )}
@@ -781,7 +1295,9 @@ export default function EventsList() {
           <p className="text-gray-500">
             {appUser?.role === 'staff'
               ? 'Belum ada acara yang ditugaskan kepada akun Anda. Silakan hubungi Admin atau Owner untuk penugasan acara.'
-              : 'No events found. Let\'s create one!'}
+              : appUser?.role === 'client'
+              ? 'Belum ada acara yang terdaftar untuk akun Anda. Acara Anda akan disiapkan oleh penyelenggara (Owner / Admin).'
+              : 'Belum ada acara yang dibuat. Silakan klik tombol "Create Event" untuk membuat acara baru.'}
           </p>
         </div>
       ) : (
@@ -793,6 +1309,7 @@ export default function EventsList() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">No</th>
+                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Thumbnail</th>
                   <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Tanggal Dibuat</th>
                   <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Nama Acara</th>
                   <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Tanggal Acara</th>
@@ -805,11 +1322,31 @@ export default function EventsList() {
                 {events.map((event, index) => (
                   <tr key={event.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{index + 1}</td>
+                    <td className="px-6 py-3 whitespace-nowrap">
+                      <Link to={`/auth/login/events/${event.id}`} className="block w-fit group">
+                        {event.thumbnailUrl ? (
+                          <img
+                            src={event.thumbnailUrl}
+                            alt={event.title}
+                            className="w-14 h-10 rounded-lg object-cover border border-gray-200 shadow-2xs bg-gray-50 group-hover:ring-2 group-hover:ring-indigo-500/40 transition-all"
+                          />
+                        ) : (
+                          <div
+                            className="w-14 h-10 rounded-lg border border-dashed border-gray-300 bg-gray-50 flex flex-col items-center justify-center text-gray-400 group-hover:border-indigo-300 group-hover:text-indigo-500 transition-colors"
+                            title="Belum ada thumbnail kustom"
+                          >
+                            <ImageIcon className="w-4 h-4" />
+                          </div>
+                        )}
+                      </Link>
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {event.createdAt && parseFirestoreDate(event.createdAt) ? format(parseFirestoreDate(event.createdAt)!, 'dd MMM yyyy') : '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{event.title}</div>
+                      <Link to={`/auth/login/events/${event.id}`} className="text-sm font-medium text-gray-900 hover:text-indigo-600 transition-colors">
+                        {event.title}
+                      </Link>
                       <div className="text-sm text-gray-500 capitalize">{event.status}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

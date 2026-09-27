@@ -255,6 +255,33 @@ async function startServer() {
 
   app.use('/uploads', express.static(uploadsBaseDir));
 
+  app.get('/api/media/proxy', async (req, res) => {
+    try {
+      const targetUrl = String(req.query.url || '').trim();
+      if (!targetUrl || (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://'))) {
+        return res.status(400).json({ success: false, error: 'Invalid URL' });
+      }
+      const response = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'image/*,*/*;q=0.8',
+        },
+      });
+      if (!response.ok) {
+        return res.status(response.status).json({ success: false, error: 'Failed to fetch image' });
+      }
+      const contentType = response.headers.get('content-type') || 'image/jpeg';
+      const arrayBuffer = await response.arrayBuffer();
+      const base64 = Buffer.from(arrayBuffer).toString('base64');
+      return res.json({
+        success: true,
+        dataUrl: `data:${contentType};base64,${base64}`,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Proxy error' });
+    }
+  });
+
   app.post('/api/media/upload', (req, res) => {
     upload.single('file')(req, res, async (multerErr: any) => {
       if (multerErr) {

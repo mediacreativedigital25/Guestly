@@ -13,6 +13,7 @@ import EventDetails from './pages/EventDetails';
 import ClientsList from './pages/ClientsList';
 import WhiteLabelSettings from './pages/WhiteLabelSettings';
 import UsersList from './pages/UsersList';
+import BusinessesList from './pages/BusinessesList';
 import RolesSettings from './pages/RolesSettings';
 import RSVP from './pages/RSVP';
 import PublicRSVP from './pages/PublicRSVP';
@@ -29,6 +30,7 @@ import AdminInvoice from './pages/admin/AdminInvoice';
 import AdminSettings from './pages/admin/AdminSettings';
 import AdminCalendar from './pages/admin/AdminCalendar';
 import AdminWATemplates from './pages/admin/AdminWATemplates';
+import AdminEInviteTemplates from './pages/admin/AdminEInviteTemplates';
 import MediaLibrary from './pages/admin/MediaLibrary';
 import ServicesCatalog from './pages/services/ServicesCatalog';
 import MyServices from './pages/services/MyServices';
@@ -52,6 +54,7 @@ export default function App() {
             <Route path="clients" element={<ClientsList />} />
             <Route path="approvals" element={<Approvals />} />
             <Route path="settings" element={<WhiteLabelSettings />} />
+            <Route path="businesses" element={<BusinessesList />} />
             <Route path="users" element={<UsersList />} />
             <Route path="roles" element={<RolesSettings />} />
             <Route path="changelog" element={<Changelog />} />
@@ -69,6 +72,7 @@ export default function App() {
             <Route path="admin/settings" element={<AdminSettings />} />
             <Route path="admin/calendar" element={<AdminCalendar />} />
             <Route path="admin/wa-templates" element={<AdminWATemplates />} />
+            <Route path="admin/e-invitation-templates" element={<AdminEInviteTemplates />} />
             <Route path="media" element={<MediaLibrary />} />
           </Route>
           {/* Public Route */}

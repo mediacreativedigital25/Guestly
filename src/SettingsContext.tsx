@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from './lib/firebase';
 
 interface GlobalSettings {
@@ -61,33 +61,80 @@ const SettingsContext = createContext<SettingsContextType>({ settings: null, loa
 
 export const useSettings = () => useContext(SettingsContext);
 
+const SETTINGS_CACHE_KEY = 'guestly_global_settings_v1';
+
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [settings, setSettings] = useState<GlobalSettings | null>(null);
+  const [settings, setSettings] = useState<GlobalSettings | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = localStorage.getItem(SETTINGS_CACHE_KEY);
+      return raw ? (JSON.parse(raw) as GlobalSettings) : null;
+    } catch {
+      return null;
+    }
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const loadSettings = async () => {
+    const applyFavicon = (faviconUrl?: string) => {
+      if (!faviconUrl || typeof document === 'undefined') return;
+      let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.href = faviconUrl;
+    };
+
+    if (settings?.faviconUrl) {
+      applyFavicon(settings.faviconUrl);
+    }
+
+    const resolveMediaFallbackIfNeeded = async (baseData: GlobalSettings): Promise<GlobalSettings> => {
+      if (baseData.logoUrl && baseData.faviconUrl) return baseData;
       try {
-        const docSnap = await getDoc(doc(db, 'settings', 'global'));
-        if (docSnap.exists()) {
-          setSettings(docSnap.data() as GlobalSettings);
-          
-          // Apply favicon
-          const faviconUrl = docSnap.data().faviconUrl;
-          if (faviconUrl) {
-            let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
-            if (!link) {
-              link = document.createElement('link');
-              link.rel = 'icon';
-              document.head.appendChild(link);
-            }
-            link.href = faviconUrl;
-          }
-        } else {
-          setSettings({});
+        const mediaSnap = await getDocs(collection(db, 'media'));
+        const items = mediaSnap.docs.map((d) => d.data() as any);
+        const sortNewest = (a: any, b: any) => {
+          const tA = a.uploadedAt?.toMillis ? a.uploadedAt.toMillis() : Date.parse(String(a.uploadedAt || '')) || 0;
+          const tB = b.uploadedAt?.toMillis ? b.uploadedAt.toMillis() : Date.parse(String(b.uploadedAt || '')) || 0;
+          return tB - tA;
+        };
+        const next: GlobalSettings = { ...baseData };
+        if (!next.faviconUrl) {
+          const favs = items.filter((m) => m.category === 'favicon' && m.url).sort(sortNewest);
+          if (favs.length > 0) next.faviconUrl = favs[0].url;
         }
-      } catch (err: any) {
-        setSettings({});
+        if (!next.logoUrl) {
+          const logos = items.filter((m) => m.category === 'logo' && m.url).sort(sortNewest);
+          if (logos.length > 0) next.logoUrl = logos[0].url;
+        }
+        return next;
+      } catch {
+        return baseData;
+      }
+    };
+
+    const unsubscribe = onSnapshot(
+      doc(db, 'settings', 'global'),
+      async (docSnap) => {
+        const rawData = docSnap.exists() ? (docSnap.data() as GlobalSettings) : {};
+        const data = await resolveMediaFallbackIfNeeded(rawData);
+        setSettings(data);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(data));
+          } catch {
+            // ignore storage quota errors
+          }
+        }
+        applyFavicon(data.faviconUrl);
+        setLoading(false);
+      },
+      (err: any) => {
+        setSettings((prev) => prev || {});
+        setLoading(false);
         if (err?.message?.includes('Missing or insufficient permissions') || err?.code === 'permission-denied') {
           console.warn('Settings not accessible (using default settings):', err?.message || err);
         } else if (err?.message?.includes('Quota') || err?.message?.includes('quota') || String(err).includes('Quota')) {
@@ -95,11 +142,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         } else {
           console.warn('Could not load custom settings, falling back to defaults:', err);
         }
-      } finally {
-        setLoading(false);
       }
-    };
-    loadSettings();
+    );
+
+    return () => unsubscribe();
   }, []);
 
   return (

@@ -30,9 +30,19 @@ export default function Approvals() {
     const fetchApprovals = async () => {
       try {
         const { getDocs } = await import('firebase/firestore');
-        const snapshot = await getDocs(q);
+        const [snapshot, eventsSnap] = await Promise.all([
+          getDocs(q),
+          getDocs(collection(db, 'events'))
+        ]);
+        const eventPartnerMap = new Map<string, string | null>();
+        eventsSnap.docs.forEach(d => {
+          eventPartnerMap.set(d.id, d.data()?.partnerId || null);
+        });
         const rawData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
-        const data = rawData.filter(req => canUserAccessEvent(appUser, req.eventId));
+        const data = rawData.filter(req => {
+          const evPartnerId = req.partnerId || eventPartnerMap.get(req.eventId) || null;
+          return canUserAccessEvent(appUser, req.eventId, evPartnerId);
+        });
         setRequests(data);
       } catch (err) {
         console.error('Approvals getDocs error:', err);

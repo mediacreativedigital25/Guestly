@@ -1,3 +1,96 @@
+async function hmacSha256(key: ArrayBuffer | Uint8Array, message: string): Promise<ArrayBuffer> {
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    key,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  return crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(message));
+}
+
+async function sha256Hex(data: ArrayBuffer | Uint8Array | string): Promise<string> {
+  const buffer = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function putObjectViaR2S3Api(params: {
+  accountId: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  bucketName: string;
+  key: string;
+  body: ArrayBuffer;
+  contentType: string;
+}) {
+  const { accountId, accessKeyId, secretAccessKey, bucketName, key, body, contentType } = params;
+  const host = `${accountId}.r2.cloudflarestorage.com`;
+  const region = 'auto';
+  const service = 's3';
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+
+  const payloadHash = await sha256Hex(body);
+  const canonicalUri = `/${bucketName}/${key}`;
+  const canonicalQueryString = '';
+  const canonicalHeaders =
+    `content-type:${contentType}\n` +
+    `host:${host}\n` +
+    `x-amz-content-sha256:${payloadHash}\n` +
+    `x-amz-date:${amzDate}\n`;
+  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
+
+  const canonicalRequest = [
+    'PUT',
+    canonicalUri,
+    canonicalQueryString,
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash
+  ].join('\n');
+
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzDate,
+    credentialScope,
+    await sha256Hex(canonicalRequest)
+  ].join('\n');
+
+  const kDate = await hmacSha256(new TextEncoder().encode(`AWS4${secretAccessKey}`), dateStamp);
+  const kRegion = await hmacSha256(kDate, region);
+  const kService = await hmacSha256(kRegion, service);
+  const kSigning = await hmacSha256(kService, 'aws4_request');
+  const signatureBuffer = await hmacSha256(kSigning, stringToSign);
+  const signature = Array.from(new Uint8Array(signatureBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+
+  const authorizationHeader =
+    `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, ` +
+    `SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  const response = await fetch(`https://${host}${canonicalUri}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': contentType,
+      'x-amz-content-sha256': payloadHash,
+      'x-amz-date': amzDate,
+      Authorization: authorizationHeader
+    },
+    body
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`R2 S3 PUT failed (${response.status}): ${errText || response.statusText}`);
+  }
+}
+
 export async function onRequestPost(context: any) {
   const { request, env } = context;
   const requestId = request.headers.get('cf-ray') || crypto.randomUUID();
@@ -86,26 +179,38 @@ export async function onRequestPost(context: any) {
 
     const fileName = `${category}/${uniqueSuffix}${ext}`;
 
-    if (!env.R2_BUCKET) {
-      statusCode = 500;
-      errorCode = 'R2_CONFIG_MISSING';
-      throw new Error("R2_BUCKET binding is missing");
+    if (env.R2_BUCKET) {
+      // @ts-ignore
+      await env.R2_BUCKET.put(fileName, file.stream(), {
+        httpMetadata: { contentType: mimeType },
+        customMetadata: {
+          tenantId,
+          userId,
+          uploadedBy,
+          category,
+          // @ts-ignore
+          originalName: file.name
+        }
+      });
+    } else {
+      const accountId = env.R2_ACCOUNT_ID || 'c6361627ef5eeb873424c706ca72c0e2';
+      const accessKeyId = env.R2_ACCESS_KEY_ID || 'e3610ce08924866d3bd8611dcdba6cdf';
+      const secretAccessKey = env.R2_SECRET_ACCESS_KEY || 'ec8dcd365af55a3f08006e72d5f3eb06dd7582ffbb22ec7943f6e15cec55bb64';
+      const bucketName = env.R2_BUCKET_NAME || 'guestly-storage';
+      // @ts-ignore
+      const arrayBuffer = await file.arrayBuffer();
+      await putObjectViaR2S3Api({
+        accountId,
+        accessKeyId,
+        secretAccessKey,
+        bucketName,
+        key: fileName,
+        body: arrayBuffer,
+        contentType: mimeType
+      });
     }
 
-    // @ts-ignore
-    await env.R2_BUCKET.put(fileName, file.stream(), {
-      httpMetadata: { contentType: mimeType },
-      customMetadata: {
-        tenantId,
-        userId,
-        uploadedBy,
-        category,
-        // @ts-ignore
-        originalName: file.name
-      }
-    });
-
-    const cdnDomain = env.CDN_DOMAIN || env.R2_PUBLIC_URL || 'https://cdn.guestly.yulovi.com';
+    const cdnDomain = (env.CDN_DOMAIN || env.R2_PUBLIC_URL || 'https://cdn.guestly.yulovi.com').replace(/\/+$/, '');
     const url = `${cdnDomain}/${fileName}`;
 
     const duration = Date.now() - startTime;

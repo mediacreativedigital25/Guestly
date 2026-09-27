@@ -72,7 +72,7 @@ export default function PublicRSVP() {
   const isNamePrefilled = Boolean(searchParams.get('to') || searchParams.get('name'));
   const [phone, setPhone] = useState(searchParams.get('phone') || '');
   const [rsvpStatus, setRsvpStatus] = useState('attending');
-  const [paxInput, setPaxInput] = useState<number>(Number(searchParams.get('pax')) || 1);
+  const [paxInput, setPaxInput] = useState<string>(String(Math.max(1, Number(searchParams.get('pax')) || 1)));
   const [sessionInput, setSessionInput] = useState(searchParams.get('session') || '');
   const [wishes, setWishes] = useState('');
   const [selectedSticker, setSelectedSticker] = useState<string>('');
@@ -265,7 +265,7 @@ export default function PublicRSVP() {
       }
       setSelectedSticker('');
       setRsvpStatus('attending');
-      setPaxInput(1);
+      setPaxInput('1');
       
     } catch (error: any) {
       console.error(error);
@@ -433,17 +433,29 @@ export default function PublicRSVP() {
                     {rsvpStatus !== 'declined' && (
                       <div className="space-y-1">
                         <label className={`block text-[11px] font-semibold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Jumlah Orang Hadir (Pax) <span className="text-red-500">*</span></label>
-                        <select 
-                          value={paxInput} 
-                          onChange={e => setPaxInput(Number(e.target.value))} 
-                          className={`w-full border ${isDark ? 'border-neutral-700 bg-neutral-800 text-white' : 'border-gray-300 bg-white text-gray-900'} ${isEmbed ? 'rounded-lg px-3 py-2 text-sm' : 'rounded-xl px-4 py-3'} transition-colors ${theme.ringColor}`}
-                        >
-                          <option value={1}>1 Orang</option>
-                          <option value={2}>2 Orang</option>
-                          <option value={3}>3 Orang</option>
-                          <option value={4}>4 Orang</option>
-                          <option value={5}>5 Orang</option>
-                        </select>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={1}
+                            max={999}
+                            required
+                            value={paxInput}
+                            onChange={e => {
+                              const val = e.target.value.replace(/[^0-9]/g, '');
+                              setPaxInput(val);
+                            }}
+                            onBlur={() => {
+                              const num = parseInt(paxInput, 10);
+                              if (!num || num < 1) setPaxInput('1');
+                            }}
+                            placeholder="Contoh: 2"
+                            className={`w-full border ${isDark ? 'border-neutral-700 bg-neutral-800 text-white placeholder-neutral-500' : 'border-gray-300 bg-white text-gray-900 placeholder-gray-400'} ${isEmbed ? 'rounded-lg pl-3 pr-14 py-2 text-sm' : 'rounded-xl pl-4 pr-16 py-3'} transition-colors ${theme.ringColor} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+                          />
+                          <span className={`pointer-events-none absolute inset-y-0 right-0 flex items-center ${isEmbed ? 'pr-3 text-xs' : 'pr-4 text-xs'} font-semibold ${isDark ? 'text-neutral-400' : 'text-gray-500'}`}>
+                            Orang
+                          </span>
+                        </div>
                       </div>
                     )}
                   </div>

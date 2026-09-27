@@ -75,6 +75,8 @@
   }
   #print-area, #print-area * {
     visibility: visible;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
   #print-area {
     display: block !important;
@@ -96,6 +98,34 @@
     break-after: page;
   }
   .a4-qr-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+  .a4-card-page-4 {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 3.5mm;
+    page-break-after: always;
+    break-after: page;
+  }
+  .a4-card-page-4:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+  .a4-card-page-8 {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-items: center;
+    align-items: center;
+    gap: 3.5mm;
+    page-break-after: always;
+    break-after: page;
+  }
+  .a4-card-page-8:last-child {
     page-break-after: auto;
     break-after: auto;
   }

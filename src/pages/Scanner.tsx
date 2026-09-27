@@ -28,10 +28,16 @@ import {
   Sparkles,
   RefreshCw,
   TrendingUp,
-  Info
+  Info,
+  Wifi,
+  WifiOff,
+  CloudDownload,
+  CloudUpload,
+  ShieldAlert
 } from 'lucide-react';
 import ScannerStressTestModal from '../components/ScannerStressTestModal';
 import { souvenirStorage } from '../services/souvenirStorage';
+import { offlineSyncService, OfflineSnapshotMeta } from '../services/offlineSyncService';
 
 const playBeep = () => {
   try {
@@ -173,12 +179,39 @@ export default function Scanner() {
   const [waitingSearch, setWaitingSearch] = useState('');
   const [isHandingOutId, setIsHandingOutId] = useState<string | null>(null);
 
+  // Offline-First Emergency Mode States
+  const [isOnline, setIsOnline] = useState<boolean>(
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+  const [isForceOffline, setIsForceOffline] = useState<boolean>(() =>
+    eventId ? offlineSyncService.isForceOffline(eventId) : false
+  );
+  const [pendingSyncCount, setPendingSyncCount] = useState<number>(() =>
+    eventId ? offlineSyncService.getSyncQueue(eventId).length : 0
+  );
+  const [snapshotMeta, setSnapshotMeta] = useState<OfflineSnapshotMeta>(() =>
+    eventId ? offlineSyncService.getSnapshotMeta(eventId) : { updatedAt: null, count: 0 }
+  );
+  const [isSyncingQueue, setIsSyncingQueue] = useState<boolean>(false);
+  const [isPreparingOffline, setIsPreparingOffline] = useState<boolean>(false);
+
   const isProcessingRef = useRef(false);
   const lastScannedCodeRef = useRef<string | null>(null);
 
-  const applyGuestsListToState = (rawList: Guest[]) => {
+  const refreshOfflineStatus = () => {
     if (!eventId) return;
-    const merged = souvenirStorage.mergeGuestsWithSouvenirs(eventId, rawList);
+    setPendingSyncCount(offlineSyncService.getSyncQueue(eventId).length);
+    setSnapshotMeta(offlineSyncService.getSnapshotMeta(eventId));
+    setIsForceOffline(offlineSyncService.isForceOffline(eventId));
+  };
+
+  const applyGuestsListToState = (rawList: Guest[], saveSnapshot = true) => {
+    if (!eventId) return;
+    const withPendingQueue = offlineSyncService.mergeGuestsWithPendingQueue(eventId, rawList);
+    if (saveSnapshot && withPendingQueue.length > 0) {
+      offlineSyncService.saveGuestsSnapshot(eventId, withPendingQueue);
+    }
+    const merged = souvenirStorage.mergeGuestsWithSouvenirs(eventId, withPendingQueue);
     setAllGuests(merged);
     setStats({
       total: merged.length,
@@ -202,34 +235,186 @@ export default function Scanner() {
       setSelectedSouvenirId(prev => prev || updatedSouvenirs[0].id!);
     }
     setSouvenirLogs(souvenirStorage.getLogs(eventId));
+    refreshOfflineStatus();
   };
 
   const loadAllGuests = async () => {
     if (!eventId) return;
+
+    // 1. Always hydrate immediately from local offline snapshot if state is empty or in offline mode
+    const localSnapshot = offlineSyncService.getGuestsSnapshot(eventId);
+    const forceOff = offlineSyncService.isForceOffline(eventId);
+    const currentlyOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+
+    if (!currentlyOnline || forceOff) {
+      if (localSnapshot.length > 0) {
+        applyGuestsListToState(localSnapshot, false);
+        return;
+      }
+    } else if (allGuests.length === 0 && localSnapshot.length > 0) {
+      applyGuestsListToState(localSnapshot, false);
+    }
+
     souvenirStorage.hydrateFromSupabase(eventId, true);
     try {
       const supaList = await supabaseDb.getGuests(eventId);
-      if (supaList) {
-        applyGuestsListToState(supaList);
+      if (supaList && supaList.length > 0) {
+        applyGuestsListToState(supaList, true);
+        return;
+      } else if (supaList && localSnapshot.length === 0) {
+        applyGuestsListToState(supaList, true);
         return;
       }
     } catch (supaErr) {
-      console.warn("Supabase loadAllGuests fallback:", supaErr);
+      console.warn("Supabase loadAllGuests fallback to local snapshot:", supaErr);
     }
 
     try {
       const guestsRef = collection(db, 'events', eventId, 'guests');
       const snap = await getDocs(guestsRef);
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Guest));
-      applyGuestsListToState(list);
+      if (list.length > 0 || localSnapshot.length === 0) {
+        applyGuestsListToState(list, true);
+        return;
+      }
     } catch (e) {
-      console.warn("Failed to load guests list (falling back gracefully):", e);
+      console.warn("Failed to load guests list (falling back to offline snapshot):", e);
+    }
+
+    if (localSnapshot.length > 0) {
+      applyGuestsListToState(localSnapshot, false);
+    }
+  };
+
+  const handlePrepareOfflineData = async () => {
+    if (!eventId || isPreparingOffline) return;
+    setIsPreparingOffline(true);
+    try {
+      souvenirStorage.hydrateFromSupabase(eventId, true);
+      // Also cache event metadata for Greeting Screen
+      supabaseDb.getEvent(eventId).then(ev => {
+        if (ev) offlineSyncService.saveEventSnapshot(eventId, ev);
+      }).catch(() => {});
+
+      const supaList = await supabaseDb.getGuests(eventId);
+      if (supaList && supaList.length > 0) {
+        applyGuestsListToState(supaList, true);
+        playBeep();
+        setScanResult({
+          status: 'success',
+          message: `✓ Data Offline Siap! ${supaList.length.toLocaleString('id-ID')} data tamu telah disimpan ke memori perangkat ini.`
+        });
+        setTimeout(() => setScanResult(null), 4000);
+        return;
+      }
+    } catch (e) {
+      console.warn("Prepare offline fallback:", e);
+    } finally {
+      setIsPreparingOffline(false);
+    }
+
+    const fallbackList = allGuests.length > 0 ? allGuests : offlineSyncService.getGuestsSnapshot(eventId);
+    if (fallbackList.length > 0) {
+      offlineSyncService.saveGuestsSnapshot(eventId, fallbackList);
+      refreshOfflineStatus();
+      playBeep();
+      setScanResult({
+        status: 'success',
+        message: `✓ Data Offline Tersimpan (${fallbackList.length.toLocaleString('id-ID')} tamu siap diverifikasi tanpa internet).`
+      });
+      setTimeout(() => setScanResult(null), 4000);
+    }
+  };
+
+  const handleManualSyncNow = async () => {
+    if (!eventId || isSyncingQueue) return;
+    setIsSyncingQueue(true);
+    try {
+      const res = await offlineSyncService.flushSyncQueue(eventId, { ignoreForceOffline: true });
+      refreshOfflineStatus();
+      await loadAllGuests();
+      if (res.synced > 0) {
+        playBeep();
+        setScanResult({
+          status: 'success',
+          message: `✓ Sinkronisasi Berhasil! ${res.synced} antrean scan offline telah dikirim ke server pusat.`
+        });
+        setTimeout(() => setScanResult(null), 4000);
+      }
+    } finally {
+      setIsSyncingQueue(false);
+    }
+  };
+
+  const handleToggleForceOffline = () => {
+    if (!eventId) return;
+    const next = !isForceOffline;
+    offlineSyncService.setForceOffline(eventId, next);
+    setIsForceOffline(next);
+    if (!next && navigator.onLine) {
+      // Automatically flush queue when turning emergency mode off
+      handleManualSyncNow();
     }
   };
 
   const fetchStats = async () => {
     await loadAllGuests();
   };
+
+  // Monitor Online/Offline network status & auto-flush sync queue
+  useEffect(() => {
+    if (!eventId) return;
+    refreshOfflineStatus();
+
+    const handleOnline = () => {
+      setIsOnline(true);
+      if (!offlineSyncService.isForceOffline(eventId)) {
+        offlineSyncService.flushSyncQueue(eventId).then(() => {
+          refreshOfflineStatus();
+          loadAllGuests();
+        });
+      }
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
+    const handleQueueChanged = (e: any) => {
+      if (!e.detail?.eventId || e.detail?.eventId === eventId) {
+        refreshOfflineStatus();
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('guestly_offline_queue_changed', handleQueueChanged);
+
+    // Background Auto-Sync every 5 seconds when online and not in manual Force-Offline lock
+    const syncTimer = setInterval(async () => {
+      if (
+        navigator.onLine &&
+        !offlineSyncService.isForceOffline(eventId) &&
+        offlineSyncService.getSyncQueue(eventId).length > 0 &&
+        !isProcessingRef.current
+      ) {
+        setIsSyncingQueue(true);
+        try {
+          await offlineSyncService.flushSyncQueue(eventId);
+          refreshOfflineStatus();
+        } finally {
+          setIsSyncingQueue(false);
+        }
+      }
+    }, 5000);
+
+    return () => {
+      clearInterval(syncTimer);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('guestly_offline_queue_changed', handleQueueChanged);
+    };
+  }, [eventId]);
 
   // Subscribe to real-time check-ins, souvenirs, and live monitoring heartbeat
   useEffect(() => {
@@ -274,9 +459,14 @@ export default function Scanner() {
     window.addEventListener('guestly_souvenir_logs_changed', handleLogsChanged);
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // 3. Guaranteed 3-second real-time monitoring heartbeat when tab is visible
+    // 3. Guaranteed 3-second real-time monitoring heartbeat when tab is visible & online
     const liveInterval = setInterval(() => {
-      if (document.visibilityState === 'visible' && !isProcessingRef.current) {
+      if (
+        document.visibilityState === 'visible' &&
+        !isProcessingRef.current &&
+        navigator.onLine &&
+        !offlineSyncService.isForceOffline(eventId)
+      ) {
         loadAllGuests();
       }
     }, 3000);
@@ -298,6 +488,184 @@ export default function Scanner() {
   }, [scanMode]);
 
   const activeSouvenir = souvenirs.find(s => s.id === selectedSouvenirId) || souvenirs[0];
+
+  const executeOnlineTicketTransaction = async (code: string) => {
+    const guestsRef = collection(db, 'events', eventId!, 'guests');
+    const q = query(guestsRef, where('ticketCode', '==', code), limit(1));
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+      const notFoundErr: any = new Error('TICKET_NOT_FOUND');
+      throw notFoundErr;
+    }
+
+    const guestDocId = snapshot.docs[0].id;
+    const guestDocRef = doc(db, 'events', eventId!, 'guests', guestDocId);
+
+    // Check against pending local queue first so we never allow duplicate scan if offline queue hasn't flushed yet
+    const localMerged = offlineSyncService.mergeGuestsWithPendingQueue(eventId!, allGuests);
+    const localGuest = localMerged.find(g => g.id === guestDocId);
+
+    const txRes = await runTransaction(db, async (transaction) => {
+      const freshSnap = await transaction.get(guestDocRef);
+      if (!freshSnap.exists()) {
+        throw new Error('GUEST_NOT_FOUND');
+      }
+
+      const rawData = freshSnap.data();
+      const guestData = {
+        ...rawData,
+        attended: rawData.attended || localGuest?.attended,
+        attendedAt: rawData.attendedAt || localGuest?.attendedAt,
+        checkInStaff: rawData.checkInStaff || localGuest?.checkInStaff,
+        souvenirTaken: rawData.souvenirTaken || localGuest?.souvenirTaken,
+        souvenirTakenAt: rawData.souvenirTakenAt || localGuest?.souvenirTakenAt,
+        souvenirName: rawData.souvenirName || localGuest?.souvenirName,
+        souvenirTakenBy: rawData.souvenirTakenBy || localGuest?.souvenirTakenBy,
+      };
+
+      if (stationMode === 'souvenir_only') {
+        const isAlreadyTaken = guestData.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
+        if (isAlreadyTaken) {
+          const localTaken = souvenirStorage.getGuestTakenInfo(eventId!, guestDocId);
+          const error = new Error('ALREADY_TAKEN_SOUVENIR');
+          (error as any).souvenirTakenAt = guestData.souvenirTakenAt || localTaken?.takenAt;
+          (error as any).guestName = guestData.name;
+          (error as any).souvenirName = guestData.souvenirName || localTaken?.souvenirName || 'Souvenir';
+          (error as any).souvenirTakenBy = guestData.souvenirTakenBy || localTaken?.takenBy;
+          throw error;
+        }
+
+        if (!activeSouvenir || !activeSouvenir.id) {
+          throw new Error('NO_SOUVENIR_CONFIGURED');
+        }
+
+        if ((activeSouvenir.remainingStock || 0) <= 0) {
+          throw new Error('OUT_OF_STOCK');
+        }
+
+        transaction.update(guestDocRef, {
+          souvenirTaken: true,
+          souvenirTakenAt: serverTimestamp(),
+          souvenirId: activeSouvenir.id,
+          souvenirName: activeSouvenir.name,
+          souvenirQuantity: 1,
+          souvenirTakenBy: currentOperator,
+          attended: true,
+          attendedAt: guestData.attendedAt || serverTimestamp(),
+          checkInStaff: guestData.checkInStaff || currentOperator,
+          updatedAt: serverTimestamp()
+        });
+
+        return { 
+          name: guestData.name, 
+          category: guestData.category || '', 
+          session: guestData.session || '',
+          souvenirGiven: true,
+          souvenirName: activeSouvenir.name,
+          guestDocId,
+          mode: 'souvenir_only' as const,
+          wasAlreadyAttended: !!guestData.attended,
+          processedOffline: false
+        };
+
+      } else if (stationMode === 'checkin_souvenir') {
+        if (guestData.attended) {
+          const error = new Error('ALREADY_ATTENDED');
+          (error as any).attendedAt = guestData.attendedAt;
+          (error as any).guestName = guestData.name;
+          (error as any).category = guestData.category;
+          (error as any).checkInStaff = guestData.checkInStaff;
+          (error as any).souvenirTaken = guestData.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
+          throw error;
+        }
+
+        const guestUpdate: any = {
+          attended: true,
+          attendedAt: serverTimestamp(),
+          checkInStaff: currentOperator,
+          updatedAt: serverTimestamp()
+        };
+
+        let souvenirGiven = false;
+        let targetSouvenirName = '';
+
+        const isAlreadyTaken = guestData.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
+        if (activeSouvenir && activeSouvenir.id && !isAlreadyTaken && (activeSouvenir.remainingStock || 0) > 0) {
+          guestUpdate.souvenirTaken = true;
+          guestUpdate.souvenirTakenAt = serverTimestamp();
+          guestUpdate.souvenirId = activeSouvenir.id;
+          guestUpdate.souvenirName = activeSouvenir.name;
+          guestUpdate.souvenirQuantity = 1;
+          guestUpdate.souvenirTakenBy = currentOperator;
+          souvenirGiven = true;
+          targetSouvenirName = activeSouvenir.name;
+        }
+
+        transaction.update(guestDocRef, guestUpdate);
+
+        return { 
+          name: guestData.name, 
+          category: guestData.category || '', 
+          session: guestData.session || '',
+          souvenirGiven,
+          souvenirName: targetSouvenirName,
+          guestDocId,
+          mode: 'checkin_souvenir' as const,
+          wasAlreadyAttended: false,
+          processedOffline: false
+        };
+
+      } else {
+        if (guestData.attended) {
+          const error = new Error('ALREADY_ATTENDED');
+          (error as any).attendedAt = guestData.attendedAt;
+          (error as any).guestName = guestData.name;
+          (error as any).category = guestData.category;
+          (error as any).checkInStaff = guestData.checkInStaff;
+          throw error;
+        }
+
+        transaction.update(guestDocRef, {
+          attended: true,
+          attendedAt: serverTimestamp(),
+          checkInStaff: currentOperator,
+          updatedAt: serverTimestamp()
+        });
+
+        return { 
+          name: guestData.name, 
+          category: guestData.category || '', 
+          session: guestData.session || '',
+          souvenirGiven: false,
+          guestDocId,
+          mode: 'checkin' as const,
+          wasAlreadyAttended: false,
+          processedOffline: false
+        };
+      }
+    });
+
+    // Also update local snapshot so offline cache stays 100% up-to-date
+    const nowIso = new Date().toISOString();
+    offlineSyncService.updateGuestInSnapshot(eventId!, txRes.guestDocId, {
+      attended: true,
+      attendedAt: nowIso,
+      checkInTime: nowIso,
+      checkInStaff: currentOperator,
+      ...(txRes.souvenirGiven && activeSouvenir
+        ? {
+            souvenirTaken: true,
+            souvenirTakenAt: nowIso,
+            souvenirId: activeSouvenir.id,
+            souvenirName: activeSouvenir.name,
+            souvenirTakenBy: currentOperator,
+          }
+        : {}),
+    });
+
+    return txRes;
+  };
 
   const processTicket = async (decodedText: string) => {
     if (isProcessingRef.current) return;
@@ -339,148 +707,65 @@ export default function Scanner() {
     lastScannedCodeRef.current = code;
 
     try {
-      const guestsRef = collection(db, 'events', eventId!, 'guests');
-      const q = query(guestsRef, where('ticketCode', '==', code), limit(1));
-      const snapshot = await getDocs(q);
-      
-      if (snapshot.empty) {
-        playErrorBuzz();
-        setScanResult({ status: 'error', message: `Tiket tidak valid atau tidak terdaftar. (Kode: ${code})`});
-      } else {
-        const guestDocId = snapshot.docs[0].id;
-        const guestDocRef = doc(db, 'events', eventId!, 'guests', guestDocId);
+      const shouldUseOfflineDirectly =
+        !navigator.onLine || offlineSyncService.isForceOffline(eventId!);
 
-        // Atomic Check-in / Souvenir Handover using Firestore Transaction
-        const transactionResult = await runTransaction(db, async (transaction) => {
-          const freshSnap = await transaction.get(guestDocRef);
-          if (!freshSnap.exists()) {
-            throw new Error('GUEST_NOT_FOUND');
-          }
+      let transactionResult: {
+        name: string;
+        category: string;
+        session: string;
+        souvenirGiven: boolean;
+        souvenirName?: string;
+        guestDocId: string;
+        mode: 'checkin' | 'checkin_souvenir' | 'souvenir_only';
+        wasAlreadyAttended: boolean;
+        processedOffline?: boolean;
+      };
 
-          const guestData = freshSnap.data();
-
-          if (stationMode === 'souvenir_only') {
-            // LOKET SOUVENIR KHUSUS (Tamu menukarkan tiket di meja souvenir terpisah)
-            const isAlreadyTaken = guestData.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
-            if (isAlreadyTaken) {
-              const localTaken = souvenirStorage.getGuestTakenInfo(eventId!, guestDocId);
-              const error = new Error('ALREADY_TAKEN_SOUVENIR');
-              (error as any).souvenirTakenAt = guestData.souvenirTakenAt || localTaken?.takenAt;
-              (error as any).guestName = guestData.name;
-              (error as any).souvenirName = guestData.souvenirName || localTaken?.souvenirName || 'Souvenir';
-              (error as any).souvenirTakenBy = guestData.souvenirTakenBy || localTaken?.takenBy;
-              throw error;
-            }
-
-            if (!activeSouvenir || !activeSouvenir.id) {
-              throw new Error('NO_SOUVENIR_CONFIGURED');
-            }
-
-            if ((activeSouvenir.remainingStock || 0) <= 0) {
-              throw new Error('OUT_OF_STOCK');
-            }
-
-            // Update Guest document in Firestore
-            transaction.update(guestDocRef, {
-              souvenirTaken: true,
-              souvenirTakenAt: serverTimestamp(),
-              souvenirId: activeSouvenir.id,
-              souvenirName: activeSouvenir.name,
-              souvenirQuantity: 1,
-              souvenirTakenBy: currentOperator,
-              attended: true,
-              attendedAt: guestData.attendedAt || serverTimestamp(),
-              checkInStaff: guestData.checkInStaff || currentOperator,
-              updatedAt: serverTimestamp()
-            });
-
-            return { 
-              name: guestData.name, 
-              category: guestData.category || '', 
-              session: guestData.session || '',
-              souvenirGiven: true,
-              souvenirName: activeSouvenir.name,
-              guestDocId,
-              mode: 'souvenir_only',
-              wasAlreadyAttended: !!guestData.attended
-            };
-
-          } else if (stationMode === 'checkin_souvenir') {
-            // MEJA RESEPSIONIS GABUNGAN: Check-In + Serahkan Souvenir
-            if (guestData.attended) {
-              const error = new Error('ALREADY_ATTENDED');
-              (error as any).attendedAt = guestData.attendedAt;
-              (error as any).guestName = guestData.name;
-              (error as any).category = guestData.category;
-              (error as any).checkInStaff = guestData.checkInStaff;
-              (error as any).souvenirTaken = guestData.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
-              throw error;
-            }
-
-            const guestUpdate: any = {
-              attended: true,
-              attendedAt: serverTimestamp(),
-              checkInStaff: currentOperator,
-              updatedAt: serverTimestamp()
-            };
-
-            let souvenirGiven = false;
-            let targetSouvenirName = '';
-
-            const isAlreadyTaken = guestData.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
-            if (activeSouvenir && activeSouvenir.id && !isAlreadyTaken && (activeSouvenir.remainingStock || 0) > 0) {
-              guestUpdate.souvenirTaken = true;
-              guestUpdate.souvenirTakenAt = serverTimestamp();
-              guestUpdate.souvenirId = activeSouvenir.id;
-              guestUpdate.souvenirName = activeSouvenir.name;
-              guestUpdate.souvenirQuantity = 1;
-              guestUpdate.souvenirTakenBy = currentOperator;
-              souvenirGiven = true;
-              targetSouvenirName = activeSouvenir.name;
-            }
-
-            transaction.update(guestDocRef, guestUpdate);
-
-            return { 
-              name: guestData.name, 
-              category: guestData.category || '', 
-              session: guestData.session || '',
-              souvenirGiven,
-              souvenirName: targetSouvenirName,
-              guestDocId,
-              mode: 'checkin_souvenir',
-              wasAlreadyAttended: false
-            };
-
-          } else {
-            // CHECK-IN SAJA
-            if (guestData.attended) {
-              const error = new Error('ALREADY_ATTENDED');
-              (error as any).attendedAt = guestData.attendedAt;
-              (error as any).guestName = guestData.name;
-              (error as any).category = guestData.category;
-              (error as any).checkInStaff = guestData.checkInStaff;
-              throw error;
-            }
-
-            transaction.update(guestDocRef, {
-              attended: true,
-              attendedAt: serverTimestamp(),
-              checkInStaff: currentOperator,
-              updatedAt: serverTimestamp()
-            });
-
-            return { 
-              name: guestData.name, 
-              category: guestData.category || '', 
-              session: guestData.session || '',
-              souvenirGiven: false,
-              guestDocId,
-              mode: 'checkin',
-              wasAlreadyAttended: false
-            };
-          }
+      if (shouldUseOfflineDirectly) {
+        transactionResult = offlineSyncService.processTicketLocally({
+          eventId: eventId!,
+          ticketCode: code,
+          stationMode,
+          activeSouvenir,
+          currentOperator,
+          inMemoryGuests: allGuests,
         });
+      } else {
+        // Smart 1.5s Timeout: If ballroom signal lags > 1500ms or network fails, fallback to Local Snapshot
+        try {
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('BALLROOM_SIGNAL_TIMEOUT')), 1500)
+          );
+          transactionResult = await Promise.race([
+            executeOnlineTicketTransaction(code),
+            timeoutPromise,
+          ]);
+        } catch (onlineErr: any) {
+          const businessErrors = [
+            'ALREADY_ATTENDED',
+            'ALREADY_TAKEN_SOUVENIR',
+            'OUT_OF_STOCK',
+            'NO_SOUVENIR_CONFIGURED',
+            'TICKET_NOT_FOUND',
+            'GUEST_NOT_FOUND',
+          ];
+          if (businessErrors.includes(onlineErr?.message)) {
+            throw onlineErr;
+          }
+          console.warn('Signal slow/offline during scan, switching to instant local verification:', onlineErr?.message);
+          transactionResult = offlineSyncService.processTicketLocally({
+            eventId: eventId!,
+            ticketCode: code,
+            stationMode,
+            activeSouvenir,
+            currentOperator,
+            inMemoryGuests: allGuests,
+          });
+        }
+      }
+
+      if (transactionResult) {
 
         // Record log and update storage outside transaction
         if (transactionResult.souvenirGiven && activeSouvenir) {
@@ -540,11 +825,12 @@ export default function Scanner() {
           }));
         }
         
-        let successMessage = `${transactionResult.name} berhasil check-in di gate!`;
+        const offlineBadge = transactionResult.processedOffline ? ' [Tersimpan Lokal • Auto-Sync]' : '';
+        let successMessage = `${transactionResult.name} berhasil check-in di gate!${offlineBadge}`;
         if (transactionResult.mode === 'souvenir_only') {
-          successMessage = `🎁 Souvenir "${transactionResult.souvenirName}" berhasil diserahkan kepada ${transactionResult.name}!`;
+          successMessage = `🎁 Souvenir "${transactionResult.souvenirName}" berhasil diserahkan kepada ${transactionResult.name}!${offlineBadge}`;
         } else if (transactionResult.souvenirGiven) {
-          successMessage = `✓ ${transactionResult.name} berhasil check-in & 🎁 Souvenir "${transactionResult.souvenirName}" diserahkan!`;
+          successMessage = `✓ ${transactionResult.name} berhasil check-in & 🎁 Souvenir "${transactionResult.souvenirName}" diserahkan!${offlineBadge}`;
         }
 
         setScanResult({ 
@@ -556,35 +842,43 @@ export default function Scanner() {
           operatorName: currentOperator
         });
 
-        // Supabase Realtime Broadcast to Greeting Screen & database update
-        supabaseDb.broadcastGuestArrival(eventId!, {
-          name: transactionResult.name,
-          category: transactionResult.category,
-          ticketCode: code,
-          session: transactionResult.session,
-          attended: true,
-          attendedAt: new Date().toISOString()
-        });
+        if (!transactionResult.processedOffline) {
+          // Supabase Realtime Broadcast to Greeting Screen & database update
+          supabaseDb.broadcastGuestArrival(eventId!, {
+            name: transactionResult.name,
+            category: transactionResult.category,
+            ticketCode: code,
+            session: transactionResult.session,
+            attended: true,
+            attendedAt: new Date().toISOString()
+          });
 
-        // Also sync state into Supabase guests table
-        supabaseDb.getGuestByTicket(eventId!, code).then((found) => {
-          if (found?.id) {
-            supabaseDb.updateGuest(found.id, {
-              attended: true,
-              attendedAt: new Date().toISOString(),
-              checkInStaff: found.checkInStaff || currentOperator,
-              souvenirTaken: Boolean(transactionResult.souvenirGiven),
-              souvenirName: transactionResult.souvenirName || undefined,
-              souvenirTakenBy: transactionResult.souvenirGiven ? currentOperator : undefined
-            });
-          }
-        }).catch(e => console.warn('Supabase guest sync error:', e));
+          // Also sync state into Supabase guests table
+          supabaseDb.getGuestByTicket(eventId!, code).then((found) => {
+            if (found?.id) {
+              supabaseDb.updateGuest(found.id, {
+                attended: true,
+                attendedAt: new Date().toISOString(),
+                checkInStaff: found.checkInStaff || currentOperator,
+                souvenirTaken: Boolean(transactionResult.souvenirGiven),
+                souvenirName: transactionResult.souvenirName || undefined,
+                souvenirTakenBy: transactionResult.souvenirGiven ? currentOperator : undefined
+              });
+            }
+          }).catch(e => console.warn('Supabase guest sync error:', e));
+        }
 
+        refreshOfflineStatus();
         loadAllGuests();
       }
     } catch (error: any) {
       playErrorBuzz();
-      if (error?.message === 'ALREADY_TAKEN_SOUVENIR') {
+      if (error?.message === 'TICKET_NOT_FOUND' || error?.message === 'TICKET_NOT_FOUND_LOCALLY') {
+        setScanResult({
+          status: 'error',
+          message: `Tiket tidak valid atau tidak terdaftar di acara ini. (Kode: ${code})`
+        });
+      } else if (error?.message === 'ALREADY_TAKEN_SOUVENIR') {
         const takenDate = parseFirestoreDate(error.souvenirTakenAt);
         const timeFormatted = takenDate 
           ? takenDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
@@ -652,25 +946,52 @@ export default function Scanner() {
     }
 
     setIsHandingOutId(guest.id);
+    const nowIso = new Date().toISOString();
+    const shouldUseOffline = !navigator.onLine || offlineSyncService.isForceOffline(eventId);
+
     try {
+      if (shouldUseOffline) {
+        throw new Error('FORCE_LOCAL_QUEUE');
+      }
+
       const guestDocRef = doc(db, 'events', eventId, 'guests', guest.id);
-      await updateDoc(guestDocRef, {
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('HANDOUT_TIMEOUT')), 1500)
+      );
+
+      await Promise.race([
+        updateDoc(guestDocRef, {
+          souvenirTaken: true,
+          souvenirTakenAt: serverTimestamp(),
+          souvenirId: activeSouvenir.id,
+          souvenirName: activeSouvenir.name,
+          souvenirQuantity: 1,
+          souvenirTakenBy: currentOperator,
+          attended: true,
+          attendedAt: guest.attendedAt || serverTimestamp(),
+          checkInStaff: guest.checkInStaff || currentOperator,
+          updatedAt: serverTimestamp()
+        }),
+        timeoutPromise
+      ]);
+
+      offlineSyncService.updateGuestInSnapshot(eventId, guest.id, {
+        attended: true,
+        attendedAt: guest.attendedAt || nowIso,
+        checkInStaff: guest.checkInStaff || currentOperator,
         souvenirTaken: true,
-        souvenirTakenAt: serverTimestamp(),
+        souvenirTakenAt: nowIso,
         souvenirId: activeSouvenir.id,
         souvenirName: activeSouvenir.name,
         souvenirQuantity: 1,
         souvenirTakenBy: currentOperator,
-        attended: true,
-        attendedAt: guest.attendedAt || serverTimestamp(),
-        checkInStaff: guest.checkInStaff || currentOperator,
-        updatedAt: serverTimestamp()
+        updatedAt: nowIso
       });
 
       souvenirStorage.recordGuestTake(eventId, guest.id, {
         souvenirId: activeSouvenir.id,
         souvenirName: activeSouvenir.name,
-        takenAt: new Date().toISOString(),
+        takenAt: nowIso,
         takenBy: currentOperator
       });
 
@@ -708,12 +1029,46 @@ export default function Scanner() {
       setSouvenirLogs(souvenirStorage.getLogs(eventId));
       loadAllGuests();
     } catch (e: any) {
-      console.warn("Manual handout error, saving locally:", e);
-      // Fallback local persistence
+      console.warn("Manual handout offline/timeout fallback, queueing locally:", e?.message);
+      const attendedAtVal = typeof guest.attendedAt === 'string' ? guest.attendedAt : nowIso;
+      const checkInStaffVal = guest.checkInStaff || currentOperator;
+
+      offlineSyncService.updateGuestInSnapshot(eventId, guest.id, {
+        attended: true,
+        attendedAt: attendedAtVal,
+        checkInTime: attendedAtVal,
+        checkInStaff: checkInStaffVal,
+        souvenirTaken: true,
+        souvenirTakenAt: nowIso,
+        souvenirId: activeSouvenir.id,
+        souvenirName: activeSouvenir.name,
+        souvenirQuantity: 1,
+        souvenirTakenBy: currentOperator,
+        updatedAt: nowIso
+      });
+
+      offlineSyncService.enqueueSyncItem(eventId, {
+        eventId,
+        guestId: guest.id,
+        ticketCode: (guest.ticketCode || '').toUpperCase(),
+        guestName: guest.name,
+        category: guest.category || '',
+        session: guest.session || '',
+        mode: 'souvenir_only',
+        attended: true,
+        attendedAt: attendedAtVal,
+        checkInStaff: checkInStaffVal,
+        souvenirGiven: true,
+        souvenirId: activeSouvenir.id,
+        souvenirName: activeSouvenir.name,
+        souvenirTakenAt: nowIso,
+        souvenirTakenBy: currentOperator
+      });
+
       souvenirStorage.recordGuestTake(eventId, guest.id, {
         souvenirId: activeSouvenir.id,
         souvenirName: activeSouvenir.name,
-        takenAt: new Date().toISOString(),
+        takenAt: nowIso,
         takenBy: currentOperator
       });
       souvenirStorage.addLog(eventId, {
@@ -725,13 +1080,13 @@ export default function Scanner() {
         ticketCode: guest.ticketCode || '',
         quantity: 1,
         action: 'TAKE',
-        notes: 'Penyerahan dicatat secara lokal',
+        notes: 'Penyerahan dicatat secara lokal (Antrean Auto-Sync)',
         performedBy: currentOperator
       });
       playSouvenirChime();
       setScanResult({
         status: 'success',
-        message: `🎁 Souvenir "${activeSouvenir.name}" berhasil dicatat untuk ${guest.name}!`,
+        message: `🎁 Souvenir "${activeSouvenir.name}" berhasil dicatat untuk ${guest.name}! [Tersimpan Lokal • Auto-Sync]`,
         guestName: guest.name,
         operatorName: currentOperator
       });
@@ -742,6 +1097,7 @@ export default function Scanner() {
       const updated = souvenirStorage.getSouvenirs(eventId);
       setSouvenirs(updated);
       setSouvenirLogs(souvenirStorage.getLogs(eventId));
+      refreshOfflineStatus();
       loadAllGuests();
     } finally {
       setIsHandingOutId(null);
@@ -915,6 +1271,110 @@ export default function Scanner() {
               <Keyboard className="w-3.5 h-3.5" /> Alat Scanner
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Offline-First Emergency Mode Status & Sync Bar */}
+      <div
+        className={`p-3 sm:p-3.5 rounded-lg border shadow-2xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3 transition-colors ${
+          !isOnline || isForceOffline
+            ? 'bg-rose-50/90 border-rose-300 text-rose-950'
+            : pendingSyncCount > 0
+            ? 'bg-amber-50/90 border-amber-300 text-amber-950'
+            : 'bg-emerald-50/60 border-emerald-200 text-emerald-950'
+        }`}
+      >
+        <div className="flex items-start sm:items-center gap-3">
+          <div
+            className={`w-9 h-9 rounded-md flex items-center justify-center shrink-0 ${
+              !isOnline || isForceOffline
+                ? 'bg-rose-600 text-white'
+                : pendingSyncCount > 0
+                ? 'bg-amber-500 text-white'
+                : 'bg-emerald-600 text-white'
+            }`}
+          >
+            {!isOnline || isForceOffline ? (
+              <WifiOff className="w-4 h-4" />
+            ) : pendingSyncCount > 0 ? (
+              <CloudUpload className="w-4 h-4 animate-bounce" />
+            ) : (
+              <Wifi className="w-4 h-4" />
+            )}
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs sm:text-sm font-bold">
+                {!isOnline
+                  ? '🔴 Sinyal Terputus — Mode Offline Darurat Aktif'
+                  : isForceOffline
+                  ? '🔴 Mode Darurat Offline Aktif (Dikunci Manual)'
+                  : pendingSyncCount > 0
+                  ? `🟠 Menyinkronkan Antrean (${pendingSyncCount} Data Belum Terkirim)`
+                  : '🟢 Online & Tersinkronisasi Real-Time'}
+              </span>
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-slate-800">
+                Data Offline Siap: {(snapshotMeta.count || stats.total).toLocaleString('id-ID')} Tamu
+                {snapshotMeta.updatedAt
+                  ? ` • Update ${new Date(snapshotMeta.updatedAt).toLocaleTimeString('id-ID', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}`
+                  : ''}
+              </span>
+            </div>
+            <p className="text-[11px] opacity-85 mt-0.5">
+              {!isOnline || isForceOffline
+                ? 'Scan QR & serah souvenir tetap berjalan instan (< 0,1 detik) dari memori perangkat. Data otomatis dikirim saat sinyal kembali.'
+                : pendingSyncCount > 0
+                ? 'Terdapat catatan scan offline di perangkat ini yang sedang dikirim ke server pusat.'
+                : 'Sinyal gedung stabil. Jika sinyal buruk/lambat (> 1,5 detik), scanner otomatis beralih ke verifikasi memori perangkat tanpa jeda.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
+          {/* Button: Siapkan Data Offline */}
+          <button
+            onClick={handlePrepareOfflineData}
+            disabled={isPreparingOffline || !isOnline}
+            className="h-8 flex items-center gap-1.5 px-2.5 text-xs font-semibold bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-md transition-colors cursor-pointer disabled:opacity-50"
+            title="Unduh dan perbarui seluruh daftar tamu ke memori perangkat untuk persiapan sebelum acara"
+          >
+            <CloudDownload className={`w-3.5 h-3.5 text-indigo-600 ${isPreparingOffline ? 'animate-bounce' : ''}`} />
+            <span>{isPreparingOffline ? 'Menyimpan...' : 'Siapkan Data Offline'}</span>
+          </button>
+
+          {/* Button: Sinkronkan Sekarang (Shown when queue > 0) */}
+          {pendingSyncCount > 0 && (
+            <button
+              onClick={handleManualSyncNow}
+              disabled={isSyncingQueue || !isOnline}
+              className="h-8 flex items-center gap-1.5 px-3 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-md transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
+              title="Kirim antrean scan offline ke database server sekarang"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingQueue ? 'animate-spin' : ''}`} />
+              <span>
+                {isSyncingQueue
+                  ? 'Menyinkronkan...'
+                  : `Sinkronkan Sekarang (${pendingSyncCount})`}
+              </span>
+            </button>
+          )}
+
+          {/* Toggle: Mode Darurat Offline */}
+          <button
+            onClick={handleToggleForceOffline}
+            className={`h-8 flex items-center gap-1.5 px-2.5 text-xs font-semibold rounded-md border transition-colors cursor-pointer ${
+              isForceOffline
+                ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-700'
+                : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300'
+            }`}
+            title="Aktifkan manual jika sinyal gedung hidup-mati agar scanner tidak menunggu jaringan sama sekali (0ms lag)"
+          >
+            <ShieldAlert className="w-3.5 h-3.5" />
+            <span>{isForceOffline ? 'Matikan Mode Darurat' : 'Mode Darurat Offline'}</span>
+          </button>
         </div>
       </div>
 

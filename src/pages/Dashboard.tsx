@@ -6,8 +6,9 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { EventRecord, Guest } from '../types';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
-import { format, isSameDay } from 'date-fns';
-import { parseFirestoreDate, getRoleLabel, canUserAccessEvent } from '../lib/utils';
+import { format, isSameDay, addMonths, startOfDay, endOfDay, differenceInCalendarDays } from 'date-fns';
+import { id as localeId } from 'date-fns/locale';
+import { parseFirestoreDate, getRoleLabel, canUserAccessEvent, shouldHideServiceInfo, getUserBusinessId } from '../lib/utils';
 
 export default function Dashboard() {
   const { appUser } = useAuth();
@@ -18,21 +19,6 @@ export default function Dashboard() {
       navigate('/auth/login/events', { replace: true });
     }
   }, [appUser, navigate]);
-  
-  // Parse activeUntil safely
-  let isTrial = false;
-  if (appUser?.role === 'client') {
-    let activeDate: Date | null = null;
-    if (appUser.activeUntil) {
-       if (appUser.activeUntil.toDate) activeDate = appUser.activeUntil.toDate();
-       else if (typeof appUser.activeUntil === 'string') activeDate = new Date(appUser.activeUntil);
-       else if (appUser.activeUntil.seconds) activeDate = new Date(appUser.activeUntil.seconds * 1000);
-    }
-    // Consider trial if no active date, or active date is less than 7 days from now, or low event quota
-    if (!activeDate || activeDate < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) || (appUser.eventQuota && appUser.eventQuota <= 1)) {
-      isTrial = true;
-    }
-  }
 
   const [metrics, setMetrics] = useState({
     totalEvents: 0,
@@ -54,7 +40,31 @@ export default function Dashboard() {
   });
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [isFilteringByDate, setIsFilteringByDate] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
+
+  // Check if client is under a WO / Partner (via user profile, hideServiceInfo, or event partnerId)
+  const isClientUnderWO = Boolean(
+    shouldHideServiceInfo(appUser) ||
+    (appUser?.partnerId && appUser.partnerId !== 'default-partner') ||
+    appUser?.businessName ||
+    events.some(ev => ev.partnerId && ev.partnerId !== 'default-partner')
+  );
+
+  // Parse activeUntil safely — only show trial upgrade prompt for standalone end-user clients not under a WO
+  let isTrial = false;
+  if (appUser?.role === 'client' && !loading && !isClientUnderWO) {
+    let activeDate: Date | null = null;
+    if (appUser.activeUntil) {
+       if (appUser.activeUntil.toDate) activeDate = appUser.activeUntil.toDate();
+       else if (typeof appUser.activeUntil === 'string') activeDate = new Date(appUser.activeUntil);
+       else if (appUser.activeUntil.seconds) activeDate = new Date(appUser.activeUntil.seconds * 1000);
+    }
+    // Consider trial if no active date, or active date is less than 7 days from now, or low event quota
+    if (!activeDate || activeDate < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) || (appUser.eventQuota && appUser.eventQuota <= 1)) {
+      isTrial = true;
+    }
+  }
 
   useEffect(() => {
     let unsubscribeGuestsList: (() => void)[] = [];
@@ -67,10 +77,7 @@ export default function Dashboard() {
         let eventsRef = collection(db, 'events');
         let q = query(eventsRef);
         
-        if (appUser?.role === 'partner') {
-          const partnerId = appUser.id || '';
-          q = query(eventsRef, where('partnerId', '==', partnerId));
-        } else if (appUser?.role === 'client') {
+        if (appUser?.role === 'client') {
           const targetClientId = appUser?.clientId || appUser?.id || '';
           if (!targetClientId) {
              setLoading(false);
@@ -79,17 +86,18 @@ export default function Dashboard() {
           q = query(eventsRef, where('clientId', '==', targetClientId));
         }
 
-        if (appUser?.role === 'superadmin' || appUser?.role === 'owner') {
+        if (appUser?.role === 'superadmin') {
           try {
              const { getCountFromServer } = await import('firebase/firestore');
              const usersRef = collection(db, 'users');
              const totalUsersSnap = await getCountFromServer(usersRef);
              const partnersSnap = await getCountFromServer(query(usersRef, where('role', '==', 'partner')));
+             const ownersSnap = await getCountFromServer(query(usersRef, where('role', '==', 'owner')));
              const clientsSnap = await getCountFromServer(collection(db, 'clients'));
              setSuperMetrics(prev => ({ 
                ...prev, 
                totalUsers: totalUsersSnap.data().count, 
-               totalPartners: partnersSnap.data().count,
+               totalPartners: partnersSnap.data().count + ownersSnap.data().count,
                totalClients: clientsSnap.data().count 
              }));
           } catch (error: any) {
@@ -98,14 +106,54 @@ export default function Dashboard() {
         }
 
         try {
+          const myBizIds = new Set<string>(
+            [appUser?.id, appUser?.partnerId, getUserBusinessId(appUser)].filter(Boolean) as string[]
+          );
+          const myClientIds = new Set<string>();
+
+          if (appUser && ['owner', 'partner', 'admin'].includes(appUser.role)) {
+            try {
+              const [snapUsers, snapClients] = await Promise.all([
+                getDocs(collection(db, 'users')),
+                getDocs(collection(db, 'clients')),
+              ]);
+              snapUsers.docs.forEach(uDoc => {
+                const u = uDoc.data();
+                if (
+                  (u.partnerId && myBizIds.has(u.partnerId)) ||
+                  (u.createdBy && myBizIds.has(u.createdBy)) ||
+                  myBizIds.has(uDoc.id)
+                ) {
+                  myBizIds.add(uDoc.id);
+                  if (u.partnerId) myBizIds.add(u.partnerId);
+                }
+              });
+              snapClients.docs.forEach(cDoc => {
+                const c = cDoc.data();
+                if (c.partnerId && myBizIds.has(c.partnerId)) {
+                  myClientIds.add(cDoc.id);
+                }
+              });
+            } catch {
+              // ignore auxiliary scope lookup error
+            }
+          }
+
+          const allowedPartnerIds = Array.from(myBizIds);
+          const userPrimaryBizId = getUserBusinessId(appUser) || appUser?.id || '';
+
           const eventsSnapshot = await getDocs(q);
           const eventsList: EventRecord[] = [];
           let drafts = 0;
           let published = 0;
               
           eventsSnapshot.forEach(doc => {
-            if (!canUserAccessEvent(appUser, doc.id)) return;
             const data = doc.data() as EventRecord;
+            const effectivePartnerId =
+              data.clientId && myClientIds.has(data.clientId)
+                ? userPrimaryBizId
+                : data.partnerId;
+            if (!canUserAccessEvent(appUser, doc.id, effectivePartnerId, allowedPartnerIds)) return;
             eventsList.push({ ...data, id: doc.id });
             if (data.status === 'draft') drafts++;
             if (data.status === 'published' || data.status === 'completed') published++;
@@ -252,18 +300,39 @@ export default function Dashboard() {
       const hasEvent = events.some(event => {
           const d = parseFirestoreDate(event.date);
           if (!d || isNaN(d.getTime())) return false;
-          return isSameDay(d, date) && event.status !== 'completed';
+          return isSameDay(d, date) && event.status === 'published';
       });
       return hasEvent ? <div className="w-1.5 h-1.5 bg-indigo-600 rounded-full mx-auto mt-1"></div> : null;
     }
     return null;
   };
   
-  const selectedDateEvents = events.filter(event => {
+  const todayStart = startOfDay(new Date());
+  const threeMonthsLimit = endOfDay(addMonths(todayStart, 3));
+
+  const upcomingThreeMonthsEvents = events
+    .filter(event => {
+      if (event.status !== 'published') return false;
       const d = parseFirestoreDate(event.date);
       if (!d || isNaN(d.getTime())) return false;
-      return isSameDay(d, selectedDate) && event.status !== 'completed';
-  });
+      return d >= todayStart && d <= threeMonthsLimit;
+    })
+    .sort((a, b) => {
+      const da = parseFirestoreDate(a.date)?.getTime() || 0;
+      const dbTime = parseFirestoreDate(b.date)?.getTime() || 0;
+      return da - dbTime;
+    });
+
+  const selectedDateEvents = events
+    .filter(event => {
+      if (event.status !== 'published') return false;
+      const d = parseFirestoreDate(event.date);
+      if (!d || isNaN(d.getTime())) return false;
+      return isSameDay(d, selectedDate);
+    })
+    .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+
+  const displayedScheduleEvents = isFilteringByDate ? selectedDateEvents : upcomingThreeMonthsEvents;
 
   return (
     <div className="space-y-6">
@@ -293,7 +362,7 @@ export default function Dashboard() {
         <div className="text-gray-500">Memuat data dashboard...</div>
       ) : (
         <div className="space-y-6">
-          {(appUser?.role === 'superadmin' || appUser?.role === 'owner') && (
+          {appUser?.role === 'superadmin' && (
             <div>
                <h2 className="text-lg font-medium text-gray-900 mb-4">Statistik Global Sistem</h2>
                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -302,7 +371,7 @@ export default function Dashboard() {
                    <p className="text-3xl font-bold text-gray-900 mt-2">{superMetrics.totalUsers}</p>
                  </div>
                  <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 border-l-4 border-l-orange-500">
-                   <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Partner</h3>
+                   <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Owner / Partner</h3>
                    <p className="text-3xl font-bold text-gray-900 mt-2">{superMetrics.totalPartners}</p>
                  </div>
                  <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 border-l-4 border-l-teal-500">
@@ -402,51 +471,118 @@ export default function Dashboard() {
                     `}
                   </style>
                   <Calendar 
-                    onChange={(val) => setSelectedDate(val as Date)} 
+                    onChange={(val) => {
+                      setSelectedDate(val as Date);
+                      setIsFilteringByDate(true);
+                    }} 
                     value={selectedDate}
                     tileContent={tileContent}
                     className="w-full"
                   />
                 </div>
                 <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 lg:col-span-2">
-                  <h3 className="text-base font-medium text-gray-900 mb-4 border-b pb-2">
-                    Jadwal Acara: {format(selectedDate, 'dd MMMM yyyy')}
-                  </h3>
-                  {selectedDateEvents.length > 0 ? (
-                    <div className="space-y-4">
-                      {selectedDateEvents.map(event => {
-                        // Check if Event is H-3
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 border-b pb-3">
+                    <div>
+                      <h3 className="text-base font-semibold text-gray-900">
+                        {isFilteringByDate
+                          ? `Jadwal Acara: ${format(selectedDate, 'dd MMMM yyyy', { locale: localeId })}`
+                          : 'Jadwal Acara Mendatang (3 Bulan ke Depan)'}
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {isFilteringByDate
+                          ? 'Menampilkan acara berstatus Published pada tanggal yang dipilih.'
+                          : `${format(todayStart, 'dd MMM yyyy', { locale: localeId })} – ${format(threeMonthsLimit, 'dd MMM yyyy', { locale: localeId })} • Status: Published (${upcomingThreeMonthsEvents.length} Acara)`}
+                      </p>
+                    </div>
+                    {isFilteringByDate && (
+                      <button
+                        type="button"
+                        onClick={() => setIsFilteringByDate(false)}
+                        className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors self-start sm:self-auto shrink-0"
+                      >
+                        Lihat 3 Bulan ke Depan
+                      </button>
+                    )}
+                  </div>
+                  {displayedScheduleEvents.length > 0 ? (
+                    <div className="space-y-3.5 max-h-[420px] overflow-y-auto pr-1">
+                      {displayedScheduleEvents.map(event => {
                         const parsedDate = parseFirestoreDate(event.date);
-                        const diffTime = parsedDate ? parsedDate.getTime() - new Date().getTime() : 0;
-                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                        const isWarning = diffDays > 0 && diffDays <= 3;
+                        const diffDays = parsedDate ? differenceInCalendarDays(parsedDate, todayStart) : 0;
+                        const isWarning = diffDays >= 0 && diffDays <= 3;
+                        const countdownLabel =
+                          diffDays === 0
+                            ? 'Hari Ini'
+                            : diffDays > 0 && diffDays <= 7
+                            ? `H-${diffDays}`
+                            : `${diffDays} Hari Lagi`;
                         
                         return (
-                          <div key={event.id} className={`p-4 rounded-lg border ${isWarning ? 'border-orange-300 bg-orange-50' : 'border-gray-200 bg-gray-50'}`}>
-                            <div className="flex justify-between items-start">
-                              <div>
-                                <h4 className="font-semibold text-gray-900">{event.title}</h4>
-                                <p className="text-sm text-gray-600 mt-1 flex items-center">
-                                  <svg className="w-4 h-4 mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                  {event.time || 'Waktu belum diatur'}
-                                </p>
-                                {event.location && (
-                                  <p className="text-sm text-gray-600 mt-1 flex items-center">
-                                    <svg className="w-4 h-4 mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                                    {event.location}
-                                  </p>
-                                )}
+                          <div
+                            key={event.id}
+                            className={`p-4 rounded-xl border transition-colors ${
+                              isWarning
+                                ? 'border-orange-300 bg-orange-50/70'
+                                : 'border-gray-200 bg-gray-50/70 hover:bg-gray-100/70'
+                            }`}
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-gray-200/70">
+                              <div className="flex items-center gap-2 text-xs font-semibold text-indigo-700">
+                                <svg className="w-4 h-4 text-indigo-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                <span>
+                                  {parsedDate
+                                    ? format(parsedDate, 'EEEE, dd MMMM yyyy', { locale: localeId })
+                                    : event.date}
+                                </span>
                               </div>
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                event.status === 'published' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                              }`}>
-                                {event.status}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                                    isWarning
+                                      ? 'bg-orange-100 text-orange-800 border border-orange-200'
+                                      : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                  }`}
+                                >
+                                  {countdownLabel}
+                                </span>
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                  Published
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div>
+                                <h4 className="font-bold text-gray-900 text-sm sm:text-base">{event.title}</h4>
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 text-xs sm:text-sm text-gray-600">
+                                  <span className="flex items-center">
+                                    <svg className="w-4 h-4 mr-1 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                    {event.time || 'Waktu belum diatur'}
+                                  </span>
+                                  {event.location && (
+                                    <span className="flex items-center">
+                                      <svg className="w-4 h-4 mr-1 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                                      {event.location}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/auth/login/events/${event.id}`)}
+                                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-white border border-indigo-200 hover:border-indigo-300 px-3 py-1.5 rounded-lg transition-colors self-start sm:self-center shrink-0"
+                              >
+                                Lihat Acara &rarr;
+                              </button>
                             </div>
                             {isWarning && (
-                              <div className="mt-3 text-sm text-orange-700 bg-orange-100 bg-opacity-50 p-2 rounded flex items-start">
-                                <svg className="w-5 h-5 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-                                <span>Acara ini akan berlangsung dalam H-{diffDays}. Mohon pastikan segala perlengkapan siap.</span>
+                              <div className="mt-3 text-xs sm:text-sm text-orange-800 bg-orange-100/70 p-2.5 rounded-lg flex items-start">
+                                <svg className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                                <span>
+                                  {diffDays === 0
+                                    ? 'Acara ini berlangsung HARI INI. Pastikan seluruh tim dan perlengkapan siap.'
+                                    : `Acara ini akan berlangsung dalam H-${diffDays}. Mohon pastikan segala perlengkapan siap.`}
+                                </span>
                               </div>
                             )}
                           </div>
@@ -456,7 +592,11 @@ export default function Dashboard() {
                   ) : (
                     <div className="text-center py-8 text-gray-500">
                       <svg className="w-12 h-12 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                      <p>Tidak ada jadwal acara pada tanggal ini.</p>
+                      <p>
+                        {isFilteringByDate
+                          ? 'Tidak ada jadwal acara berstatus Published pada tanggal ini.'
+                          : 'Belum ada jadwal acara berstatus Published untuk 3 bulan ke depan.'}
+                      </p>
                     </div>
                   )}
                 </div>

@@ -2,18 +2,19 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { QrCode, Printer, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code, MessageCircle, RefreshCcw, Users, Loader2, Gift, ArrowUpDown, AlertCircle, ArrowLeft, Image as ImageIcon } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'react-qr-code';
-import * as htmlToImage from 'html-to-image';
 import { collection, query, getDocs, addDoc, serverTimestamp, doc, getDoc, deleteDoc, updateDoc, deleteField, onSnapshot, writeBatch } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { supabaseDb } from '../lib/supabaseDb';
-import { Guest, EventRecord, WATemplate } from '../types';
-import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel } from '../lib/utils';
+import { Guest, EventRecord, WATemplate, EInviteTemplate } from '../types';
+import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel, exportCardToPng } from '../lib/utils';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Modal } from '../components/Modal';
 import { MediaUploader } from '../components/media/MediaUploader';
+import { EInvitationCard } from '../components/EInvitationCard';
+import { eInviteTemplateService, DEFAULT_EINVITE_TEMPLATES } from '../services/eInviteTemplateService';
 import { useAuth } from '../AuthContext';
 import { showAlert, showConfirm } from '../lib/alerts';
 import { useSettings } from '../SettingsContext';
@@ -30,6 +31,8 @@ export default function EventDetails() {
   const isStaffSouvenirOnly = isStaff && appUser?.staffType === 'souvenir';
   const [event, setEvent] = useState<EventRecord | null>(null);
   const [clientName, setClientName] = useState<string>('');
+  const [clientPartnerId, setClientPartnerId] = useState<string | null>(null);
+  const [teamPartnerIds, setTeamPartnerIds] = useState<string[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
   const [waTemplates, setWaTemplates] = useState<WATemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,7 +43,7 @@ export default function EventDetails() {
   const [newGuestCategory, setNewGuestCategory] = useState('');
   const [newGuestInvitationType, setNewGuestInvitationType] = useState('');
   const [newGuestSession, setNewGuestSession] = useState('');
-  const [newGuestPax, setNewGuestPax] = useState<number>(1);
+  const [newGuestPax, setNewGuestPax] = useState<string>('1');
   const [searchTerm, setSearchTerm] = useState('');
   const [rsvpFilter, setRsvpFilter] = useState('all');
   const [attendanceFilter, setAttendanceFilter] = useState('all');
@@ -66,6 +69,10 @@ export default function EventDetails() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrRef = useRef<HTMLDivElement>(null);
   const [activeQrGuest, setActiveQrGuest] = useState<Guest | null>(null);
+  const [qrModalViewMode, setQrModalViewMode] = useState<'card' | 'standard'>('card');
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [printFormat, setPrintFormat] = useState<'standard' | 'card-4' | 'card-8'>('standard');
+  const [singlePrintGuest, setSinglePrintGuest] = useState<Guest | null>(null);
   const { settings } = useSettings();
   const [isBlasting, setIsBlasting] = useState(false);
   const [isBlastModalOpen, setIsBlastModalOpen] = useState(false);
@@ -81,7 +88,7 @@ export default function EventDetails() {
   const [editGuestCategory, setEditGuestCategory] = useState('');
   const [editGuestInvitationType, setEditGuestInvitationType] = useState('');
   const [editGuestSession, setEditGuestSession] = useState('');
-  const [editGuestPax, setEditGuestPax] = useState<number>(1);
+  const [editGuestPax, setEditGuestPax] = useState<string>('1');
   const [editGuestRsvpStatus, setEditGuestRsvpStatus] = useState<'pending' | 'attending' | 'declined'>('pending');
   const [isRefreshingGuests, setIsRefreshingGuests] = useState(false);
 
@@ -95,6 +102,15 @@ export default function EventDetails() {
   const [isThumbnailModalOpen, setIsThumbnailModalOpen] = useState(false);
   const [thumbnailInput, setThumbnailInput] = useState('');
   const [isSavingThumbnail, setIsSavingThumbnail] = useState(false);
+  const [eInviteTemplates, setEInviteTemplates] = useState<EInviteTemplate[]>(DEFAULT_EINVITE_TEMPLATES);
+
+  useEffect(() => {
+    eInviteTemplateService.getTemplates().then((list) => {
+      if (Array.isArray(list) && list.length > 0) {
+        setEInviteTemplates(list);
+      }
+    });
+  }, []);
 
   const openThumbnailModal = () => {
     setThumbnailInput(event?.thumbnailUrl || '');
@@ -125,6 +141,25 @@ export default function EventDetails() {
       showAlert('Gagal', 'Gagal menyimpan pengaturan thumbnail acara.', 'error');
     } finally {
       setIsSavingThumbnail(false);
+    }
+  };
+
+  const handleUpdateEInviteConfig = async (updates: {
+    eInviteTheme?: 'rose' | 'gold' | 'sage';
+    eInviteMode?: 'full' | 'compact';
+    eInviteTemplateId?: string;
+    eInviteTemplateUrl?: string;
+  }) => {
+    if (!eventId || !event) return;
+    try {
+      await updateDoc(doc(db, 'events', eventId), {
+        ...updates,
+        updatedAt: serverTimestamp(),
+      });
+      setEvent({ ...event, ...updates });
+    } catch (error) {
+      console.error('Error updating E-Invitation config:', error);
+      showAlert('Gagal', 'Gagal menyimpan pengaturan tema E-Invitation.', 'error');
     }
   };
 
@@ -176,9 +211,22 @@ export default function EventDetails() {
                 const clientDoc = await getDoc(doc(db, 'clients', eventData.clientId));
                 if (clientDoc.exists()) {
                   setClientName(clientDoc.data().name);
+                  setClientPartnerId(clientDoc.data().partnerId || null);
                 }
               } catch (clientErr) {
                 console.warn('Failed to fetch client details:', clientErr);
+              }
+            }
+            if (eventData.partnerId) {
+              try {
+                const creatorDoc = await getDoc(doc(db, 'users', eventData.partnerId));
+                if (creatorDoc.exists()) {
+                  const cData = creatorDoc.data();
+                  const ids = [creatorDoc.id, cData.partnerId, cData.createdBy].filter(Boolean);
+                  setTeamPartnerIds(ids);
+                }
+              } catch {
+                // ignore
               }
             }
           }
@@ -334,7 +382,7 @@ export default function EventDetails() {
       setNewGuestCategory('');
       setNewGuestInvitationType('');
       setNewGuestSession('');
-      setNewGuestPax(1);
+      setNewGuestPax('1');
       setIsAddingGuest(false);
     } catch (error) {
       showAlert("Gagal", "Failed to add guest. Check permissions.", "error");
@@ -628,19 +676,33 @@ export default function EventDetails() {
     doc.save(`Daftar_Tamu_${event?.title || 'Event'}.pdf`);
   };
 
-  const handleDownloadQR = () => {
+  const handleDownloadQR = async () => {
     if (qrRef.current && activeQrGuest) {
-      htmlToImage.toPng(qrRef.current)
-        .then(function (dataUrl) {
-          const link = document.createElement('a');
-          link.download = `QR_${activeQrGuest.name.replace(/\s+/g, '_')}_${event?.title || 'Event'}.png`;
-          link.href = dataUrl;
-          link.click();
-        })
-        .catch(function (error) {
-          console.error('oops, something went wrong!', error);
-        });
+      try {
+        const prefix = qrModalViewMode === 'card' ? 'Card_QR' : 'QR_Label';
+        const fileName = `${prefix}_${activeQrGuest.name.replace(/\s+/g, '_')}_${(event?.title || 'Event').replace(/\s+/g, '_')}.png`;
+        await exportCardToPng(qrRef.current, fileName);
+      } catch (error) {
+        console.warn('Failed to download QR card:', error);
+        showAlert('Gagal', 'Gagal mengunduh kartu QR.', 'error');
+      }
     }
+  };
+
+  const handlePrintSingleGuest = (guest: Guest, mode: 'card' | 'standard') => {
+    setSinglePrintGuest(guest);
+    setPrintFormat(mode === 'card' ? 'card-4' : 'standard');
+    setTimeout(() => {
+      window.print();
+    }, 180);
+  };
+
+  const handleExecuteBulkPrint = () => {
+    setSinglePrintGuest(null);
+    setIsPrintModalOpen(false);
+    setTimeout(() => {
+      window.print();
+    }, 180);
   };
 
   const getQrTicketLink = (ticketCode: string) => {
@@ -750,7 +812,7 @@ export default function EventDetails() {
       const template = waTemplates.find(t => t.id === selectedTemplateId) || waTemplates[0];
 
       // Use a default message if template is missing but should fallback
-      const defaultMessageContent = `Halo *[GUEST_NAME]* 👋🏻\n\nDengan penuh rasa hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara spesial kami:\n\n✨ *[EVENT_TITLE]* ✨\n\nUntuk konfirmasi kehadiran saat acara berlangsung, silakan tunjukkan QR Code berikut:\n������ [QR_LINK]\n\nDetail lengkap acara dapat dilihat melalui undangan digital berikut:\n💌 [INVITE_LINK]\n\nMerupakan suatu kebahagiaan bagi kami apabila Bapak/Ibu/Saudara/i berkenan hadir serta memberikan doa dan restu kepada kami.\n\nAtas perhatian dan kehadirannya, kami ucapkan terima kasih 🙏🏻\n\nHormat kami,\n*[SENDER_NAME]*`;
+      const defaultMessageContent = `Halo *[GUEST_NAME]* 👋🏻\n\nDengan penuh rasa hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara spesial kami:\n\n✨ *[EVENT_TITLE]* ✨\n\nUntuk konfirmasi kehadiran saat acara berlangsung, silakan tunjukkan QR Code berikut:\n🔳 [QR_LINK]\n\nDetail lengkap acara dapat dilihat melalui undangan digital berikut:\n💌 [INVITE_LINK]\n\nMerupakan suatu kebahagiaan bagi kami apabila Bapak/Ibu/Saudara/i berkenan hadir serta memberikan doa dan restu kepada kami.\n\nAtas perhatian dan kehadirannya, kami ucapkan terima kasih 🙏🏻\n\nHormat kami,\n*[SENDER_NAME]*`;
 
       const templateContent = template?.content || defaultMessageContent;
 
@@ -1100,8 +1162,8 @@ export default function EventDetails() {
   const handleClearAllGuests = async () => {
     if (!eventId || guests.length === 0) return;
 
-    if (appUser?.role !== 'superadmin' && appUser?.role !== 'partner') {
-      showAlert('Ditolak', 'Hanya Admin atau Partner yang dapat menghapus semua tamu.', 'error');
+    if (appUser?.role !== 'superadmin' && appUser?.role !== 'owner' && appUser?.role !== 'admin' && appUser?.role !== 'partner') {
+      showAlert('Ditolak', 'Hanya Super Admin, Owner, Admin, atau Partner yang dapat menghapus semua tamu.', 'error');
       return;
     }
 
@@ -1159,7 +1221,7 @@ export default function EventDetails() {
     setEditGuestCategory(guest.category || '');
     setEditGuestInvitationType(guest.invitationType || '');
     setEditGuestSession(guest.session || '');
-    setEditGuestPax(guest.pax !== undefined && guest.pax > 0 ? Number(guest.pax) : 1);
+    setEditGuestPax(String(guest.pax !== undefined && guest.pax > 0 ? Number(guest.pax) : 1));
     setEditGuestRsvpStatus(guest.rsvpStatus || 'pending');
     setIsEditingGuest(true);
   };
@@ -1256,7 +1318,15 @@ export default function EventDetails() {
     }
   };
 
-  if (appUser && !canUserAccessEvent(appUser, eventId)) {
+  const effectiveEventPartnerId = event
+    ? (clientPartnerId && (clientPartnerId === appUser?.id || clientPartnerId === appUser?.partnerId)
+        ? clientPartnerId
+        : (teamPartnerIds.includes(appUser?.id || '') || (appUser?.partnerId && teamPartnerIds.includes(appUser.partnerId))
+            ? (appUser?.partnerId || appUser?.id)
+            : (event.partnerId || clientPartnerId || undefined)))
+    : undefined;
+
+  if (appUser && !canUserAccessEvent(appUser, eventId, effectiveEventPartnerId, teamPartnerIds)) {
     return (
       <div className="max-w-lg mx-auto mt-12 bg-white p-8 rounded-2xl shadow-sm border border-red-200 text-center space-y-4">
         <div className="w-12 h-12 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto">
@@ -1464,6 +1534,106 @@ export default function EventDetails() {
                     </div>
                   )}
                </div>
+               {/* E-Invitation & Digital Pass Configuration */}
+               {!isStaff && (
+                 <div className="md:col-span-2 pt-3 border-t border-slate-100">
+                   <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                     <div>
+                       <h3 className="text-sm font-semibold text-slate-800">Desain E-Invitation & Kartu Akses Tamu</h3>
+                       <p className="text-xs text-slate-500 mt-0.5">
+                         Mengatur tampilan link undangan personal tamu (menampilkan Nama Acara, Foto Mempelai, Kepada, & Barcode Check-In).
+                       </p>
+                     </div>
+                     {guests.length > 0 && (
+                       <Link
+                         to={`/rsvp/${eventId}/${guests[0].ticketCode}`}
+                         target="_blank"
+                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors"
+                       >
+                         <QrCode className="w-3.5 h-3.5" />
+                         <span>Pratinjau E-Invitation ({guests[0].name})</span>
+                       </Link>
+                     )}
+                   </div>
+
+                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 bg-slate-50/70 border border-slate-200 rounded-xl p-4">
+                     <div>
+                       <div className="flex items-center justify-between mb-2">
+                         <label className="block text-xs font-semibold text-slate-700">
+                           Template Kartu E-Invitation (Cloudflare R2)
+                         </label>
+                         {appUser?.role === 'superadmin' && (
+                           <Link
+                             to="/auth/login/admin/e-invitation-templates"
+                             className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 underline"
+                           >
+                             + Kelola Template
+                           </Link>
+                         )}
+                       </div>
+                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                         {eInviteTemplates.map((tpl) => {
+                           const activeTplId =
+                             event.eInviteTemplateId ||
+                             (eInviteTemplates.find((t) => t.isDefault) || eInviteTemplates[0])?.id;
+                           const active = activeTplId === tpl.id;
+                           return (
+                             <button
+                               key={tpl.id}
+                               type="button"
+                               onClick={() =>
+                                 handleUpdateEInviteConfig({
+                                   eInviteTemplateId: tpl.id,
+                                   eInviteTemplateUrl: tpl.imageUrl || '',
+                                 })
+                               }
+                               className={`flex items-center justify-between gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer text-left ${
+                                 active
+                                   ? 'bg-white border-indigo-600 text-indigo-700 ring-2 ring-indigo-500/20 shadow-2xs'
+                                   : 'bg-white/70 border-slate-200 text-slate-600 hover:bg-white'
+                               }`}
+                             >
+                               <span className="truncate">{tpl.name}</span>
+                               <span
+                                 className="w-2.5 h-2.5 rounded-full shrink-0 border border-slate-300"
+                                 style={{ backgroundColor: tpl.footerColor || '#C27D7A' }}
+                               />
+                             </button>
+                           );
+                         })}
+                       </div>
+                     </div>
+
+                     <div>
+                       <label className="block text-xs font-semibold text-slate-700 mb-2">
+                         Mode Tampilan Halaman Tamu
+                       </label>
+                       <div className="grid grid-cols-2 gap-2">
+                         {[
+                           { id: 'full', label: 'Lengkap (Undangan + QR + RSVP)' },
+                           { id: 'compact', label: 'Ringkas (Fokus Kartu QR Saja)' },
+                         ].map((m) => {
+                           const active = (event.eInviteMode || 'full') === m.id;
+                           return (
+                             <button
+                               key={m.id}
+                               type="button"
+                               onClick={() => handleUpdateEInviteConfig({ eInviteMode: m.id as 'full' | 'compact' })}
+                               className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer text-center ${
+                                 active
+                                   ? 'bg-white border-indigo-600 text-indigo-700 ring-2 ring-indigo-500/20 shadow-2xs'
+                                   : 'bg-white/70 border-slate-200 text-slate-600 hover:bg-white'
+                               }`}
+                             >
+                               {m.label}
+                             </button>
+                           );
+                         })}
+                       </div>
+                     </div>
+                   </div>
+                 </div>
+               )}
                {event.frameOverlayUrl && (
                  <div className="md:col-span-2">
                     <h3 className="text-sm font-medium text-gray-500 mb-2">Frame / Overlay Sapa Tamu</h3>
@@ -2061,17 +2231,29 @@ export default function EventDetails() {
                     )}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Jumlah Orang (Pax)</label>
-                      <select
-                        value={newGuestPax}
-                        onChange={e => setNewGuestPax(Number(e.target.value))}
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      >
-                        <option value={1}>1 Orang</option>
-                        <option value={2}>2 Orang</option>
-                        <option value={3}>3 Orang</option>
-                        <option value={4}>4 Orang</option>
-                        <option value={5}>5 Orang</option>
-                      </select>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={999}
+                          required
+                          value={newGuestPax}
+                          onChange={e => {
+                            const val = e.target.value.replace(/[^0-9]/g, '');
+                            setNewGuestPax(val);
+                          }}
+                          onBlur={() => {
+                            const num = parseInt(newGuestPax, 10);
+                            if (!num || num < 1) setNewGuestPax('1');
+                          }}
+                          placeholder="Contoh: 2"
+                          className="w-full border border-gray-300 rounded-md pl-3 pr-16 py-2 focus:ring-indigo-500 focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
+                        <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-xs font-medium text-gray-500">
+                          Orang
+                        </span>
+                      </div>
                     </div>
                  </div>
                  <div className="flex justify-end">
@@ -2099,14 +2281,17 @@ export default function EventDetails() {
                   <span className="text-sm text-indigo-700 font-medium">{selectedGuestIds.length} tamu terpilih</span>
                   <div className="flex items-center space-x-4">
                     <button 
-                      onClick={() => window.print()} 
-                      className="px-3 py-1.5 bg-indigo-600 text-white hover:bg-indigo-700 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-xs"
-                      title="Cetak 20 QR Code per halaman kertas A4 Portrait (4 kolom x 5 baris)"
+                      onClick={() => {
+                        setSinglePrintGuest(null);
+                        setIsPrintModalOpen(true);
+                      }} 
+                      className="px-3.5 py-1.5 bg-indigo-600 text-white hover:bg-indigo-700 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                      title="Pilih cetak QR Biasa (20/Hal) atau Bentuk Card E-Invitation (4 atau 8 Card/Hal)"
                     >
                       <Printer className="w-3.5 h-3.5" />
-                      <span>Cetak QR A4 ({Math.ceil(selectedGuestIds.length / 20)} Hal • 20 QR/Hal)</span>
+                      <span>Cetak QR ({selectedGuestIds.length} Tamu)</span>
                     </button>
-                    {(appUser?.role === 'superadmin' || appUser?.role === 'partner') && (
+                    {(appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'admin' || appUser?.role === 'partner') && (
                       <button 
                         onClick={handleBulkDeleteGuests} 
                         className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center transition-colors"
@@ -2519,7 +2704,13 @@ export default function EventDetails() {
                  <label className="block text-sm font-medium text-gray-700 mb-1">Status RSVP (Pra Check-In)</label>
                  <select
                    value={editGuestRsvpStatus}
-                   onChange={e => setEditGuestRsvpStatus(e.target.value as any)}
+                   onChange={e => {
+                     const nextStatus = e.target.value as 'pending' | 'attending' | 'declined';
+                     setEditGuestRsvpStatus(nextStatus);
+                     if (nextStatus !== 'declined' && (!parseInt(editGuestPax, 10) || parseInt(editGuestPax, 10) < 1)) {
+                       setEditGuestPax('1');
+                     }
+                   }}
                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
                  >
                    <option value="pending">Pending / Belum Konfirmasi</option>
@@ -2529,24 +2720,32 @@ export default function EventDetails() {
                </div>
                <div>
                  <label className="block text-sm font-medium text-gray-700 mb-1">Jumlah Orang (Pax)</label>
-                 <select
-                   value={editGuestRsvpStatus === 'declined' ? 0 : editGuestPax}
-                   disabled={editGuestRsvpStatus === 'declined'}
-                   onChange={e => setEditGuestPax(Number(e.target.value))}
-                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100 disabled:text-gray-400"
-                 >
-                   {editGuestRsvpStatus === 'declined' ? (
-                     <option value={0}>0 Orang (Tidak Hadir)</option>
-                   ) : (
-                     <>
-                       <option value={1}>1 Orang</option>
-                       <option value={2}>2 Orang</option>
-                       <option value={3}>3 Orang</option>
-                       <option value={4}>4 Orang</option>
-                       <option value={5}>5 Orang</option>
-                     </>
-                   )}
-                 </select>
+                 <div className="relative">
+                   <input
+                     type="number"
+                     inputMode="numeric"
+                     min={editGuestRsvpStatus === 'declined' ? 0 : 1}
+                     max={999}
+                     required={editGuestRsvpStatus !== 'declined'}
+                     value={editGuestRsvpStatus === 'declined' ? '0' : editGuestPax}
+                     disabled={editGuestRsvpStatus === 'declined'}
+                     onChange={e => {
+                       const val = e.target.value.replace(/[^0-9]/g, '');
+                       setEditGuestPax(val);
+                     }}
+                     onBlur={() => {
+                       if (editGuestRsvpStatus !== 'declined') {
+                         const num = parseInt(editGuestPax, 10);
+                         if (!num || num < 1) setEditGuestPax('1');
+                       }
+                     }}
+                     placeholder="Contoh: 2"
+                     className="w-full border border-gray-300 rounded-md pl-3 pr-16 py-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                   />
+                   <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-xs font-medium text-gray-500">
+                     Orang
+                   </span>
+                 </div>
                </div>
              </div>
           </div>
@@ -2636,65 +2835,399 @@ export default function EventDetails() {
         </div>
       </Modal>
 
-      <Modal isOpen={!!activeQrGuest} onClose={() => setActiveQrGuest(null)} title="Bagikan Undangan & QR">
-        {activeQrGuest && (
-          <div className="flex flex-col items-center">
-            <div 
-              ref={qrRef} 
-              className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex flex-col items-center justify-center"
-            >
-              <h3 className="text-lg font-bold text-gray-900 mb-2">{activeQrGuest.name}</h3>
-              <p className="text-sm font-medium tracking-[0.2em] text-gray-500 mb-4">{activeQrGuest.ticketCode}</p>
-              <QRCode value={activeQrGuest.ticketCode} size={200} />
-            </div>
-            
-            <div className="mt-8 w-full space-y-3">
-              <div className="w-full mb-4 text-left">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Pilih Template WhatsApp
-                </label>
-                <select
-                  value={selectedTemplateId}
-                  onChange={(e) => {
-                     setSelectedTemplateId(e.target.value);
-                     localStorage.setItem(`waTemplateId_${eventId}`, e.target.value);
-                  }}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+      <Modal isOpen={!!activeQrGuest} onClose={() => setActiveQrGuest(null)} title="Bagikan & Cetak Kartu QR">
+        {activeQrGuest && (() => {
+          const activeTemplate =
+            eInviteTemplates.find((t) => t.id === event?.eInviteTemplateId) ||
+            eInviteTemplates.find((t) => t.isDefault) ||
+            DEFAULT_EINVITE_TEMPLATES[0];
+          const qrValue = `${window.location.origin}/rsvp/${eventId}/${activeQrGuest.ticketCode}`;
+          const domFav =
+            typeof document !== 'undefined'
+              ? (document.querySelector("link[rel~='icon']") as HTMLLinkElement | null)?.href || ''
+              : '';
+          const resolvedFavicon = settings?.faviconUrl || domFav || settings?.logoUrl || '';
+
+          return (
+            <div className="flex flex-col items-center">
+              {/* Toggle Format Tampilan: Bentuk Card vs QR Biasa */}
+              <div className="w-full grid grid-cols-2 gap-1.5 p-1 mb-4 bg-slate-100 rounded-xl border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setQrModalViewMode('card')}
+                  className={`py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    qrModalViewMode === 'card'
+                      ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
                 >
-                  {waTemplates.length === 0 && <option value="">Default Pesan Sistem</option>}
-                  {waTemplates.map(t => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                </select>
+                  <ImageIcon className="w-3.5 h-3.5" />
+                  <span>Bentuk Card (E-Invitation)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQrModalViewMode('standard')}
+                  className={`py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    qrModalViewMode === 'standard'
+                      ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>QR Biasa (Label Ringkas)</span>
+                </button>
               </div>
 
-              <button 
-                onClick={() => handleShareWA(activeQrGuest)}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-500 text-white font-medium rounded-lg hover:bg-green-600 transition-colors"
-              >
-                <Share2 className="w-5 h-5" /> Bagikan ke WhatsApp
-              </button>
+              {qrModalViewMode === 'card' ? (
+                <div className="w-full">
+                  <EInvitationCard
+                    cardRef={qrRef}
+                    event={event}
+                    guest={activeQrGuest}
+                    template={activeTemplate}
+                    appLogoUrl={settings?.logoUrl}
+                    appFaviconUrl={settings?.faviconUrl}
+                    appBrandName={settings?.appName || 'Guestly'}
+                    appTagline="Buku Tamu Digital"
+                  />
+                </div>
+              ) : (
+                <div className="w-full flex justify-center py-2">
+                  <div
+                    ref={qrRef}
+                    className="w-[320px] bg-white border-2 border-slate-300 rounded-2xl p-5 flex flex-col items-center text-center shadow-sm"
+                  >
+                    <div className="w-full text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-1.5 break-words px-1">
+                      {event?.coupleName || event?.title || 'Undangan Pernikahan'}
+                    </div>
+                    <div
+                      className={`w-full ${
+                        activeQrGuest.name.length > 36
+                          ? 'text-xs'
+                          : activeQrGuest.name.length > 24
+                          ? 'text-sm'
+                          : 'text-base'
+                      } font-bold text-slate-900 leading-snug mb-3 break-words px-1`}
+                    >
+                      {activeQrGuest.name}
+                    </div>
+                    <div className="relative p-3 bg-white rounded-xl border border-slate-200 shadow-2xs my-1">
+                      <QRCode value={qrValue} size={176} level="H" bgColor="#FFFFFF" fgColor="#111827" />
+                      {resolvedFavicon && (
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[36px] h-[36px] rounded-lg bg-white shadow-xs flex items-center justify-center p-1 border border-slate-100">
+                          <img
+                            src={resolvedFavicon}
+                            alt="Favicon"
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-3 flex flex-col items-center gap-0.5">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700">
+                        {activeQrGuest.category || 'Tamu Undangan'}
+                        {activeQrGuest.session ? ` • ${activeQrGuest.session}` : ''}
+                      </span>
+                      <span className="text-xs font-mono font-bold text-slate-900 tracking-wider mt-1">
+                        {activeQrGuest.ticketCode}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
               
-              <div className="flex gap-3">
+              <div className="mt-5 w-full space-y-2.5">
+                <div className="w-full mb-3 text-left">
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Pilih Template WhatsApp
+                  </label>
+                  <select
+                    value={selectedTemplateId}
+                    onChange={(e) => {
+                       setSelectedTemplateId(e.target.value);
+                       localStorage.setItem(`waTemplateId_${eventId}`, e.target.value);
+                    }}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    {waTemplates.length === 0 && <option value="">Default Pesan Sistem</option>}
+                    {waTemplates.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+
                 <button 
-                  onClick={handleDownloadQR}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-indigo-700 bg-indigo-50 font-medium rounded-lg hover:bg-indigo-100 transition-colors"
+                  onClick={() => handleShareWA(activeQrGuest)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors cursor-pointer"
                 >
-                  <DownloadIcon className="w-5 h-5" /> Download QR
+                  <Share2 className="w-4 h-4" /> Bagikan ke WhatsApp
                 </button>
-                <button 
-                  onClick={() => {
-                    navigator.clipboard.writeText(generateShareLink(activeQrGuest));
-                    showAlert('Berhasil', 'Link berhasil disalin!', 'success');
-                  }}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-gray-700 bg-gray-100 font-medium rounded-lg hover:bg-gray-200 transition-colors"
-                >
-                  <Copy className="w-5 h-5" /> Salin Link
-                </button>
+                
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button 
+                    onClick={handleDownloadQR}
+                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors cursor-pointer"
+                  >
+                    <DownloadIcon className="w-4 h-4" />
+                    <span>{qrModalViewMode === 'card' ? 'Unduh Card' : 'Unduh QR'}</span>
+                  </button>
+                  <button 
+                    onClick={() => handlePrintSingleGuest(activeQrGuest, qrModalViewMode)}
+                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold text-emerald-700 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-colors cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>{qrModalViewMode === 'card' ? 'Cetak Card' : 'Cetak QR'}</span>
+                  </button>
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(generateShareLink(activeQrGuest));
+                      showAlert('Berhasil', 'Link E-Invitation berhasil disalin!', 'success');
+                    }}
+                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer"
+                  >
+                    <Copy className="w-4 h-4" /> Salin Link
+                  </button>
+                  <Link
+                    to={`/rsvp/${eventId}/${activeQrGuest.ticketCode}`}
+                    target="_blank"
+                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold text-rose-700 bg-rose-50 rounded-lg hover:bg-rose-100 transition-colors"
+                  >
+                    <QrCode className="w-4 h-4" /> Buka Link
+                  </Link>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
+      </Modal>
+
+      <Modal
+        isOpen={isPrintModalOpen}
+        onClose={() => setIsPrintModalOpen(false)}
+        title={`Pilih Format Cetak QR (${selectedGuestIds.length} Tamu Terpilih)`}
+      >
+        {(() => {
+          const sampleGuest =
+            guests.find((g) => selectedGuestIds.includes(g.id!)) || guests[0] || {
+              id: 'sample',
+              eventId: eventId || '',
+              name: 'Budi Santoso',
+              ticketCode: 'GUEST123',
+              category: 'VIP',
+              pax: 2,
+              rsvpStatus: 'attending',
+              attended: false,
+            };
+          const activeTemplate =
+            eInviteTemplates.find((t) => t.id === event?.eInviteTemplateId) ||
+            eInviteTemplates.find((t) => t.isDefault) ||
+            DEFAULT_EINVITE_TEMPLATES[0];
+          const domFav =
+            typeof document !== 'undefined'
+              ? (document.querySelector("link[rel~='icon']") as HTMLLinkElement | null)?.href || ''
+              : '';
+          const resolvedFavicon = settings?.faviconUrl || domFav || settings?.logoUrl || '';
+          const count = Math.max(1, selectedGuestIds.length);
+
+          return (
+            <div className="space-y-4">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Pilih model cetakan kertas <strong>A4 Portrait</strong> sesuai kebutuhan Anda: apakah <strong>QR Biasa (Label Stiker)</strong> atau <strong>Bentuk Card E-Invitation Landscape</strong>.
+              </p>
+
+              {/* Format Selector Cards */}
+              <div className="grid grid-cols-1 gap-2.5">
+                {/* Opsi 1: QR Biasa (20 QR / Hal) */}
+                <button
+                  type="button"
+                  onClick={() => setPrintFormat('standard')}
+                  className={`w-full text-left p-3.5 rounded-xl border-2 transition-all flex items-start justify-between gap-3 cursor-pointer ${
+                    printFormat === 'standard'
+                      ? 'border-indigo-600 bg-indigo-50/50 shadow-2xs'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`p-2.5 rounded-lg shrink-0 ${printFormat === 'standard' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                      <QrCode className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-slate-900">1. QR Biasa (Label / Stiker Undangan)</span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        Kotak putih ringkas berisi Nama Tamu, QR Code (Favicon Guestly), Kategori & Kode Tiket. Cocok ditempel pada amplop fisik.
+                      </p>
+                      <div className="mt-1.5 flex items-center gap-2 text-[11px] font-mono font-semibold text-indigo-700">
+                        <span>20 QR / Halaman A4 (4 Kolom × 5 Baris)</span>
+                        <span>•</span>
+                        <span>Estimasi: {Math.ceil(count / 20)} Halaman</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`w-4 h-4 rounded-full border-2 shrink-0 mt-1 flex items-center justify-center ${printFormat === 'standard' ? 'border-indigo-600' : 'border-slate-300'}`}>
+                    {printFormat === 'standard' && <div className="w-2 h-2 rounded-full bg-indigo-600" />}
+                  </div>
+                </button>
+
+                {/* Opsi 2: Bentuk Card Ukuran Besar (4 Card / Hal) */}
+                <button
+                  type="button"
+                  onClick={() => setPrintFormat('card-4')}
+                  className={`w-full text-left p-3.5 rounded-xl border-2 transition-all flex items-start justify-between gap-3 cursor-pointer ${
+                    printFormat === 'card-4'
+                      ? 'border-indigo-600 bg-indigo-50/50 shadow-2xs'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`p-2.5 rounded-lg shrink-0 ${printFormat === 'card-4' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                      <ImageIcon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-slate-900">2. Bentuk Card E-Invitation — Ukuran Besar</span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        Kartu akses VIP Landscape penuh warna lengkap dengan Foto Mempelai, Nama Mempelai, Waktu/Lokasi & QR Code.
+                      </p>
+                      <div className="mt-1.5 flex items-center gap-2 text-[11px] font-mono font-semibold text-indigo-700">
+                        <span>4 Card / Halaman A4 (1 Kolom × 4 Baris)</span>
+                        <span>•</span>
+                        <span>Estimasi: {Math.ceil(count / 4)} Halaman</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`w-4 h-4 rounded-full border-2 shrink-0 mt-1 flex items-center justify-center ${printFormat === 'card-4' ? 'border-indigo-600' : 'border-slate-300'}`}>
+                    {printFormat === 'card-4' && <div className="w-2 h-2 rounded-full bg-indigo-600" />}
+                  </div>
+                </button>
+
+                {/* Opsi 3: Bentuk Card Ukuran Hemat (8 Card / Hal) */}
+                <button
+                  type="button"
+                  onClick={() => setPrintFormat('card-8')}
+                  className={`w-full text-left p-3.5 rounded-xl border-2 transition-all flex items-start justify-between gap-3 cursor-pointer ${
+                    printFormat === 'card-8'
+                      ? 'border-indigo-600 bg-indigo-50/50 shadow-2xs'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`p-2.5 rounded-lg shrink-0 ${printFormat === 'card-8' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                      <ImageIcon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-slate-900">3. Bentuk Card E-Invitation — Ukuran Hemat Kertas</span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        Desain Card E-Invitation Landscape yang disusun 2 kolom per halaman A4 untuk menghemat kertas cetakan.
+                      </p>
+                      <div className="mt-1.5 flex items-center gap-2 text-[11px] font-mono font-semibold text-indigo-700">
+                        <span>8 Card / Halaman A4 (2 Kolom × 4 Baris)</span>
+                        <span>•</span>
+                        <span>Estimasi: {Math.ceil(count / 8)} Halaman</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`w-4 h-4 rounded-full border-2 shrink-0 mt-1 flex items-center justify-center ${printFormat === 'card-8' ? 'border-indigo-600' : 'border-slate-300'}`}>
+                    {printFormat === 'card-8' && <div className="w-2 h-2 rounded-full bg-indigo-600" />}
+                  </div>
+                </button>
+              </div>
+
+              {/* Pratinjau Visual Hasil Cetak */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-xs font-semibold text-slate-700">
+                    Pratinjau Desain yang Akan Dicetak:
+                  </span>
+                  <span className="text-[11px] font-medium text-slate-500">
+                    {printFormat === 'standard'
+                      ? 'Mode Label Stiker (20/Hal)'
+                      : printFormat === 'card-4'
+                      ? `Template: ${activeTemplate.name} (4 Card/Hal)`
+                      : `Template: ${activeTemplate.name} (8 Card/Hal)`}
+                  </span>
+                </div>
+
+                {printFormat === 'standard' ? (
+                  <div className="flex justify-center py-2">
+                    <div className="w-48 flex flex-col items-center justify-between p-2.5 border border-gray-400 rounded-lg bg-white text-black shadow-2xs">
+                      <div
+                        className={`w-full text-center font-bold ${
+                          sampleGuest.name.length > 34
+                            ? 'text-[10px]'
+                            : sampleGuest.name.length > 22
+                            ? 'text-[11px]'
+                            : 'text-xs'
+                        } leading-tight text-black break-words px-1 mb-1`}
+                      >
+                        {sampleGuest.name}
+                      </div>
+                      <div className="relative my-1 flex items-center justify-center bg-white p-1">
+                        <QRCode
+                          value={`${window.location.origin}/rsvp/${eventId}/${sampleGuest.ticketCode}`}
+                          size={96}
+                          level="H"
+                        />
+                        {resolvedFavicon && (
+                          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[20px] h-[20px] rounded bg-white shadow-2xs flex items-center justify-center p-0.5 border border-gray-100">
+                            <img src={resolvedFavicon} alt="" className="w-full h-full object-contain" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="w-full text-center mt-1">
+                        <div className="text-[10px] font-semibold text-gray-700 leading-tight truncate">
+                          {sampleGuest.category || 'Tamu'}
+                        </div>
+                        <div className="text-[10px] font-mono font-bold text-black leading-tight mt-0.5">
+                          {sampleGuest.ticketCode}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full max-w-[440px] mx-auto">
+                    <EInvitationCard
+                      event={event}
+                      guest={sampleGuest}
+                      template={activeTemplate}
+                      appLogoUrl={settings?.logoUrl}
+                      appFaviconUrl={settings?.faviconUrl}
+                      appBrandName={settings?.appName || 'Guestly'}
+                      appTagline="Buku Tamu Digital"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-200">
+                <span className="text-xs text-slate-500">
+                  Tips: Centang <strong>Background graphics</strong> pada jendela Print browser agar warna tercetak penuh.
+                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsPrintModalOpen(false)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExecuteBulkPrint}
+                    className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Cetak Sekarang ({count} Tamu)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
 
       <Modal isOpen={isThumbnailModalOpen} onClose={() => setIsThumbnailModalOpen(false)} title="Atur Thumbnail WA & Foto Mempelai">
@@ -2808,38 +3341,96 @@ export default function EventDetails() {
         </div>
       </Modal>
 
-      {/* Hidden Print Area: A4 Portrait - 20 QR per Page (4 Columns x 5 Rows) */}
+      {/* Hidden Print Area: Supports Standard QR (20/page) & Card E-Invitation (4 or 8/page) */}
       <div id="print-area" className="hidden bg-white text-black">
         {(() => {
-          const selectedGuests = guests.filter(g => selectedGuestIds.includes(g.id!));
+          const selectedGuests = singlePrintGuest
+            ? [singlePrintGuest]
+            : guests.filter((g) => selectedGuestIds.includes(g.id!));
+          if (selectedGuests.length === 0) return null;
+
+          const baseUrl = window.location.origin;
+          const activeTemplate =
+            eInviteTemplates.find((t) => t.id === event?.eInviteTemplateId) ||
+            eInviteTemplates.find((t) => t.isDefault) ||
+            DEFAULT_EINVITE_TEMPLATES[0];
+          const domFav =
+            typeof document !== 'undefined'
+              ? (document.querySelector("link[rel~='icon']") as HTMLLinkElement | null)?.href || ''
+              : '';
+          const resolvedFavicon = settings?.faviconUrl || domFav || settings?.logoUrl || '';
+
+          if (printFormat === 'card-4' || printFormat === 'card-8') {
+            const perPage = printFormat === 'card-4' ? 4 : 8;
+            const cardWidthPx = printFormat === 'card-4' ? 420 : 340;
+            const pageClass = printFormat === 'card-4' ? 'a4-card-page-4' : 'a4-card-page-8';
+            const pages: Guest[][] = [];
+            for (let i = 0; i < selectedGuests.length; i += perPage) {
+              pages.push(selectedGuests.slice(i, i + perPage));
+            }
+
+            return pages.map((pageGuests, pageIndex) => (
+              <div key={pageIndex} className={pageClass}>
+                {pageGuests.map((guest) => (
+                  <div key={guest.id} className="a4-qr-card">
+                    <EInvitationCard
+                      fixedWidthPx={cardWidthPx}
+                      event={event}
+                      guest={guest}
+                      template={activeTemplate}
+                      appLogoUrl={settings?.logoUrl}
+                      appFaviconUrl={settings?.faviconUrl}
+                      appBrandName={settings?.appName || 'Guestly'}
+                      appTagline="Buku Tamu Digital"
+                    />
+                  </div>
+                ))}
+              </div>
+            ));
+          }
+
+          // Default: Standard QR Label (20 per A4 page: 4 columns x 5 rows)
           const pages: Guest[][] = [];
           for (let i = 0; i < selectedGuests.length; i += 20) {
             pages.push(selectedGuests.slice(i, i + 20));
           }
-          const baseUrl = window.location.origin;
 
           return pages.map((pageGuests, pageIndex) => (
             <div key={pageIndex} className="a4-qr-page">
-              {pageGuests.map(guest => {
+              {pageGuests.map((guest) => {
                 const qrLink = `${baseUrl}/rsvp/${eventId}/${guest.ticketCode}`;
-                const paxCount = guest.rsvpStatus === 'declined'
-                  ? 0
-                  : Math.max(1, Number(guest.pax) || 1);
 
                 return (
                   <div
                     key={guest.id}
                     className="a4-qr-card flex flex-col items-center justify-between p-2 border border-gray-400 rounded bg-white text-black overflow-hidden"
                   >
-                    <div className="w-full text-center font-bold text-[11px] leading-tight text-black truncate px-1">
+                    <div
+                      className={`w-full text-center font-bold ${
+                        guest.name.length > 36
+                          ? 'text-[8.5px]'
+                          : guest.name.length > 22
+                          ? 'text-[9.5px]'
+                          : 'text-[11px]'
+                      } leading-tight text-black break-words px-0.5`}
+                    >
                       {guest.name}
                     </div>
-                    <div className="my-0.5 flex items-center justify-center bg-white p-1">
-                      <QRCode value={qrLink} size={104} />
+                    <div className="relative my-0.5 flex items-center justify-center bg-white p-1">
+                      <QRCode value={qrLink} size={104} level="H" />
+                      {resolvedFavicon && (
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[22px] h-[22px] rounded bg-white shadow-2xs flex items-center justify-center p-0.5 border border-gray-100">
+                          <img
+                            src={resolvedFavicon}
+                            alt=""
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                      )}
                     </div>
                     <div className="w-full text-center">
                       <div className="text-[9px] font-semibold text-gray-700 leading-tight truncate">
-                        {guest.category || 'Tamu'} • {paxCount} Pax
+                        {guest.category || 'Tamu'}
                       </div>
                       <div className="text-[9px] font-mono font-bold text-black leading-tight mt-0.5 tracking-tight">
                         {guest.ticketCode}

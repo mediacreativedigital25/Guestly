@@ -14,6 +14,9 @@ export interface User {
   partnerId: string | null;
   clientId: string | null;
   businessName?: string;
+  businessAddress?: string;
+  businessCity?: string;
+  businessCategory?: string;
   brandName?: string;
   brandLogo?: string;
   logoUrl?: string;
@@ -31,6 +34,9 @@ export interface User {
   belongsToReseller?: string;
   allowManualEvent?: boolean;
   eventManual?: boolean;
+  hideServiceInfo?: boolean;
+  createdBy?: string;
+  createdByName?: string;
   activeUntil?: any;
   createdAt: any;
   updatedAt: any;
@@ -93,8 +99,34 @@ export interface EventRecord {
   waTemplateId?: string;
   waBlastCount?: number;
   disableTicketRsvpForm?: boolean;
+  eInviteTheme?: 'rose' | 'gold' | 'sage';
+  eInviteMode?: 'full' | 'compact';
+  eInviteTemplateId?: string;
+  eInviteTemplateUrl?: string;
+  eInviteHeaderText?: string;
+  eInviteGroomName?: string;
+  eInviteBrideName?: string;
+  eInvitePhotoUrl?: string;
+  eInviteVenueName?: string;
+  eInviteVenueAddress?: string;
+  eInviteGreetingText?: string;
+  eInviteFooterText?: string;
   createdAt: any;
   updatedAt: any;
+}
+
+export interface EInviteTemplate {
+  id: string;
+  name: string;
+  imageUrl: string;
+  r2Key?: string;
+  primaryColor?: string;
+  accentColor?: string;
+  guestBoxBg?: string;
+  footerColor?: string;
+  isDefault?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface WATemplate {
