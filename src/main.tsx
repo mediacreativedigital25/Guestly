@@ -54,7 +54,7 @@ createRoot(document.getElementById('root')!).render(
 
 // Register Offline-First Service Worker in production; in dev mode, purge stale SW caches so module edits take effect immediately
 if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-  if (import.meta.env.DEV) {
+  if ((import.meta as any).env?.DEV) {
     navigator.serviceWorker.getRegistrations().then((registrations) => {
       registrations.forEach((reg) => reg.unregister());
     }).catch(() => {});

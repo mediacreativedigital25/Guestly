@@ -4,7 +4,7 @@ import { Calendar, MapPin, Heart } from 'lucide-react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { EventRecord, Guest, EInviteTemplate } from '../types';
-import { parseFirestoreDate } from '../lib/utils';
+import { parseFirestoreDate, resolveMediaUrl } from '../lib/utils';
 import { useSettings } from '../SettingsContext';
 import { useAuth } from '../AuthContext';
 
@@ -221,14 +221,16 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
       ? '#3B6652'
       : '#C27D7A');
 
-  const templateImageUrl =
-    template?.imageUrl || event?.eInviteTemplateUrl || '';
+  const templateImageUrl = resolveMediaUrl(
+    template?.imageUrl || event?.eInviteTemplateUrl || ''
+  );
 
-  const couplePhotoUrl =
+  const couplePhotoUrl = resolveMediaUrl(
     event?.eInvitePhotoUrl ||
-    event?.thumbnailUrl ||
-    event?.frameOverlayUrl ||
-    DEFAULT_COUPLE_PHOTO;
+      event?.thumbnailUrl ||
+      event?.frameOverlayUrl ||
+      DEFAULT_COUPLE_PHOTO
+  );
 
   const headerText = (event?.eInviteHeaderText || 'THE WEDDING OF').toUpperCase();
   const { groom, bride } = splitCoupleNames(
@@ -287,14 +289,16 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
 
   const brandName = appBrandName || 'Guestly';
   const tagline = appTagline || 'Buku Tamu Digital';
-  const resolvedLogoUrl =
-    appLogoUrl || partnerLogoUrl || appUser?.logoUrl || settings?.logoUrl || '';
+  const resolvedLogoUrl = resolveMediaUrl(
+    appLogoUrl || partnerLogoUrl || appUser?.logoUrl || settings?.logoUrl || ''
+  );
   const domFaviconHref =
     typeof document !== 'undefined'
       ? (document.querySelector("link[rel~='icon']") as HTMLLinkElement | null)?.href || ''
       : '';
-  const resolvedQrEmblemUrl =
-    appFaviconUrl || settings?.faviconUrl || domFaviconHref || resolvedLogoUrl || '';
+  const resolvedQrEmblemUrl = resolveMediaUrl(
+    appFaviconUrl || settings?.faviconUrl || domFaviconHref || resolvedLogoUrl || ''
+  );
 
   return (
     <div
@@ -404,6 +408,7 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
         {templateImageUrl && (
           <img
             src={templateImageUrl}
+            data-export-role="template-bg"
             alt={template?.name || 'Template E-Invitation'}
             onError={(e) => {
               (e.currentTarget as HTMLImageElement).style.display = 'none';
@@ -414,11 +419,16 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
 
         {/* LAYER 2: Left Arch Couple Photo (Clipped to match Card 1.png arch curve) */}
         <div
+          data-arch-clip="true"
           className="absolute top-0 left-0 w-[432px] h-[543px] z-[2] overflow-hidden"
-          style={{ clipPath: `url(#${clipPathId})` }}
+          style={{
+            clipPath:
+              "path('M 0,0 L 242,0 C 362,54 432,198 432,340 C 432,428 410,498 386,543 L 0,543 Z')",
+          }}
         >
           <img
             src={couplePhotoUrl}
+            data-export-role="arch-photo"
             alt={`${groom} & ${bride}`}
             onError={(e) => {
               const target = e.currentTarget as HTMLImageElement;
@@ -430,6 +440,7 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
           />
           {/* Top-left delicate botanical leaf accent over photo corner (like Template 1.png) */}
           <svg
+            data-export-ignore="true"
             className="absolute top-0 left-0 w-[160px] h-[200px] pointer-events-none"
             viewBox="0 0 160 200"
             fill="none"
@@ -586,8 +597,15 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
 
         {/* LAYER 4: Right Column ({{APP_LOGO}}, QR Card, {{GUEST_CODE}}, SCAN UNTUK CHECK-IN) */}
         <div className="absolute top-[22px] left-[874px] w-[288px] h-[508px] z-[3] flex flex-col justify-between items-center">
-          {/* App / Partner Logo Header (Diperjelas dengan latar putih bersih & ukuran proporsional) */}
-          <div className="w-full bg-white/95 rounded-[20px] px-4 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.06)] border border-[#EFE6E0] flex flex-col items-center justify-center min-h-[78px]">
+          {/* App / Partner Logo Header (Transparan lembut / frosted glass blur agar menyatu dengan latar kartu) */}
+          <div
+            data-logo-box="true"
+            className="w-full bg-white/45 backdrop-blur-md rounded-[20px] px-4 py-2.5 shadow-[0_4px_20px_rgba(183,131,122,0.08)] border border-white/60 flex flex-col items-center justify-center min-h-[78px]"
+            style={{
+              WebkitBackdropFilter: 'blur(10px)',
+              backdropFilter: 'blur(10px)',
+            }}
+          >
             {resolvedLogoUrl && !logoLoadError ? (
               <img
                 src={resolvedLogoUrl}

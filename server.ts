@@ -5,7 +5,7 @@ import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import cron from "node-cron";
 import multer from "multer";
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { supabase } from "./src/lib/supabase.ts";
 
 dotenv.config();
@@ -255,27 +255,144 @@ async function startServer() {
 
   app.use('/uploads', express.static(uploadsBaseDir));
 
+  function guessMimeType(name: string): string {
+    const ext = path.extname(name).toLowerCase();
+    if (ext === '.png') return 'image/png';
+    if (ext === '.webp') return 'image/webp';
+    if (ext === '.svg') return 'image/svg+xml';
+    if (ext === '.gif') return 'image/gif';
+    if (ext === '.ico') return 'image/x-icon';
+    return 'image/jpeg';
+  }
+
+  async function resolveMediaBuffer(rawInput: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+    const input = String(rawInput || '').trim();
+    if (!input) return null;
+
+    let candidateKey = '';
+    if (input.startsWith('/api/media/r2/')) {
+      candidateKey = decodeURIComponent(input.replace(/^\/api\/media\/r2\/+/, '').split('?')[0]);
+    } else if (input.startsWith('/uploads/')) {
+      candidateKey = decodeURIComponent(input.replace(/^\/uploads\/+/, '').split('?')[0]);
+    } else if (/^https?:\/\/cdn\.guestly\.yulovi\.com\/+/i.test(input)) {
+      candidateKey = decodeURIComponent(
+        input.replace(/^https?:\/\/cdn\.guestly\.yulovi\.com\/+/i, '').split('?')[0]
+      );
+    } else if (!input.startsWith('http://') && !input.startsWith('https://')) {
+      candidateKey = decodeURIComponent(input.replace(/^\/+/, '').split('?')[0]);
+    } else {
+      try {
+        const u = new URL(input);
+        if (u.pathname.startsWith('/api/media/r2/')) {
+          candidateKey = decodeURIComponent(u.pathname.replace(/^\/api\/media\/r2\/+/, ''));
+        } else if (u.pathname.startsWith('/uploads/')) {
+          candidateKey = decodeURIComponent(u.pathname.replace(/^\/uploads\/+/, ''));
+        }
+      } catch {
+        // ignore URL parse error
+      }
+    }
+
+    if (candidateKey) {
+      const baseName = path.basename(candidateKey);
+      const localPaths = [
+        path.join(uploadsBaseDir, candidateKey),
+        path.join(uploadsBaseDir, baseName),
+      ];
+      for (const p of localPaths) {
+        if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+          return {
+            buffer: fs.readFileSync(p),
+            contentType: guessMimeType(p),
+          };
+        }
+      }
+
+      const r2Client = getR2Client();
+      if (r2Client) {
+        const keysToTry = Array.from(new Set([candidateKey, baseName]));
+        for (const k of keysToTry) {
+          try {
+            const r2Obj = await r2Client.send(
+              new GetObjectCommand({
+                Bucket: r2BucketName,
+                Key: k,
+              })
+            );
+            if (r2Obj.Body) {
+              const bytes = await r2Obj.Body.transformToByteArray();
+              const buf = Buffer.from(bytes);
+              const contentType = r2Obj.ContentType || guessMimeType(k);
+              try {
+                fs.writeFileSync(path.join(uploadsBaseDir, baseName), buf);
+              } catch {
+                // ignore cache write error
+              }
+              return { buffer: buf, contentType };
+            }
+          } catch {
+            // continue to next candidate
+          }
+        }
+      }
+    }
+
+    if (input.startsWith('http://') || input.startsWith('https://')) {
+      const response = await fetch(input, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          Accept: 'image/*,*/*;q=0.8',
+        },
+      });
+      if (response.ok) {
+        const contentType = response.headers.get('content-type') || guessMimeType(input);
+        if (!contentType.includes('text/html')) {
+          const arrayBuffer = await response.arrayBuffer();
+          return {
+            buffer: Buffer.from(arrayBuffer),
+            contentType,
+          };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  app.use('/api/media/r2', async (req, res) => {
+    try {
+      const key = decodeURIComponent(req.path.replace(/^\/+/, ''));
+      if (!key) {
+        return res.status(400).send('Missing media key');
+      }
+      const resolved = await resolveMediaBuffer(key);
+      if (!resolved) {
+        return res.status(404).send('Media not found');
+      }
+      res.setHeader('Content-Type', resolved.contentType);
+      res.setHeader('Cache-Control', 'public, max-age=31536000');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      return res.send(resolved.buffer);
+    } catch (err: any) {
+      return res.status(500).send(err?.message || 'Error serving media');
+    }
+  });
+
   app.get('/api/media/proxy', async (req, res) => {
     try {
       const targetUrl = String(req.query.url || '').trim();
-      if (!targetUrl || (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://'))) {
+      if (!targetUrl) {
         return res.status(400).json({ success: false, error: 'Invalid URL' });
       }
-      const response = await fetch(targetUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Accept': 'image/*,*/*;q=0.8',
-        },
-      });
-      if (!response.ok) {
-        return res.status(response.status).json({ success: false, error: 'Failed to fetch image' });
+      const resolved = await resolveMediaBuffer(targetUrl);
+      if (!resolved) {
+        return res.status(404).json({ success: false, error: 'Failed to fetch image' });
       }
-      const contentType = response.headers.get('content-type') || 'image/jpeg';
-      const arrayBuffer = await response.arrayBuffer();
-      const base64 = Buffer.from(arrayBuffer).toString('base64');
+      const base64 = resolved.buffer.toString('base64');
       return res.json({
         success: true,
-        dataUrl: `data:${contentType};base64,${base64}`,
+        dataUrl: `data:${resolved.contentType};base64,${base64}`,
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message || 'Proxy error' });
@@ -298,7 +415,7 @@ async function startServer() {
 
         const category = (req.body.category || 'attachment').replace(/[^a-zA-Z0-9_-]/g, '');
         const key = `${category}/${req.file.filename}`;
-        let finalUrl = `/uploads/${req.file.filename}`;
+        let finalUrl = `/api/media/r2/${key}`;
 
         const r2Client = getR2Client();
         if (r2Client) {
@@ -310,9 +427,9 @@ async function startServer() {
               Body: fileContent,
               ContentType: req.file.mimetype,
             }));
-            finalUrl = `${r2PublicUrl.replace(/\/+$/, '')}/${key}`;
           } catch (r2Error: any) {
             console.warn('R2 upload failed, falling back to local server storage:', r2Error.message);
+            finalUrl = `/uploads/${req.file.filename}`;
           }
         }
 

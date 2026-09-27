@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { resolveMediaUrl } from '../lib/utils';
 import { EInviteTemplate } from '../types';
 
 const LOCAL_CACHE_KEY = 'guestly_einvite_templates_v1';
@@ -45,7 +46,10 @@ export const eInviteTemplateService = {
       if (!raw) return DEFAULT_EINVITE_TEMPLATES;
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        return parsed.map((t: EInviteTemplate) => ({
+          ...t,
+          imageUrl: resolveMediaUrl(t.imageUrl),
+        }));
       }
     } catch {
       // ignore
@@ -57,7 +61,10 @@ export const eInviteTemplateService = {
     try {
       const snap = await getDoc(doc(db, 'settings', 'eInviteTemplates'));
       if (snap.exists() && Array.isArray(snap.data()?.templates) && snap.data().templates.length > 0) {
-        const list = snap.data().templates as EInviteTemplate[];
+        const list = (snap.data().templates as EInviteTemplate[]).map((t) => ({
+          ...t,
+          imageUrl: resolveMediaUrl(t.imageUrl),
+        }));
         if (typeof window !== 'undefined') {
           localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(list));
         }

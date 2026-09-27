@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { File as FileIcon, X } from 'lucide-react';
+import { resolveMediaUrl } from '../../lib/utils';
 
 interface MediaPreviewProps {
   url?: string;
@@ -11,7 +12,7 @@ interface MediaPreviewProps {
 export const MediaPreview: React.FC<MediaPreviewProps> = ({ url, file, onClear, disabled }) => {
   const previewUrl = useMemo(() => {
     if (file) return URL.createObjectURL(file);
-    return url;
+    return resolveMediaUrl(url);
   }, [file, url]);
 
   const isImage = useMemo(() => {

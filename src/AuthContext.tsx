@@ -4,6 +4,7 @@ import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from 'firebase/fires
 import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
 import { User } from './types';
 import { showAlert } from './lib/alerts';
+import { resolveMediaUrl } from './lib/utils';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
@@ -49,6 +50,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 console.error(e);
               }
             }
+            if (data.logoUrl) data.logoUrl = resolveMediaUrl(data.logoUrl);
+            if (data.bannerUrl) data.bannerUrl = resolveMediaUrl(data.bannerUrl);
+            if (data.brandingImageUrl) data.brandingImageUrl = resolveMediaUrl(data.brandingImageUrl);
             setAppUser({ id: userDoc.id, ...data });
           } else {
             // Check if superadmin is booting up or fallback to initial setup where users might need to be explicitly added

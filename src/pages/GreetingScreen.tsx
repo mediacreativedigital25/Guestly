@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabaseDb } from '../lib/supabaseDb';
 import { EventRecord, Guest } from '../types';
-import { parseFirestoreDate } from '../lib/utils';
+import { parseFirestoreDate, resolveMediaUrl } from '../lib/utils';
 import { useSettings } from '../SettingsContext';
 import { ScanLine } from 'lucide-react';
 import { offlineSyncService } from '../services/offlineSyncService';
@@ -154,7 +154,7 @@ export default function GreetingScreen() {
     );
   }
 
-  const displayLogoUrl = partnerLogoUrl || settings?.logoUrl;
+  const displayLogoUrl = resolveMediaUrl(partnerLogoUrl || settings?.logoUrl);
 
 const renderFormattedTitle = (title: string, isMain: boolean = false) => {
     const weddingMatch = title.match(/^(the wedding of\s+)(.*)$/i);
@@ -188,7 +188,7 @@ const renderFormattedTitle = (title: string, isMain: boolean = false) => {
       {eventData.frameOverlayUrl ? (
          <div 
            className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
-           style={{ backgroundImage: `url(${eventData.frameOverlayUrl})` }}
+           style={{ backgroundImage: `url(${resolveMediaUrl(eventData.frameOverlayUrl)})` }}
          />
       ) : (
          <div 

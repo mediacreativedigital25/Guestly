@@ -1,8 +1,104 @@
 import React from 'react';
-import { Sparkles, Zap, ShieldCheck, Image as ImageIcon, Users, LayoutDashboard, Smartphone, Bug, CheckCircle2, Megaphone } from 'lucide-react';
+import {
+  Sparkles,
+  Zap,
+  ShieldCheck,
+  Image as ImageIcon,
+  Users,
+  LayoutDashboard,
+  Smartphone,
+  Bug,
+  CheckCircle2,
+  Megaphone,
+  Printer,
+  QrCode,
+  Download,
+  WifiOff,
+  Gift,
+  Calendar,
+  Briefcase,
+} from 'lucide-react';
 
 export default function Changelog() {
   const versions = [
+    {
+      version: 'V2.3.0',
+      date: '27 September 2026',
+      badge: 'Major Update',
+      changes: [
+        {
+          icon: Sparkles,
+          title: 'Kartu E-Invitation Digital & Katalog Template R2',
+          description:
+            'Desain kartu undangan digital beresolusi tinggi (16:9) dengan bingkai foto mempelai lengkung (arch), pilihan tema warna elegan, serta pengelolaan katalog template terpusat di Cloudflare R2.',
+          color: 'text-rose-500',
+          bgColor: 'bg-rose-50',
+        },
+        {
+          icon: Printer,
+          title: '2 Pilihan Mode Cetak & Unduh: Bentuk Card atau QR Biasa',
+          description:
+            'Pilihan fleksibel saat melihat tiket maupun mencetak massal: Bentuk Card E-Invitation (8 kartu per lembar A4) atau QR Biasa / Label Standar (20 label per lembar A4) lengkap dengan pratinjau langsung.',
+          color: 'text-indigo-600',
+          bgColor: 'bg-indigo-50',
+        },
+        {
+          icon: QrCode,
+          title: 'Emblem Favicon Guestly di Tengah QR & Latar Logo Frosted Glass',
+          description:
+            'Seluruh QR Code kini menampilkan identitas Favicon Guestly di bagian tengah dengan koreksi error Level H (30%) yang tetap responsif saat dipindai, dipadukan dengan area logo berlatar frosted glass (transparan buram) yang menyatu lembut dengan latar kartu.',
+          color: 'text-purple-600',
+          bgColor: 'bg-purple-50',
+        },
+        {
+          icon: Download,
+          title: 'Nama Panjang Anti-Terpotong & Mesin Unduh PNG 2D Canvas',
+          description:
+            'Ukuran huruf nama tamu beserta gelar/jabatan menyesuaikan otomatis tanpa terpotong (...), serta mesin Direct 2D Canvas Compositor dan R2 Media Proxy memastikan seluruh foto mempelai, logo, dan QR selalu ikut terunduh dengan tajam.',
+          color: 'text-emerald-600',
+          bgColor: 'bg-emerald-50',
+        },
+      ],
+    },
+    {
+      version: 'V2.2.0',
+      date: '26 September 2026',
+      badge: 'Feature Drop',
+      changes: [
+        {
+          icon: WifiOff,
+          title: 'Mode Offline-First pada Scanner & Layar Sapaan (TV Greeting)',
+          description:
+            'Proses scan check-in tamu dan tampilan layar sapaan VIP tetap berjalan lancar tanpa hambatan meskipun koneksi internet di lokasi acara sedang terputus, serta otomatis tersinkronisasi saat kembali online.',
+          color: 'text-blue-600',
+          bgColor: 'bg-blue-50',
+        },
+        {
+          icon: Gift,
+          title: 'Manajemen Pengambilan Souvenir & Pencatatan Petugas',
+          description:
+            'Dukungan mode pengambilan souvenir otomatis (1x scan sekaligus check-in) maupun terpisah (2x scan khusus meja souvenir), lengkap dengan pemantauan kuota stok dan pencatatan nama petugas yang melayani.',
+          color: 'text-amber-600',
+          bgColor: 'bg-amber-50',
+        },
+        {
+          icon: Calendar,
+          title: 'Kalender Jadwal 3 Bulan & Indikator Hitung Mundur H-3 di Dashboard',
+          description:
+            'Tampilan kalender interaktif untuk memantau jadwal acara berstatus Published selama 3 bulan ke depan, dilengkapi lencana pengingat otomatis (Hari Ini, H-1 s/d H-3).',
+          color: 'text-teal-600',
+          bgColor: 'bg-teal-50',
+        },
+        {
+          icon: Briefcase,
+          title: 'Workspace Khusus Petugas (Staff) & Identitas Naungan Partner/WO',
+          description:
+            'Antarmuka workspace yang lebih ringkas untuk petugas lapangan, penampil identitas naungan bisnis/WO pada profil pengguna, serta standarisasi hak akses lintas peran.',
+          color: 'text-indigo-500',
+          bgColor: 'bg-indigo-50',
+        },
+      ],
+    },
     {
       version: 'V2.0.0',
       date: '12 Juli 2026',

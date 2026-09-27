@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { doc, getDoc, onSnapshot, collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from './lib/firebase';
+import { resolveMediaUrl } from './lib/utils';
 
 interface GlobalSettings {
   logoUrl?: string;
@@ -68,7 +69,11 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (typeof window === 'undefined') return null;
     try {
       const raw = localStorage.getItem(SETTINGS_CACHE_KEY);
-      return raw ? (JSON.parse(raw) as GlobalSettings) : null;
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as GlobalSettings;
+      if (parsed.logoUrl) parsed.logoUrl = resolveMediaUrl(parsed.logoUrl);
+      if (parsed.faviconUrl) parsed.faviconUrl = resolveMediaUrl(parsed.faviconUrl);
+      return parsed;
     } catch {
       return null;
     }
@@ -78,13 +83,14 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     const applyFavicon = (faviconUrl?: string) => {
       if (!faviconUrl || typeof document === 'undefined') return;
+      const normalized = resolveMediaUrl(faviconUrl);
       let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
       if (!link) {
         link = document.createElement('link');
         link.rel = 'icon';
         document.head.appendChild(link);
       }
-      link.href = faviconUrl;
+      link.href = normalized;
     };
 
     if (settings?.faviconUrl) {
@@ -110,9 +116,14 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const logos = items.filter((m) => m.category === 'logo' && m.url).sort(sortNewest);
           if (logos.length > 0) next.logoUrl = logos[0].url;
         }
+        if (next.logoUrl) next.logoUrl = resolveMediaUrl(next.logoUrl);
+        if (next.faviconUrl) next.faviconUrl = resolveMediaUrl(next.faviconUrl);
         return next;
       } catch {
-        return baseData;
+        const fallback = { ...baseData };
+        if (fallback.logoUrl) fallback.logoUrl = resolveMediaUrl(fallback.logoUrl);
+        if (fallback.faviconUrl) fallback.faviconUrl = resolveMediaUrl(fallback.faviconUrl);
+        return fallback;
       }
     };
 

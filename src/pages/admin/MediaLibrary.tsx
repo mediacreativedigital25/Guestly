@@ -5,6 +5,7 @@ import { File as FileIcon, ImageIcon, FileText, Film, FileArchive, Upload, Searc
 import { mediaService } from '../../services/media/media.service';
 import { MediaUploader } from '../../components/media/MediaUploader';
 import { showAlert, showConfirm } from '../../lib/alerts';
+import { resolveMediaUrl } from '../../lib/utils';
 import { format } from 'date-fns';
 import { useAuth } from '../../AuthContext';
 
@@ -230,7 +231,7 @@ export default function MediaLibrary() {
               >
                 <div className="aspect-square flex items-center justify-center bg-gray-100 overflow-hidden">
                   {item.mimeType?.startsWith('image/') ? (
-                    <img src={item.url} alt={item.fileName} className="w-full h-full object-cover" />
+                    <img src={resolveMediaUrl(item.url)} alt={item.fileName} className="w-full h-full object-cover" />
                   ) : (
                     getFileIcon(item.mimeType, 48)
                   )}
@@ -255,13 +256,13 @@ export default function MediaLibrary() {
           <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row">
             <div className="md:w-2/3 bg-gray-100 flex items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200">
               {selectedMedia.mimeType?.startsWith('image/') ? (
-                <img src={selectedMedia.url} alt={selectedMedia.fileName} className="max-w-full max-h-[60vh] object-contain rounded" />
+                <img src={resolveMediaUrl(selectedMedia.url)} alt={selectedMedia.fileName} className="max-w-full max-h-[60vh] object-contain rounded" />
               ) : selectedMedia.mimeType?.startsWith('video/') ? (
-                <video src={selectedMedia.url} controls className="max-w-full max-h-[60vh] rounded" />
+                <video src={resolveMediaUrl(selectedMedia.url)} controls className="max-w-full max-h-[60vh] rounded" />
               ) : (
                 <div className="flex flex-col items-center">
                   {getFileIcon(selectedMedia.mimeType, 64)}
-                  <a href={selectedMedia.url} target="_blank" rel="noopener noreferrer" className="mt-4 text-indigo-600 hover:underline">
+                  <a href={resolveMediaUrl(selectedMedia.url)} target="_blank" rel="noopener noreferrer" className="mt-4 text-indigo-600 hover:underline">
                     Buka File
                   </a>
                 </div>
