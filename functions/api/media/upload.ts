@@ -35,7 +35,13 @@ async function putObjectViaR2S3Api(params: {
   const dateStamp = amzDate.slice(0, 8);
 
   const payloadHash = await sha256Hex(body);
-  const canonicalUri = `/${bucketName}/${key}`;
+  const encodedKey = key
+    .split('/')
+    .map((segment) =>
+      encodeURIComponent(segment).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())
+    )
+    .join('/');
+  const canonicalUri = `/${bucketName}/${encodedKey}`;
   const canonicalQueryString = '';
   const canonicalHeaders =
     `content-type:${contentType}\n` +
@@ -132,6 +138,7 @@ export async function onRequestPost(context: any) {
       'branding',
       'general',
       'E-Invitation',
+      'Layar Sapa',
     ];
     category = reqCategory && typeof reqCategory === 'string' ? reqCategory : 'attachment';
     if (!allowedCategories.includes(category)) {

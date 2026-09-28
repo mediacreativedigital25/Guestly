@@ -28,8 +28,9 @@ import {
   Search,
   Clock,
   CheckCircle2,
+  Monitor,
 } from 'lucide-react';
-import { cn, getRoleLabel, shouldHideServiceInfo } from './lib/utils';
+import { cn, getRoleLabel, shouldHideServiceInfo, isGreetingScreenUser } from './lib/utils';
 import { showConfirm } from './lib/alerts';
 import RouteBreadcrumbs from './components/RouteBreadcrumbs';
 import { auth, db } from './lib/firebase';
@@ -557,6 +558,50 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
     );
   }
 
+  // Auto-redirect Role Layar Sapa langsung ke halaman Layar Sapa TV tanpa masuk ke Dashboard terlebih dahulu
+  if (isGreetingScreenUser(appUser)) {
+    const assignedEventId =
+      Array.isArray(appUser.assignedEventIds) && appUser.assignedEventIds.length > 0
+        ? appUser.assignedEventIds[0]
+        : null;
+
+    if (assignedEventId) {
+      return <Navigate to={`/events/${assignedEventId}/greeting`} replace />;
+    }
+
+    return (
+      <div className="min-h-screen bg-[#FAF5F0] flex flex-col items-center justify-center p-6 text-center">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-amber-200/80 p-8 space-y-5">
+          <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto">
+            <Monitor className="w-7 h-7" />
+          </div>
+          <div className="space-y-2">
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+              {getRoleLabel(appUser.role, appUser.staffType)}
+            </span>
+            <h2 className="text-xl font-bold text-gray-900">
+              Akun Layar Sapa Belum Ditugaskan ke Acara
+            </h2>
+            <p className="text-sm text-gray-600 leading-relaxed">
+              Halo <strong>{appUser.name || appUser.email}</strong>, akun khusus Layar Sapa ini belum ditautkan ke acara mana pun. Silakan hubungi <strong>Owner / Admin Operasional</strong> untuk menugaskan 1 acara pada akun ini.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              logout();
+              navigate('/auth/login', { replace: true });
+            }}
+            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold transition-colors cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Keluar / Ganti Akun</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const isStaff = appUser.role === 'staff';
   const navItems = [
     { name: isStaff ? 'Workspace Petugas' : 'Dashboard', path: '/auth/login', icon: LayoutDashboard },
@@ -595,7 +640,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
       <header className="sticky top-0 z-30 h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 sm:px-6 shrink-0">
         {/* Left: Brand Logo + Sidebar Toggle + Search Bar */}
         <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
-          {/* Brand Logo (menyesuaikan otomatis ke Favicon saat sidebar diperkecil) */}
+          {/* Brand Logo (Tampilan Mobile & Sidebar Diperkecil: Gunakan Favicon) */}
           <div
             className={cn(
               "flex items-center shrink-0 transition-all duration-300",
@@ -606,49 +651,55 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
               to="/auth/login"
               className="flex items-center gap-2 font-bold text-xl tracking-tight text-indigo-600"
             >
-              {isSidebarCollapsed ? (
-                <>
-                  {/* Tampilan Desktop saat Sidebar Diperkecil: Gunakan Favicon */}
-                  <span className="hidden md:flex items-center justify-center">
-                    {settings?.faviconUrl || settings?.logoUrl ? (
-                      <img
-                        src={settings?.faviconUrl || '/favicon.ico'}
-                        alt="Favicon"
-                        className="w-9 h-9 object-contain"
-                        onError={(e) => {
-                          if (settings?.logoUrl && e.currentTarget.src !== settings.logoUrl) {
-                            e.currentTarget.src = settings.logoUrl;
-                          }
-                        }}
-                      />
-                    ) : (
-                      <span className="w-9 h-9 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg">
-                        G
-                      </span>
-                    )}
+              {/* Tampilan Mobile: Selalu Gunakan Favicon */}
+              <span className="flex md:hidden items-center justify-center">
+                {settings?.faviconUrl || settings?.logoUrl ? (
+                  <img
+                    src={settings?.faviconUrl || '/favicon.ico'}
+                    alt="Guestly"
+                    className="w-9 h-9 object-contain"
+                    onError={(e) => {
+                      if (settings?.logoUrl && e.currentTarget.src !== settings.logoUrl) {
+                        e.currentTarget.src = settings.logoUrl;
+                      }
+                    }}
+                  />
+                ) : (
+                  <span className="w-9 h-9 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg">
+                    G
                   </span>
-                  {/* Tampilan Mobile tetap logo penuh */}
-                  <span className="flex md:hidden items-center">
-                    {settings?.logoUrl ? (
-                      <img
-                        src={settings.logoUrl}
-                        alt="Logo"
-                        className="h-auto max-h-10 w-auto max-w-[140px] object-contain"
-                      />
-                    ) : (
-                      <span>Guestly</span>
-                    )}
-                  </span>
-                </>
-              ) : settings?.logoUrl ? (
-                <img
-                  src={settings.logoUrl}
-                  alt="Logo"
-                  className="h-auto max-h-10 w-auto max-w-[150px] object-contain"
-                />
-              ) : (
-                <span>Guestly</span>
-              )}
+                )}
+              </span>
+
+              {/* Tampilan Desktop: Gunakan Favicon saat Sidebar Diperkecil, Logo Penuh saat Diperluas */}
+              <span className="hidden md:flex items-center">
+                {isSidebarCollapsed ? (
+                  settings?.faviconUrl || settings?.logoUrl ? (
+                    <img
+                      src={settings?.faviconUrl || '/favicon.ico'}
+                      alt="Favicon"
+                      className="w-9 h-9 object-contain"
+                      onError={(e) => {
+                        if (settings?.logoUrl && e.currentTarget.src !== settings.logoUrl) {
+                          e.currentTarget.src = settings.logoUrl;
+                        }
+                      }}
+                    />
+                  ) : (
+                    <span className="w-9 h-9 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg">
+                      G
+                    </span>
+                  )
+                ) : settings?.logoUrl ? (
+                  <img
+                    src={settings.logoUrl}
+                    alt="Logo"
+                    className="h-auto max-h-10 w-auto max-w-[150px] object-contain"
+                  />
+                ) : (
+                  <span>Guestly</span>
+                )}
+              </span>
             </Link>
           </div>
 
@@ -1001,9 +1052,18 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
         >
           {/* Mobile Drawer Top Header */}
           <div className="flex md:hidden h-16 items-center justify-between px-6 border-b border-gray-200">
-            <div className="font-bold text-xl tracking-tight text-indigo-600 truncate">
-              {settings?.logoUrl ? (
-                <img src={settings.logoUrl} alt="Logo" className="h-auto max-h-10 w-auto max-w-[140px] object-contain" />
+            <div className="flex items-center gap-2.5 font-bold text-xl tracking-tight text-indigo-600 truncate">
+              {settings?.faviconUrl || settings?.logoUrl ? (
+                <img
+                  src={settings?.faviconUrl || '/favicon.ico'}
+                  alt="Guestly"
+                  className="w-9 h-9 object-contain shrink-0"
+                  onError={(e) => {
+                    if (settings?.logoUrl && e.currentTarget.src !== settings.logoUrl) {
+                      e.currentTarget.src = settings.logoUrl;
+                    }
+                  }}
+                />
               ) : (
                 'Guestly'
               )}
@@ -1414,6 +1474,21 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             <div className="flex items-center gap-2">
                               <Sparkles className="h-4 w-4" />
                               Template E-Invitation
+                            </div>
+                          </Link>
+                          <Link
+                            to="/auth/login/admin/greeting-templates"
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={cn(
+                              "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                              location.pathname === '/auth/login/admin/greeting-templates'
+                                ? "bg-indigo-50 text-indigo-700"
+                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <Monitor className="h-4 w-4" />
+                              Template Layar Sapa
                             </div>
                           </Link>
                         </div>

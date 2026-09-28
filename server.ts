@@ -413,7 +413,11 @@ async function startServer() {
           return res.status(400).json({ success: false, error: { message: 'File tidak ditemukan untuk diunggah.' } });
         }
 
-        const category = (req.body.category || 'attachment').replace(/[^a-zA-Z0-9_-]/g, '');
+        const rawCategory = String(req.body.category || 'attachment').trim();
+        const category =
+          rawCategory === 'Layar Sapa'
+            ? 'Layar Sapa'
+            : rawCategory.replace(/[^a-zA-Z0-9_-]/g, '') || 'attachment';
         const key = `${category}/${req.file.filename}`;
         let finalUrl = `/api/media/r2/${key}`;
 

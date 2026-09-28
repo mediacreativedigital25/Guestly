@@ -194,7 +194,7 @@ export const mediaService = {
 
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      throw new Error(data.error?.message || 'Gagal menghapus file dari R2.');
+      throw new Error(data.error?.message || 'Gagal menghapus file media.');
     }
   },
 
@@ -212,7 +212,7 @@ export const mediaService = {
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      throw new Error(data.error?.message || 'Gagal mendapatkan info file dari R2.');
+      throw new Error(data.error?.message || 'Gagal mendapatkan informasi file media.');
     }
     const data = await response.json();
     return data.data;

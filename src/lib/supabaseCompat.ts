@@ -503,9 +503,15 @@ function rowToUserModel(row: any, metaData?: any): any {
     email: extra.email || row.email || '',
     name: extra.name || row.name || '',
     role: resolvedRole,
-    staffType: resolvedRole === 'staff' ? (extra.staffType || 'checkin') : undefined,
+    staffType:
+      resolvedRole === 'staff'
+        ? (extra.staffType || 'checkin')
+        : resolvedRole === 'greeting'
+        ? 'greeting'
+        : undefined,
     assignedEventIds:
-      (resolvedRole === 'staff' || resolvedRole === 'admin') && Array.isArray(extra.assignedEventIds)
+      (resolvedRole === 'staff' || resolvedRole === 'greeting' || resolvedRole === 'admin') &&
+      Array.isArray(extra.assignedEventIds)
         ? extra.assignedEventIds
         : [],
     partnerId: extra.partnerId !== undefined ? extra.partnerId : (row.partner_id ?? null),

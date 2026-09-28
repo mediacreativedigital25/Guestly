@@ -8,13 +8,23 @@ import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import { format, isSameDay, addMonths, startOfDay, endOfDay, differenceInCalendarDays } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
-import { parseFirestoreDate, getRoleLabel, canUserAccessEvent, shouldHideServiceInfo, getUserBusinessId } from '../lib/utils';
+import { parseFirestoreDate, getRoleLabel, canUserAccessEvent, shouldHideServiceInfo, getUserBusinessId, isGreetingScreenUser } from '../lib/utils';
 
 export default function Dashboard() {
   const { appUser } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
+    if (isGreetingScreenUser(appUser)) {
+      const targetEventId =
+        Array.isArray(appUser?.assignedEventIds) && appUser.assignedEventIds.length > 0
+          ? appUser.assignedEventIds[0]
+          : null;
+      if (targetEventId) {
+        navigate(`/events/${targetEventId}/greeting`, { replace: true });
+      }
+      return;
+    }
     if (appUser?.role === 'staff') {
       navigate('/auth/login/events', { replace: true });
     }

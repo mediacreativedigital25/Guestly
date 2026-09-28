@@ -4,7 +4,7 @@ import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from 'firebase/fires
 import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
 import { User } from './types';
 import { showAlert } from './lib/alerts';
-import { resolveMediaUrl } from './lib/utils';
+import { resolveMediaUrl, isGreetingScreenUser } from './lib/utils';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
@@ -106,6 +106,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     if (!currentUser) return;
+    // Do not auto-logout TV Layar Sapa display accounts during long events
+    if (isGreetingScreenUser(appUser)) return;
 
     let timeoutId: NodeJS.Timeout;
 

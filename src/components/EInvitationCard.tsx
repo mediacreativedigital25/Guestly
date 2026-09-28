@@ -71,12 +71,6 @@ export function splitCoupleNames(
   brideOverride?: string,
   fallbackTitle?: string
 ): { groom: string; bride: string } {
-  if (groomOverride?.trim() || brideOverride?.trim()) {
-    return {
-      groom: (groomOverride || '').trim() || 'Mempelai Pria',
-      bride: (brideOverride || '').trim() || 'Mempelai Wanita',
-    };
-  }
   const source = (coupleName || '').trim();
   if (source) {
     const parts = source.split(/\s*(?:&|\bdan\b|\band\b|\+)\s*/i);
@@ -86,6 +80,14 @@ export function splitCoupleNames(
         bride: parts.slice(1).join(' & ').trim(),
       };
     }
+  }
+  if (groomOverride?.trim() || brideOverride?.trim()) {
+    return {
+      groom: (groomOverride || '').trim() || 'Mempelai Pria',
+      bride: (brideOverride || '').trim() || 'Mempelai Wanita',
+    };
+  }
+  if (source) {
     return { groom: source, bride: '' };
   }
   const cleanTitle = (fallbackTitle || 'Rizky & Aulia')
@@ -310,11 +312,13 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
   const timeDisplay = /wib|wita|wit/i.test(rawTime) ? rawTime : `${rawTime} WIB`;
 
   const venueName =
+    (event?.location ? event.location.split(',')[0].trim() : '') ||
     event?.eInviteVenueName ||
-    (event?.location ? event.location.split(',')[0].trim() : 'Gedung Serbaguna Graha Anugerah');
+    'Gedung Serbaguna Graha Anugerah';
 
   const venueAddress =
     event?.eInviteVenueAddress ||
+    event?.greetingVenueSubtitle ||
     (event?.location && event.location.includes(',')
       ? event.location.split(',').slice(1).join(',').trim()
       : event?.location || 'Jl. Melati No. 25, Semarang');

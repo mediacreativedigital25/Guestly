@@ -12,9 +12,9 @@ export async function onRequestGet(context: any) {
   const { request, env, params } = context;
   const rawParts = params?.path;
   const key = Array.isArray(rawParts)
-    ? rawParts.join('/')
+    ? rawParts.map((p: string) => decodeURIComponent(p)).join('/')
     : typeof rawParts === 'string'
-    ? rawParts
+    ? decodeURIComponent(rawParts)
     : '';
 
   if (!key || key.includes('..')) {
@@ -46,7 +46,11 @@ export async function onRequestGet(context: any) {
     env?.R2_PUBLIC_URL ||
     'https://cdn.guestly.yulovi.com'
   ).replace(/\/+$/, '');
-  const upstream = await fetch(`${cdnDomain}/${key}`, {
+  const encodedKeyPath = key
+    .split('/')
+    .map((seg: string) => encodeURIComponent(seg))
+    .join('/');
+  const upstream = await fetch(`${cdnDomain}/${encodedKeyPath}`, {
     headers: {
       'User-Agent': request.headers.get('User-Agent') || 'GuestlyMediaEdge/1.0',
     },

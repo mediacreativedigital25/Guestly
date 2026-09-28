@@ -5,9 +5,11 @@ import { db, handleFirestoreError, OperationType, createAuthUserSilently } from 
 import { Client, User } from '../types';
 import { parseFirestoreDate, getUserBusinessId } from '../lib/utils';
 import { format } from 'date-fns';
-import { Plus, Trash2, Edit, Eye } from 'lucide-react';
+import { Plus, Trash2, Edit, Eye, Phone, MessageSquare } from 'lucide-react';
 import { Link, useNavigate, useLocation, useParams } from 'react-router-dom';
 import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
+import { Modal } from '../components/Modal';
+import { sendFonnteMessage } from '../lib/fonnte';
 
 export default function ClientsList() {
   const { appUser } = useAuth();
@@ -25,6 +27,7 @@ export default function ClientsList() {
   const [isAddingClient, setIsAddingClient] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   const [newClientEmail, setNewClientEmail] = useState('');
+  const [newClientPhone, setNewClientPhone] = useState('');
   const [selectedPartnerId, setSelectedPartnerId] = useState('');
   
   // New state for creating user account
@@ -36,6 +39,7 @@ export default function ClientsList() {
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [editClientName, setEditClientName] = useState('');
   const [editClientEmail, setEditClientEmail] = useState('');
+  const [editClientPhone, setEditClientPhone] = useState('');
   
   const [viewingClient, setViewingClient] = useState<Client | null>(null);
 
@@ -145,6 +149,7 @@ export default function ClientsList() {
         setEditingClient(found);
         setEditClientName(found.name);
         setEditClientEmail(found.contactEmail || '');
+        setEditClientPhone(found.phone || '');
         setIsAddingClient(false);
         setViewingClient(null);
       }
@@ -216,6 +221,17 @@ export default function ClientsList() {
     }
   };
 
+  const closeAddModal = (showCancel = false) => {
+    setIsAddingClient(false);
+    setError('');
+    if (location.pathname !== '/auth/login/clients') {
+      navigate('/auth/login/clients');
+    }
+    if (showCancel) {
+      showCancelAlert('Penambahan client baru telah dibatalkan.');
+    }
+  };
+
   const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!appUser) return;
@@ -232,18 +248,23 @@ export default function ClientsList() {
       : (getUserBusinessId(appUser) || selectedPartnerId || appUser.id || 'default-partner');
 
     try {
+      const cleanedPhone = newClientPhone.trim();
       if (createAccount) {
-        if (!newClientEmail) {
+        if (!newClientEmail.trim()) {
            throw new Error('Email dibutuhkan untuk membuat akun.');
         }
         if (newClientPassword.length < 6) {
            throw new Error('Password minimal 6 karakter.');
         }
+        if (!cleanedPhone) {
+           throw new Error('Nomor WhatsApp dibutuhkan untuk mengirim notifikasi informasi akun ke Client.');
+        }
       }
 
       const clientData = {
-        name: newClientName,
-        contactEmail: newClientEmail,
+        name: newClientName.trim(),
+        contactEmail: newClientEmail.trim(),
+        phone: cleanedPhone,
         partnerId: partnerId,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
@@ -276,13 +297,15 @@ export default function ClientsList() {
         transaction.set(newClientRef, clientData);
       });
       
+      const matchedPartner = partners.find(p => p.id === partnerId);
+      const resolvedBizName = matchedPartner?.name || appUser.businessName || undefined;
+
       if (createAccount) {
-         const uid = await createAuthUserSilently(newClientEmail, newClientPassword);
-         const matchedPartner = partners.find(p => p.id === partnerId);
-         const resolvedBizName = matchedPartner?.name || appUser.businessName || undefined;
+         const uid = await createAuthUserSilently(newClientEmail.trim(), newClientPassword);
          const newUserDoc: User = {
-            name: newClientName,
-            email: newClientEmail,
+            name: newClientName.trim(),
+            email: newClientEmail.trim(),
+            phone: cleanedPhone,
             role: 'client',
             partnerId: partnerId,
             clientId: newDocId,
@@ -294,16 +317,45 @@ export default function ClientsList() {
             updatedAt: serverTimestamp()
          };
          await setDoc(doc(db, 'users', uid), newUserDoc);
+
+         // Send WhatsApp Notification via Fonnte
+         if (cleanedPhone) {
+           const loginUrl = `${window.location.origin}/auth/login`;
+           const bizInfo = resolvedBizName ? `\n🏢 *Bisnis / WO* : ${resolvedBizName}` : '';
+           const message = `🔐 *Informasi Akun Client Guestly*
+
+Halo Kak *${newClientName.trim()}*,
+
+Akun Client Anda telah berhasil dibuat di sistem *Guestly*. Berikut adalah informasi login akun Anda untuk mengelola acara dan buku tamu digital:
+
+📧 *Email* : ${newClientEmail.trim()}
+🔑 *Password* : ${newClientPassword}
+👤 *Role* : Client / Pemilik Acara${bizInfo}
+🌐 *Link Login* : ${loginUrl}
+
+Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada pihak lain. Terima kasih! 🙏`;
+
+           sendFonnteMessage(null, cleanedPhone, message).catch((err) => {
+             console.error('Failed to send WhatsApp notification via Fonnte:', err);
+           });
+         }
       }
 
       setClients([...clients, { id: newDocId, ...clientData } as unknown as Client]);
       setNewClientName('');
       setNewClientEmail('');
+      setNewClientPhone('');
       setCreateAccount(false);
       setNewClientPassword('');
       setIsAddingClient(false);
       navigate('/auth/login/clients', { replace: true });
-      showAlert('Berhasil', 'Client berhasil ditambahkan!', 'success');
+      showAlert(
+        'Berhasil',
+        createAccount && cleanedPhone
+          ? 'Client & Akun User berhasil dibuat! Notifikasi informasi akun telah dikirim ke WhatsApp Client.'
+          : 'Client berhasil ditambahkan!',
+        'success'
+      );
     } catch (error: any) {
       console.error(error);
       setError(error.message || 'Terjadi kesalahan saat menambahkan client.');
@@ -323,6 +375,8 @@ export default function ClientsList() {
     setEditingClient(client);
     setEditClientName(client.name);
     setEditClientEmail(client.contactEmail || '');
+    setEditClientPhone(client.phone || '');
+    setError('');
     if (client.id) {
       navigate(`/auth/login/clients/${client.id}/edit`);
     }
@@ -330,6 +384,7 @@ export default function ClientsList() {
 
   const closeEditModal = (showCancel = false) => {
     setEditingClient(null);
+    setError('');
     if (location.pathname !== '/auth/login/clients') {
       navigate('/auth/login/clients');
     }
@@ -364,15 +419,17 @@ export default function ClientsList() {
 
     try {
       const clientRef = doc(db, 'clients', editingClient.id);
+      const cleanedPhone = editClientPhone.trim();
       await updateDoc(clientRef, {
-        name: editClientName,
-        contactEmail: editClientEmail,
+        name: editClientName.trim(),
+        contactEmail: editClientEmail.trim(),
+        phone: cleanedPhone,
         updatedAt: serverTimestamp()
       });
 
       setClients(clients.map(c => 
         c.id === editingClient.id 
-          ? { ...c, name: editClientName, contactEmail: editClientEmail } 
+          ? { ...c, name: editClientName.trim(), contactEmail: editClientEmail.trim(), phone: cleanedPhone } 
           : c
       ));
       
@@ -393,51 +450,89 @@ export default function ClientsList() {
       <div className="flex justify-end items-center">
         <button 
           onClick={() => {
-            if (isAddingClient) {
-              setIsAddingClient(false);
-              navigate('/auth/login/clients');
-              showCancelAlert('Penambahan client baru telah dibatalkan.');
-              return;
-            }
+            const isFullManagement = appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'admin';
             const userCredit = appUser?.clientCredit !== undefined ? appUser.clientCredit : (appUser?.clientQuota || 0);
-            if (appUser?.role !== 'superadmin' && userCredit <= 0) {
+            if (!isFullManagement && userCredit <= 0) {
                showAlert('Akses Ditolak', 'Anda tidak memiliki kuota klien. Silakan beli layanan terlebih dahulu.', 'warning');
                navigate('/auth/login/clients');
                return;
             }
+            setError('');
             setIsAddingClient(true);
             navigate('/auth/login/clients/add');
           }}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium"
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium shadow-sm transition-colors"
         >
           <Plus className="w-4 h-4" />
-          {isAddingClient ? 'Batal' : 'Add Client'}
+          Add Client
         </button>
       </div>
 
-      {isAddingClient && (
-        <form onSubmit={handleAddClient} className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-          <h2 className="text-xl font-medium text-gray-900 mb-4">Create New Client</h2>
-          {error && <div className="bg-red-50 text-red-600 p-3 mb-4 rounded text-sm">{error}</div>}
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Company/Client Name</label>
-              <input required value={newClientName} onChange={e => setNewClientName(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="Acme Corp" />
+      {/* Add Client Modal (Popup) */}
+      <Modal
+        isOpen={isAddingClient}
+        onClose={() => closeAddModal(true)}
+        title="Tambah Client Baru"
+        maxWidth="max-w-lg"
+      >
+        <form onSubmit={handleAddClient} className="space-y-4">
+          {error && (
+            <div className="bg-red-50 text-red-600 p-3 rounded-md text-sm border border-red-100">
+              {error}
             </div>
+          )}
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Nama Client / Perusahaan <span className="text-red-500">*</span>
+            </label>
+            <input
+              required
+              value={newClientName}
+              onChange={e => setNewClientName(e.target.value)}
+              type="text"
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="Contoh: Romeo & Juliet / Acme Corp"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
-              <input value={newClientEmail} onChange={e => setNewClientEmail(e.target.value)} type="email" required={createAccount} className="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="contact@acme.com" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Contact Email {createAccount && <span className="text-red-500">*</span>}
+              </label>
+              <input
+                value={newClientEmail}
+                onChange={e => setNewClientEmail(e.target.value)}
+                type="email"
+                required={createAccount}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="client@email.com"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                No. WhatsApp (Notifikasi) {createAccount && <span className="text-red-500">*</span>}
+              </label>
+              <input
+                value={newClientPhone}
+                onChange={e => setNewClientPhone(e.target.value)}
+                type="tel"
+                required={createAccount}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="081234567890"
+              />
             </div>
           </div>
           
           {appUser?.role === 'superadmin' && (
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Pilih Partner</label>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Pilih Partner / Bisnis</label>
               <select 
                 value={selectedPartnerId} 
                 onChange={e => setSelectedPartnerId(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 max-w-sm"
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
               >
                 {partners.map(p => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -446,40 +541,71 @@ export default function ClientsList() {
             </div>
           )}
           
-          <div className="mb-4">
-            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-               <input type="checkbox" checked={createAccount} onChange={e => setCreateAccount(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 border-gray-300" />
-               Buat Akun User untuk Client ini
-            </label>
-            <p className="text-xs text-gray-500 ml-6 mt-1">Jika dicentang, Client dapat login menggunakan Contact Email dan Password di bawah.</p>
+          <div className="p-3.5 bg-indigo-50/60 border border-indigo-100 rounded-lg space-y-3">
+            <div>
+              <label className="flex items-center gap-2.5 text-sm font-medium text-gray-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={createAccount}
+                  onChange={e => setCreateAccount(e.target.checked)}
+                  className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 border-gray-300"
+                />
+                Buat Akun User untuk Client ini
+              </label>
+              <p className="text-xs text-gray-500 ml-6 mt-1">
+                Jika dicentang, sistem akan membuat akun login Client dan mengirimkan <strong>Notifikasi Informasi Akun otomatis via WhatsApp (Fonnte)</strong> ke nomor WA di atas.
+              </p>
+            </div>
+
+            {createAccount && (
+              <div className="ml-6 pt-2 border-t border-indigo-100/80 space-y-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Password Login Client <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    required={createAccount}
+                    minLength={6}
+                    value={newClientPassword}
+                    onChange={e => setNewClientPassword(e.target.value)}
+                    type="password"
+                    className="w-full border border-gray-300 bg-white rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="Minimal 6 karakter"
+                  />
+                </div>
+                <div className="flex items-start gap-2 text-xs text-indigo-700 bg-indigo-100/70 p-2.5 rounded-md">
+                  <MessageSquare className="w-4 h-4 shrink-0 mt-0.5 text-indigo-600" />
+                  <span>
+                    Pesan WhatsApp berisi <strong>Email, Password, Role, dan Link Login</strong> akan langsung dikirimkan ke nomor WhatsApp Client setelah disimpan.
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
-          {createAccount && (
-            <div className="mb-4 ml-6">
-               <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-               <input required={createAccount} minLength={6} value={newClientPassword} onChange={e => setNewClientPassword(e.target.value)} type="password" className="w-full border border-gray-300 rounded-md px-3 py-2 max-w-sm" placeholder="Min. 6 karakter" />
-            </div>
-          )}
-
-          <div className="flex items-center gap-3">
+          <div className="pt-3 border-t border-gray-100 flex justify-end items-center gap-2">
             <button
               type="button"
               disabled={isSubmitting}
-              onClick={() => {
-                setIsAddingClient(false);
-                navigate('/auth/login/clients');
-                showCancelAlert('Penambahan client baru telah dibatalkan.');
-              }}
-              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 font-medium"
+              onClick={() => closeAddModal(true)}
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium transition-colors"
             >
               Batal
             </button>
-            <button disabled={isSubmitting} type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium disabled:opacity-50 flex items-center justify-center min-w-[120px]">
-               {isSubmitting ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div> : 'Save Client'}
+            <button
+              disabled={isSubmitting}
+              type="submit"
+              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium disabled:opacity-50 flex items-center justify-center min-w-[130px] transition-colors"
+            >
+              {isSubmitting ? (
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+              ) : (
+                'Simpan Client'
+              )}
             </button>
           </div>
         </form>
-      )}
+      </Modal>
       
       {loading ? (
         <p className="text-gray-500 text-sm">Memuat data clients...</p>
@@ -494,7 +620,8 @@ export default function ClientsList() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">No</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama & Kontak</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No. WhatsApp</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acara</th>
                   {(appUser?.role === 'superadmin' || appUser?.role === 'partner') && (
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Partner</th>
@@ -512,6 +639,16 @@ export default function ClientsList() {
                     <td className="px-6 py-4 whitespace-nowrap">
                        <div className="text-sm font-medium text-gray-900">{client.name}</div>
                        <div className="text-sm text-gray-500">{client.contactEmail || '-'}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                       {client.phone ? (
+                         <span className="inline-flex items-center gap-1.5 text-gray-700">
+                           <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                           {client.phone}
+                         </span>
+                       ) : (
+                         <span className="text-gray-400">-</span>
+                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                        {clientEventsCount[client.id!] || 0} Acara
@@ -579,120 +716,133 @@ export default function ClientsList() {
         </div>
       )}
 
-      {/* Edit View Modal */}
-      {viewingClient && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full relative">
-             <button
-                onClick={closeViewModal}
-                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 font-bold"
-             >
-                ✕
-             </button>
-             <h2 className="text-xl font-bold text-gray-900 mb-4">Detail Client</h2>
-             
-             <div className="space-y-4">
+      {/* Detail Client Modal */}
+      <Modal
+        isOpen={Boolean(viewingClient)}
+        onClose={closeViewModal}
+        title="Detail Client"
+        maxWidth="max-w-md"
+      >
+        {viewingClient && (
+          <div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-500">Nama</label>
+                <div className="mt-1 text-sm text-gray-900 font-medium">{viewingClient.name}</div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-500">Email Kontak</label>
+                <div className="mt-1 text-sm text-gray-900">{viewingClient.contactEmail || '-'}</div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-500">No. WhatsApp</label>
+                <div className="mt-1 text-sm text-gray-900">{viewingClient.phone || '-'}</div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-500">Total Acara</label>
+                <div className="mt-1 text-sm text-gray-900">{clientEventsCount[viewingClient.id!] || 0} Acara</div>
+              </div>
+              {(appUser?.role === 'superadmin' || appUser?.role === 'partner') && viewingClient.partnerId && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-500">Nama</label>
-                  <div className="mt-1 text-sm text-gray-900">{viewingClient.name}</div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-500">Email Kontak</label>
-                  <div className="mt-1 text-sm text-gray-900">{viewingClient.contactEmail || '-'}</div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-500">Total Acara</label>
-                  <div className="mt-1 text-sm text-gray-900">{clientEventsCount[viewingClient.id!] || 0} Acara</div>
-                </div>
-                {(appUser?.role === 'superadmin' || appUser?.role === 'partner') && viewingClient.partnerId && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-500">Partner</label>
-                    <div className="mt-1 text-sm text-gray-900">{getPartnerName(viewingClient.partnerId)}</div>
-                  </div>
-                )}
-                <div>
-                  <label className="block text-sm font-medium text-gray-500">Tanggal Terdaftar</label>
-                  <div className="mt-1 text-sm text-gray-900">{viewingClient.createdAt && parseFirestoreDate(viewingClient.createdAt) ? format(parseFirestoreDate(viewingClient.createdAt)!, 'dd MMMM yyyy, HH:mm') : '-'}</div>
-                </div>
-             </div>
-             
-             <div className="mt-6 flex justify-end">
-                <button
-                  type="button"
-                  onClick={closeViewModal}
-                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
-                >
-                  Tutup
-                </button>
-             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Client Modal */}
-      {editingClient && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full relative">
-            <button
-               onClick={closeEditModal}
-               className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 font-bold"
-            >
-               ✕
-            </button>
-            <h2 className="text-xl font-bold text-gray-900 mb-4">Edit Client</h2>
-            
-            <form onSubmit={handleUpdateClient} className="space-y-4">
-              {error && (
-                <div className="p-3 bg-red-50 text-red-700 text-sm rounded-md mb-4 border border-red-100">
-                  {error}
+                  <label className="block text-sm font-medium text-gray-500">Partner</label>
+                  <div className="mt-1 text-sm text-gray-900">{getPartnerName(viewingClient.partnerId)}</div>
                 </div>
               )}
-              
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Nama Client
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editClientName}
-                  onChange={e => setEditClientName(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
-                />
+                <label className="block text-sm font-medium text-gray-500">Tanggal Terdaftar</label>
+                <div className="mt-1 text-sm text-gray-900">
+                  {viewingClient.createdAt && parseFirestoreDate(viewingClient.createdAt)
+                    ? format(parseFirestoreDate(viewingClient.createdAt)!, 'dd MMMM yyyy, HH:mm')
+                    : '-'}
+                </div>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Email Kontak
-                </label>
-                <input
-                  type="email"
-                  value={editClientEmail}
-                  onChange={e => setEditClientEmail(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
-                />
-              </div>
-              
-              <div className="pt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => closeEditModal(true)}
-                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {isSubmitting ? 'Menyimpan...' : 'Simpan'}
-                </button>
-              </div>
-            </form>
+            </div>
+            
+            <div className="mt-6 pt-4 border-t border-gray-100 flex justify-end">
+              <button
+                type="button"
+                onClick={closeViewModal}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium"
+              >
+                Tutup
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
+
+      {/* Edit Client Modal */}
+      <Modal
+        isOpen={Boolean(editingClient)}
+        onClose={() => closeEditModal(true)}
+        title="Edit Client"
+        maxWidth="max-w-md"
+      >
+        {editingClient && (
+          <form onSubmit={handleUpdateClient} className="space-y-4">
+            {error && (
+              <div className="p-3 bg-red-50 text-red-700 text-sm rounded-md border border-red-100">
+                {error}
+              </div>
+            )}
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Nama Client <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={editClientName}
+                onChange={e => setEditClientName(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Email Kontak
+              </label>
+              <input
+                type="email"
+                value={editClientEmail}
+                onChange={e => setEditClientEmail(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                No. WhatsApp (Notifikasi)
+              </label>
+              <input
+                type="tel"
+                value={editClientPhone}
+                onChange={e => setEditClientPhone(e.target.value)}
+                placeholder="081234567890"
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+            
+            <div className="pt-4 border-t border-gray-100 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => closeEditModal(true)}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium"
+              >
+                {isSubmitting ? 'Menyimpan...' : 'Simpan'}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -46,13 +46,13 @@ export default function RolesSettings() {
     {
       name: '3. Admin Operasional',
       badge: 'Back-Office Manager',
-      canCreate: 'Hanya Staff Lapangan (Check-in / Souvenir / All-in)',
+      canCreate: 'Staff Lapangan & Layar Sapa (1 User = 1 Acara)',
       createEvent: 'Bisa Buat & Kelola Acara Bisnisnya',
       serviceInfo: 'Disembunyikan Otomatis',
       description:
-        'Tim operasional di bawah naungan Bisnis Owner yang menyiapkan teknis acara, daftar tamu, WA Blast, dan menugaskan petugas lapangan.',
+        'Tim operasional di bawah naungan Bisnis Owner yang menyiapkan teknis acara, daftar tamu, WA Blast, dan menugaskan petugas lapangan serta TV Layar Sapa.',
       permissions: [
-        'Membuat dan menugaskan akun Staff Lapangan (Scan Kehadiran & Souvenir)',
+        'Membuat dan menugaskan akun Staff Lapangan & Akun Layar Sapa TV (1 User = 1 Acara)',
         'Membuat acara (Create Event), Import/Export Excel Tamu, & kirim WA Blast',
         'Mengatur stok awal souvenir & audit logistik acara',
         'Modul "Informasi Layanan" (harga paket/tagihan Owner) disembunyikan otomatis'
@@ -60,21 +60,36 @@ export default function RolesSettings() {
     },
     {
       name: '4. Staff Lapangan (Scan & Souvenir)',
-      badge: 'Focus Mode Terkunci',
+      badge: 'Focus Mode Terkunci (1 User = 1 Acara)',
       canCreate: 'Tidak Bisa Menambah User',
       createEvent: 'Terkunci (Tidak Bisa Create Event)',
       serviceInfo: 'Disembunyikan Otomatis',
       description:
-        'Petugas hari-H di Gate Masuk atau Loket Souvenir di bawah naungan Bisnis Owner/Admin. Tampilan dikunci khusus untuk tugas lapangan.',
+        'Petugas hari-H di Gate Masuk atau Loket Souvenir di bawah naungan Bisnis Owner/Admin. 1 user ditugaskan khusus untuk 1 acara.',
       permissions: [
-        'Hanya dapat membuka acara yang ditugaskan kepadanya oleh Owner/Admin',
+        '1 Akun ditugaskan fokus pada 1 acara (jika ada banyak acara bersamaan, cukup buat akun baru)',
         'Tersedia 3 mode fokus: Staff Scan Kehadiran, Staff Souvenir, atau All-in-One',
         'Tidak dapat membuat acara baru (Create Event) maupun mengubah pengaturan acara',
         'Modul "Informasi Layanan" disembunyikan sepenuhnya'
       ]
     },
     {
-      name: '5. Client (Pemilik Acara / Mempelai)',
+      name: '5. Layar Sapa (Display TV / Monitor Sambutan)',
+      badge: 'Auto-Redirect Tanpa Dashboard',
+      canCreate: 'Tidak Bisa Menambah User',
+      createEvent: 'Terkunci (Tidak Bisa Create Event)',
+      serviceInfo: 'Disembunyikan Otomatis',
+      description:
+        'Akun khusus perangkat TV / Proyektor / Mini-PC di area resepsi yang langsung menampilkan Layar Sapa begitu berhasil login tanpa masuk ke Dashboard.',
+      permissions: [
+        'Otomatis langsung masuk ke halaman Layar Sapa TV (/events/:eventId/greeting) setelah login tanpa ke Dashboard',
+        '1 User = 1 Acara (terkunci khusus pada 1 acara yang ditugaskan oleh Owner/Admin)',
+        'Dilengkapi proteksi anti auto-logout selama acara berlangsung & tombol keluar akun tersembunyi di pojok layar',
+        'Tidak memiliki akses ke Dashboard, daftar tamu, maupun pengaturan acara'
+      ]
+    },
+    {
+      name: '6. Client (Pemilik Acara / Mempelai)',
       badge: 'Event Host Monitor',
       canCreate: 'Tidak Bisa Menambah User',
       createEvent: 'Terkunci (Tidak Bisa Create Event)',

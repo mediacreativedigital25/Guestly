@@ -1,22 +1,35 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import { supabaseDb } from '../lib/supabaseDb';
-import { EventRecord, Guest } from '../types';
-import { parseFirestoreDate, resolveMediaUrl } from '../lib/utils';
+import { EventRecord, Guest, GreetingScreenTemplate } from '../types';
 import { useSettings } from '../SettingsContext';
-import { ScanLine } from 'lucide-react';
+import { useAuth } from '../AuthContext';
+import { isGreetingScreenUser } from '../lib/utils';
+import { showConfirm } from '../lib/alerts';
+import { Maximize2, Minimize2, Sparkles, Clock, LogOut } from 'lucide-react';
 import { offlineSyncService } from '../services/offlineSyncService';
+import {
+  greetingTemplateService,
+  DEFAULT_GREETING_TEMPLATES,
+} from '../services/greetingTemplateService';
+import { GreetingScreenCanvas } from '../components/GreetingScreenCanvas';
 
 export default function GreetingScreen() {
   const { eventId } = useParams();
+  const navigate = useNavigate();
   const { settings } = useSettings();
-  
+  const { appUser, logout } = useAuth();
+
   const [eventData, setEventData] = useState<EventRecord | null>(null);
+  const [templates, setTemplates] = useState<GreetingScreenTemplate[]>(
+    DEFAULT_GREETING_TEMPLATES
+  );
   const [latestGuest, setLatestGuest] = useState<Guest | null>(null);
   const [showGreeting, setShowGreeting] = useState(false);
   const [errorInfo, setErrorInfo] = useState('');
   const [partnerLogoUrl, setPartnerLogoUrl] = useState<string | null>(null);
-  
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const triggerGreetingDisplay = (newRecord: any) => {
@@ -24,7 +37,7 @@ export default function GreetingScreen() {
     const guest: Guest = {
       id: newRecord.id,
       eventId: newRecord.event_id || eventId || '',
-      name: newRecord.name,
+      name: newRecord.name || 'Tamu Undangan Kehormatan',
       ticketCode: newRecord.ticket_code || newRecord.ticketCode || '',
       category: newRecord.category,
       tableNumber: newRecord.seat || newRecord.tableNumber,
@@ -32,10 +45,13 @@ export default function GreetingScreen() {
       session: newRecord.session,
       rsvpStatus: newRecord.rsvp_status || newRecord.rsvpStatus,
       attended: true,
-      attendedAt: newRecord.check_in_time || newRecord.attendedAt || new Date().toISOString(),
+      attendedAt:
+        newRecord.check_in_time ||
+        newRecord.attendedAt ||
+        new Date().toISOString(),
       wishes: newRecord.wishes,
       createdAt: newRecord.created_at,
-      updatedAt: newRecord.updated_at
+      updatedAt: newRecord.updated_at,
     };
 
     setLatestGuest(guest);
@@ -45,13 +61,27 @@ export default function GreetingScreen() {
       clearTimeout(timeoutRef.current);
     }
 
-    // Hide greeting after 8 seconds and return to waiting screen
+    // Hide greeting after 10 seconds and return to standby screen
     timeoutRef.current = setTimeout(() => {
       setShowGreeting(false);
-    }, 8000);
+    }, 10000);
   };
 
-  // Fetch Event Info and Latest Guest
+  useEffect(() => {
+    greetingTemplateService.getTemplates().then((list) => {
+      setTemplates(list);
+    });
+  }, []);
+
+  useEffect(() => {
+    const onFsChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
+  // Fetch Event Info and Listen for Guest Check-In
   useEffect(() => {
     if (!eventId) return;
 
@@ -63,35 +93,43 @@ export default function GreetingScreen() {
         setPartnerLogoUrl(cachedSnapshot.partnerLogoUrl);
       }
     }
-    
+
     // 1. Initial Load of Event from Supabase
-    supabaseDb.getEvent(eventId).then(async (data) => {
-      if (data) {
-        setEventData(data);
-        let resolvedLogo: string | null = null;
-        if (data.partnerId) {
-          try {
-            const partner = await supabaseDb.getUser(data.partnerId);
-            if (partner && (partner as any).logoUrl) {
-              resolvedLogo = (partner as any).logoUrl;
-              setPartnerLogoUrl(resolvedLogo);
+    supabaseDb
+      .getEvent(eventId)
+      .then(async (data) => {
+        if (data) {
+          setEventData(data);
+          let resolvedLogo: string | null = null;
+          if (data.partnerId) {
+            try {
+              const partner = await supabaseDb.getUser(data.partnerId);
+              if (partner && ((partner as any).logoUrl || (partner as any).brandLogo)) {
+                resolvedLogo = (partner as any).logoUrl || (partner as any).brandLogo;
+                setPartnerLogoUrl(resolvedLogo);
+              }
+            } catch {
+              // ignore partner fetch error when offline
             }
-          } catch {
-            // ignore partner fetch error when offline
           }
+          offlineSyncService.saveEventSnapshot(eventId, data, resolvedLogo);
         }
-        offlineSyncService.saveEventSnapshot(eventId, data, resolvedLogo);
-      }
-    }).catch(err => {
-      console.warn("Error fetching event data from Supabase, checking offline snapshot:", err);
-      const fallback = offlineSyncService.getEventSnapshot(eventId);
-      if (fallback?.event) {
-        setEventData(fallback.event);
-        if (fallback.partnerLogoUrl) setPartnerLogoUrl(fallback.partnerLogoUrl);
-      } else {
-        setErrorInfo('Gagal memuat data acara dari Supabase (Periksa koneksi internet).');
-      }
-    });
+      })
+      .catch((err) => {
+        console.warn(
+          'Error fetching event data from Supabase, checking offline snapshot:',
+          err
+        );
+        const fallback = offlineSyncService.getEventSnapshot(eventId);
+        if (fallback?.event) {
+          setEventData(fallback.event);
+          if (fallback.partnerLogoUrl) setPartnerLogoUrl(fallback.partnerLogoUrl);
+        } else {
+          setErrorInfo(
+            'Gagal memuat data acara dari Supabase (Periksa koneksi internet).'
+          );
+        }
+      });
 
     // 2. Realtime WebSocket subscription to Supabase guests table
     const unsubscribeGuests = supabaseDb.subscribeToGuests(eventId, (payload) => {
@@ -135,135 +173,140 @@ export default function GreetingScreen() {
     };
   }, [eventId]);
 
-  if (errorInfo) {
-    return <div className="min-h-screen bg-black text-red-500 flex items-center justify-center">{errorInfo}</div>;
+  const toggleFullscreen = () => {
+    if (typeof document === 'undefined') return;
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  };
+
+  // Strict 1-User-1-Event enforcement for Layar Sapa role accounts
+  if (
+    isGreetingScreenUser(appUser) &&
+    Array.isArray(appUser?.assignedEventIds) &&
+    appUser.assignedEventIds.length > 0 &&
+    eventId !== appUser.assignedEventIds[0]
+  ) {
+    return <Navigate to={`/events/${appUser.assignedEventIds[0]}/greeting`} replace />;
   }
 
-  if (!eventData) {
+  if (errorInfo) {
     return (
-      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center space-y-4">
-        <img 
-          src={settings?.faviconUrl || settings?.logoUrl || "/favicon.ico"} 
-          alt="Guestly Logo" 
-          className="w-16 h-16 object-contain animate-pulse"
-          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-        />
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div>
-        <p className="text-gray-400 font-medium">Memuat Event...</p>
+      <div className="min-h-screen bg-[#FAF5F0] text-rose-600 flex items-center justify-center font-medium">
+        {errorInfo}
       </div>
     );
   }
 
-  const displayLogoUrl = resolveMediaUrl(partnerLogoUrl || settings?.logoUrl);
+  if (!eventData) {
+    return (
+      <div className="min-h-screen bg-[#FAF5F0] text-slate-800 flex flex-col items-center justify-center space-y-4">
+        <img
+          src={settings?.faviconUrl || settings?.logoUrl || '/favicon.ico'}
+          alt="Guestly Logo"
+          className="w-16 h-16 object-contain animate-pulse"
+          onError={(e) => {
+            e.currentTarget.style.display = 'none';
+          }}
+        />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-rose-500"></div>
+        <p className="text-slate-600 font-medium">Memuat Layar Sapa Guestly...</p>
+      </div>
+    );
+  }
 
-const renderFormattedTitle = (title: string, isMain: boolean = false) => {
-    const weddingMatch = title.match(/^(the wedding of\s+)(.*)$/i);
-    if (weddingMatch) {
-      if (isMain) {
-         return (
-          <span className="flex flex-col items-center gap-2 sm:gap-4 leading-none">
-            <span className="text-lg sm:text-2xl md:text-3xl font-light font-['Poppins'] opacity-90 pb-2" style={{ fontFamily: '"Poppins", sans-serif' }}>
-              The Wedding Of
-            </span>
-            <span className="leading-tight font-['Great_Vibes'] font-normal pb-4 text-[0.8em] sm:text-[1em]" style={{ fontFamily: '"Great Vibes", cursive' }}>{weddingMatch[2].replace(/ dan /gi, ' & ')}</span>
-          </span>
-         );
-      } else {
-         return (
-           <span className="flex flex-col items-center gap-1">
-             <span className="text-sm sm:text-base font-light font-['Poppins'] opacity-90" style={{ fontFamily: '"Poppins", sans-serif' }}>
-               The Wedding Of
-             </span>
-             <span className="leading-tight font-['Great_Vibes'] font-normal text-[0.9em] sm:text-[1.1em]" style={{ fontFamily: '"Great Vibes", cursive' }}>{weddingMatch[2].replace(/ dan /gi, ' & ')}</span>
-           </span>
-         );
-      }
-    }
-    return title;
-  };
+  const activeTemplate =
+    templates.find((t) => t.id === eventData.greetingTemplateId) ||
+    templates.find((t) => t.isDefault) ||
+    DEFAULT_GREETING_TEMPLATES[0];
 
   return (
-    <div className="min-h-screen w-full bg-black flex items-center justify-center relative overflow-hidden font-sans">
-      {/* Background Frame / Overlay */}
-      {eventData.frameOverlayUrl ? (
-         <div 
-           className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
-           style={{ backgroundImage: `url(${resolveMediaUrl(eventData.frameOverlayUrl)})` }}
-         />
-      ) : (
-         <div 
-           className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
-           style={{ backgroundImage: `url(/bg-default.png)` }}
-         />
-      )}
-      
-      {/* Subtle overlay to ensure text remains readable */}
-      <div className="absolute inset-0 z-0 bg-black/30 backdrop-blur-[2px]" />
+    <div className="relative w-screen h-screen overflow-hidden bg-[#FAF5F0] select-none group">
+      <GreetingScreenCanvas
+        fullscreen
+        template={activeTemplate}
+        event={eventData}
+        guest={latestGuest}
+        mode={showGreeting && latestGuest ? 'welcome' : 'standby'}
+        appLogoUrl={partnerLogoUrl || settings?.logoUrl}
+      />
 
-      {/* Main Content Container */}
-      <div className="z-10 w-full px-6 py-12 flex flex-col items-center justify-center transition-all duration-1000 min-h-screen">
-         {displayLogoUrl && (
-           <img src={displayLogoUrl} alt="Vendor Logo" className="absolute top-12 h-auto max-h-20 w-auto max-w-[240px] object-contain opacity-80" />
-         )}
+      {/* Discreet Operator Floating Controls (Only visible when hovering bottom-right corner) */}
+      <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+        <button
+          type="button"
+          onClick={() => {
+            if (showGreeting) {
+              setShowGreeting(false);
+            } else {
+              triggerGreetingDisplay({
+                id: 'demo-guest',
+                name: latestGuest?.name || 'Iklas Padli',
+                category: latestGuest?.category || '',
+                seat: latestGuest?.tableNumber || '',
+                attended: true,
+              });
+            }
+          }}
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/90 hover:bg-white text-slate-800 text-xs font-semibold shadow-lg border border-slate-200 backdrop-blur-md cursor-pointer"
+          title="Tes Tampilan Sambutan Tamu"
+        >
+          {showGreeting ? (
+            <>
+              <Clock className="w-3.5 h-3.5 text-amber-600" />
+              <span>Mode Standby</span>
+            </>
+          ) : (
+            <>
+              <Sparkles className="w-3.5 h-3.5 text-rose-600" />
+              <span>Simulasi Tamu Hadir</span>
+            </>
+          )}
+        </button>
 
-         {showGreeting && latestGuest ? (
-           <div className="flex flex-col items-center space-y-4 animate-in slide-in-from-bottom-8 fade-in zoom-in duration-700 ease-out w-full px-4">
-             <h2 className="text-2xl sm:text-3xl md:text-5xl lg:text-6xl text-white font-light tracking-[0.2em] drop-shadow-lg uppercase mb-2 sm:mb-4 text-center">
-               Selamat Datang
-             </h2>
-             
-             <h1 
-               className="text-4xl sm:text-6xl md:text-8xl lg:text-9xl text-white font-bold tracking-tight drop-shadow-2xl my-4 sm:my-6 text-center leading-tight max-w-full break-words"
-               style={{ 
-                 fontFamily: eventData.fontFamily || 'inherit',
-                 color: eventData.primaryColor || '#ffffff',
-                 textShadow: '0 4px 12px rgba(0,0,0,0.5)'
-               }}
-             >
-               {latestGuest.name}
-             </h1>
-             
-             <div className="h-1 w-16 sm:w-24 bg-white/50 rounded-full my-4 sm:my-6" />
+        <button
+          type="button"
+          onClick={toggleFullscreen}
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-slate-900/85 hover:bg-slate-900 text-white text-xs font-semibold shadow-lg backdrop-blur-md cursor-pointer"
+          title="Layar Penuh (Fullscreen)"
+        >
+          {isFullscreen ? (
+            <>
+              <Minimize2 className="w-3.5 h-3.5" />
+              <span>Keluar Fullscreen</span>
+            </>
+          ) : (
+            <>
+              <Maximize2 className="w-3.5 h-3.5" />
+              <span>Fullscreen TV</span>
+            </>
+          )}
+        </button>
 
-             <p className="text-xl sm:text-2xl md:text-3xl text-gray-100 font-medium tracking-wide drop-shadow-md text-center max-w-full break-words">
-               Di Acara {renderFormattedTitle(eventData.title, false)}
-             </p>
-           </div>
-         ) : (
-           <div className="flex flex-col items-center justify-center space-y-8 sm:space-y-12 animate-in fade-in duration-1000 w-full px-4 mt-8">
-             <h1 
-               className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl text-white/90 font-bold tracking-tight drop-shadow-xl text-center max-w-full break-words leading-tight"
-               style={{ fontFamily: eventData.fontFamily || 'inherit' }}
-             >
-               {renderFormattedTitle(eventData.title, true)}
-             </h1>
-             
-             <div className="flex flex-col items-center space-y-8">
-                <p className="text-sm sm:text-lg text-white/70 tracking-[0.3em] sm:tracking-[0.5em] uppercase font-light text-center border-b border-white/20 pb-4 px-8">
-                  Menunggu Tamu...
-                </p>
-                
-                <div className="flex items-center gap-4 bg-white/10 backdrop-blur-md px-6 py-4 rounded-2xl border border-white/10 shadow-xl">
-                  <div className="bg-white/20 p-3 rounded-xl border border-white/20">
-                    <ScanLine className="w-8 h-8 text-white/90" />
-                  </div>
-                  <div className="flex flex-col">
-                     <span className="text-white/70 text-sm font-light">Scan QR untuk</span>
-                     <span className="text-white font-semibold text-lg">Check-In</span>
-                  </div>
-                </div>
-             </div>
-           </div>
-         )}
-         
-         {!showGreeting && (
-             <div className="absolute bottom-8 flex flex-col items-center gap-1 opacity-70 hover:opacity-100 transition-opacity">
-               <span className="text-[10px] font-light tracking-[0.2em] text-white/60 uppercase">Powered by</span>
-               <div className="flex items-center gap-2">
-                 <span className="text-xl font-bold tracking-tight text-white/90 font-serif">Guestly</span>
-               </div>
-             </div>
-         )}
+        {appUser && (
+          <button
+            type="button"
+            onClick={async () => {
+              const confirmed = await showConfirm(
+                'Keluar dari Akun Layar Sapa?',
+                `Anda akan keluar dari sesi ${appUser.name || appUser.email} dan kembali ke halaman login.`
+              );
+              if (!confirmed) return;
+              if (typeof document !== 'undefined' && document.fullscreenElement) {
+                document.exitFullscreen?.().catch(() => {});
+              }
+              logout();
+              navigate('/auth/login', { replace: true });
+            }}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-rose-600/90 hover:bg-rose-600 text-white text-xs font-semibold shadow-lg backdrop-blur-md cursor-pointer"
+            title={`Keluar Akun (${appUser.name || appUser.email})`}
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Keluar Akun</span>
+          </button>
+        )}
       </div>
     </div>
   );

@@ -171,7 +171,7 @@ export default function MediaLibrary() {
     <div className="max-w-7xl mx-auto">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <p className="text-sm text-gray-500">Kelola semua file R2 Anda di sini.</p>
+          <p className="text-sm text-gray-500">Kelola seluruh file media dan aset acara Anda di sini.</p>
         </div>
         <button 
           onClick={() => setIsUploadModalOpen(true)}

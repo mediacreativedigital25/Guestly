@@ -261,10 +261,12 @@ export default function RouteBreadcrumbs() {
         segments.push({ label: 'Template WhatsApp', shortCode: 'WA Templates' });
       } else if (second === 'e-invitation-templates') {
         segments.push({ label: 'Template E-Invitation', shortCode: 'E-Invite Templates' });
+      } else if (second === 'greeting-templates') {
+        segments.push({ label: 'Template Layar Sapa', shortCode: 'Greeting Templates' });
       }
     } else if (first === 'media') {
       segments.push({
-        label: 'Media Library (R2)',
+        label: 'Media Library',
         shortCode: 'Media',
       });
     } else if (first === 'changelog') {

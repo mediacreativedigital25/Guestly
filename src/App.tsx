@@ -31,6 +31,7 @@ import AdminSettings from './pages/admin/AdminSettings';
 import AdminCalendar from './pages/admin/AdminCalendar';
 import AdminWATemplates from './pages/admin/AdminWATemplates';
 import AdminEInviteTemplates from './pages/admin/AdminEInviteTemplates';
+import AdminGreetingTemplates from './pages/admin/AdminGreetingTemplates';
 import MediaLibrary from './pages/admin/MediaLibrary';
 import ServicesCatalog from './pages/services/ServicesCatalog';
 import MyServices from './pages/services/MyServices';
@@ -85,6 +86,7 @@ export default function App() {
             <Route path="admin/calendar" element={<AdminCalendar />} />
             <Route path="admin/wa-templates" element={<AdminWATemplates />} />
             <Route path="admin/e-invitation-templates" element={<AdminEInviteTemplates />} />
+            <Route path="admin/greeting-templates" element={<AdminGreetingTemplates />} />
             <Route path="media" element={<MediaLibrary />} />
           </Route>
           {/* Public Route */}

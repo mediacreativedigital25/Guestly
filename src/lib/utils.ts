@@ -42,6 +42,13 @@ export function isEventExpired(input: string | { date?: string; activeUntil?: st
   return getDaysRemaining(input) <= 0;
 }
 
+export function isGreetingScreenUser(
+  user?: { role?: string; staffType?: string } | null
+): boolean {
+  if (!user) return false;
+  return user.role === 'greeting' || (user.role === 'staff' && user.staffType === 'greeting');
+}
+
 export function getRoleLabel(role?: string, staffType?: string): string {
   switch (role) {
     case 'superadmin':
@@ -54,7 +61,10 @@ export function getRoleLabel(role?: string, staffType?: string): string {
       return 'Partner';
     case 'client':
       return 'Client';
+    case 'greeting':
+      return 'Layar Sapa (Display TV)';
     case 'staff':
+      if (staffType === 'greeting') return 'Layar Sapa (Display TV)';
       if (staffType === 'checkin') return 'Staff Scan Kehadiran';
       if (staffType === 'souvenir') return 'Staff Souvenir';
       return 'Staff All-in (Scan & Souvenir)';
@@ -86,7 +96,7 @@ export function shouldHideServiceInfo(
 ): boolean {
   if (!user) return true;
   if (user.role === 'superadmin') return false;
-  if (user.role === 'staff' || user.role === 'admin') return true;
+  if (user.role === 'staff' || user.role === 'greeting' || user.role === 'admin') return true;
   if (user.hideServiceInfo === true) return true;
   if (
     user.role === 'client' &&
@@ -101,7 +111,7 @@ export function canUserCreateEvent(
   user?: { role?: string } | null
 ): boolean {
   if (!user) return false;
-  if (user.role === 'staff' || user.role === 'client') return false;
+  if (user.role === 'staff' || user.role === 'greeting' || user.role === 'client') return false;
   return ['superadmin', 'owner', 'admin', 'partner'].includes(user.role || '');
 }
 
@@ -181,7 +191,7 @@ export function canUserAccessEvent(
     return false;
   }
 
-  if (user.role === 'staff') {
+  if (user.role === 'staff' || user.role === 'greeting') {
     return assigned.includes(eventId);
   }
 

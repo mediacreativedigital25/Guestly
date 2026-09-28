@@ -1,6 +1,6 @@
-export type Role = 'superadmin' | 'owner' | 'admin' | 'partner' | 'client' | 'reseller' | 'staff';
+export type Role = 'superadmin' | 'owner' | 'admin' | 'partner' | 'client' | 'reseller' | 'staff' | 'greeting';
 
-export type StaffType = 'checkin' | 'souvenir' | 'all';
+export type StaffType = 'checkin' | 'souvenir' | 'all' | 'greeting';
 
 export interface User {
   id?: string;
@@ -124,6 +124,22 @@ export interface EventRecord {
   mapsUrl?: string;
   eInviteGreetingText?: string;
   eInviteFooterText?: string;
+  greetingTemplateId?: string;
+  greetingTemplateUrl?: string;
+  greetingCouplePhotoUrl?: string;
+  greetingUseThumbnailFallback?: boolean;
+  greetingAutoRemoveBg?: boolean;
+  greetingHeaderText?: string;
+  greetingGroomName?: string;
+  greetingBrideName?: string;
+  greetingWelcomeSubtext?: string;
+  greetingCheckInText?: string;
+  greetingTimeText?: string;
+  greetingVenueTitle?: string;
+  greetingVenueSubtitle?: string;
+  greetingFooterText?: string;
+  greetingShowLogo?: boolean;
+  greetingShowFooterStrip?: boolean;
   createdAt: any;
   updatedAt: any;
 }
@@ -137,6 +153,23 @@ export interface EInviteTemplate {
   accentColor?: string;
   guestBoxBg?: string;
   footerColor?: string;
+  isDefault?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface GreetingScreenTemplate {
+  id: string;
+  name: string;
+  imageUrl: string;
+  couplePhotoUrl?: string;
+  r2Key?: string;
+  primaryColor?: string;
+  accentColor?: string;
+  coupleNameColor?: string;
+  guestBoxBg?: string;
+  footerColor?: string;
+  showFooterStrip?: boolean;
   isDefault?: boolean;
   createdAt?: string;
   updatedAt?: string;

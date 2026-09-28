@@ -28,9 +28,9 @@ export default function Changelog() {
       changes: [
         {
           icon: Sparkles,
-          title: 'Kartu E-Invitation Digital & Katalog Template R2',
+          title: 'Kartu E-Invitation Digital & Katalog Template Terpusat',
           description:
-            'Desain kartu undangan digital beresolusi tinggi (16:9) dengan bingkai foto mempelai lengkung (arch), pilihan tema warna elegan, serta pengelolaan katalog template terpusat di Cloudflare R2.',
+            'Desain kartu undangan digital beresolusi tinggi (16:9) dengan bingkai foto mempelai lengkung (arch), pilihan tema warna elegan, serta pengelolaan katalog template terpusat.',
           color: 'text-rose-500',
           bgColor: 'bg-rose-50',
         },
@@ -54,7 +54,7 @@ export default function Changelog() {
           icon: Download,
           title: 'Nama Panjang Anti-Terpotong & Mesin Unduh PNG 2D Canvas',
           description:
-            'Ukuran huruf nama tamu beserta gelar/jabatan menyesuaikan otomatis tanpa terpotong (...), serta mesin Direct 2D Canvas Compositor dan R2 Media Proxy memastikan seluruh foto mempelai, logo, dan QR selalu ikut terunduh dengan tajam.',
+            'Ukuran huruf nama tamu beserta gelar/jabatan menyesuaikan otomatis tanpa terpotong (...), serta mesin Direct 2D Canvas Compositor dan Media Proxy memastikan seluruh foto mempelai, logo, dan QR selalu ikut terunduh dengan tajam.',
           color: 'text-emerald-600',
           bgColor: 'bg-emerald-50',
         },

@@ -2,15 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { collection, query, getDocs, where, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, deleteField, runTransaction, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { EventRecord, Client, User, EInviteTemplate, SeatingTable, Guest } from '../types';
+import { EventRecord, Client, User, EInviteTemplate, GreetingScreenTemplate, SeatingTable, Guest } from '../types';
 import { parseFirestoreDate, canUserAccessEvent, canUserCreateEvent, getUserBusinessId, getRoleLabel, isPartnerBusinessRegistered, resolveMediaUrl } from '../lib/utils';
 import { format } from 'date-fns';
 import { Link, useNavigate, useLocation, useParams } from 'react-router-dom';
-import { Plus, Image as ImageIcon, Trash2, Edit, ScanLine, Eye, ArrowUp, ArrowDown, Gift, Building2, Lock, Sparkles, Check, MapPin, ExternalLink, Crown, Users, Search, Armchair } from 'lucide-react';
+import { Plus, Image as ImageIcon, Trash2, Edit, ScanLine, Eye, ArrowUp, ArrowDown, Gift, Building2, Lock, Sparkles, Check, MapPin, ExternalLink, Crown, Users, Search, Armchair, Monitor } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { MediaUploader } from '../components/media/MediaUploader';
 import { EInvitationCard, splitCoupleNames } from '../components/EInvitationCard';
+import { GreetingScreenCanvas } from '../components/GreetingScreenCanvas';
 import { eInviteTemplateService, DEFAULT_EINVITE_TEMPLATES } from '../services/eInviteTemplateService';
+import { greetingTemplateService, DEFAULT_GREETING_TEMPLATES } from '../services/greetingTemplateService';
 import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 
 export default function EventsList() {
@@ -69,6 +71,30 @@ export default function EventsList() {
   const [quickTemplateUrl, setQuickTemplateUrl] = useState('');
   const [quickTemplateKey, setQuickTemplateKey] = useState('');
 
+  // Layar Sapa (Greeting Screen) Tab State
+  const [greetingTemplates, setGreetingTemplates] = useState<GreetingScreenTemplate[]>(DEFAULT_GREETING_TEMPLATES);
+  const [selectedGreetingTemplateId, setSelectedGreetingTemplateId] = useState<string>('default-blush-stage');
+  const [selectedGreetingTemplateUrl, setSelectedGreetingTemplateUrl] = useState<string>('');
+  const [greetingCouplePhotoUrl, setGreetingCouplePhotoUrl] = useState<string>('');
+  const [greetingUseThumbnailFallback, setGreetingUseThumbnailFallback] = useState<boolean>(true);
+  const [greetingAutoRemoveBg, setGreetingAutoRemoveBg] = useState<boolean>(true);
+  const [greetingHeaderText, setGreetingHeaderText] = useState<string>('DI ACARA PERNIKAHAN');
+  const [greetingGroomName, setGreetingGroomName] = useState<string>('');
+  const [greetingBrideName, setGreetingBrideName] = useState<string>('');
+  const [greetingWelcomeSubtext, setGreetingWelcomeSubtext] = useState<string>('BAPAK/IBU');
+  const [greetingTimeText, setGreetingTimeText] = useState<string>('10.00 WIB');
+  const [greetingVenueTitle, setGreetingVenueTitle] = useState<string>('');
+  const [greetingVenueSubtitle, setGreetingVenueSubtitle] = useState<string>('');
+  const [greetingFooterText, setGreetingFooterText] = useState<string>('Terima kasih atas kehadiran dan doa restunya.');
+  const [greetingShowLogo, setGreetingShowLogo] = useState<boolean>(true);
+  const [greetingShowFooterStrip, setGreetingShowFooterStrip] = useState<boolean>(true);
+  const [greetingPreviewMode, setGreetingPreviewMode] = useState<'welcome' | 'standby'>('welcome');
+  const [greetingPreviewGuestName, setGreetingPreviewGuestName] = useState<string>('Iklas Padli');
+  const [isQuickUploadingGreetingTemplate, setIsQuickUploadingGreetingTemplate] = useState(false);
+  const [quickGreetingTemplateName, setQuickGreetingTemplateName] = useState('');
+  const [quickGreetingTemplateUrl, setQuickGreetingTemplateUrl] = useState('');
+  const [quickGreetingTemplateKey, setQuickGreetingTemplateKey] = useState('');
+
   // Manajemen Meja (Beta) State
   const [seatingTables, setSeatingTables] = useState<SeatingTable[]>([]);
   const [newTableName, setNewTableName] = useState('');
@@ -89,6 +115,14 @@ export default function EventsList() {
       if (def && !editingEventId) {
         setSelectedEInviteTemplateId(def.id);
         setSelectedEInviteTemplateUrl(def.imageUrl || '');
+      }
+    });
+    greetingTemplateService.getTemplates().then((list) => {
+      setGreetingTemplates(list);
+      const def = list.find((t) => t.isDefault) || list[0];
+      if (def && !editingEventId) {
+        setSelectedGreetingTemplateId(def.id);
+        setSelectedGreetingTemplateUrl(def.imageUrl || '');
       }
     });
   }, [editingEventId]);
@@ -125,6 +159,24 @@ export default function EventsList() {
     setEInviteFooterText('ATAS KEHADIRAN DAN DOA RESTUNYA');
     setEInviteMode('full');
     setIsQuickUploadingTemplate(false);
+    const defGreetTpl = greetingTemplates.find((t) => t.isDefault) || greetingTemplates[0] || DEFAULT_GREETING_TEMPLATES[0];
+    setSelectedGreetingTemplateId(defGreetTpl.id);
+    setSelectedGreetingTemplateUrl(defGreetTpl.imageUrl || '');
+    setGreetingCouplePhotoUrl('');
+    setGreetingUseThumbnailFallback(true);
+    setGreetingAutoRemoveBg(true);
+    setGreetingHeaderText('DI ACARA PERNIKAHAN');
+    setGreetingGroomName('');
+    setGreetingBrideName('');
+    setGreetingWelcomeSubtext('BAPAK/IBU');
+    setGreetingTimeText('10.00 WIB');
+    setGreetingVenueTitle('');
+    setGreetingVenueSubtitle('');
+    setGreetingFooterText('Terima kasih atas kehadiran dan doa restunya.');
+    setGreetingShowLogo(true);
+    setGreetingShowFooterStrip(true);
+    setGreetingPreviewMode('welcome');
+    setIsQuickUploadingGreetingTemplate(false);
     setSeatingTables([]);
     setNewTableName('');
     setNewTableZone('VIP');
@@ -213,11 +265,27 @@ export default function EventsList() {
     setSelectedEInviteTemplateId(event.eInviteTemplateId || defTpl.id);
     setSelectedEInviteTemplateUrl(event.eInviteTemplateUrl || '');
     setEInviteHeaderText(event.eInviteHeaderText || 'THE WEDDING OF');
-    const parsedCouple = splitCoupleNames(event.coupleName, event.eInviteGroomName, event.eInviteBrideName, event.title);
-    setEInviteGroomName(event.eInviteGroomName || parsedCouple.groom || '');
-    setEInviteBrideName(event.eInviteBrideName || parsedCouple.bride || '');
-    setEInviteVenueName(event.eInviteVenueName || '');
-    setEInviteVenueAddress(event.eInviteVenueAddress || '');
+    const parsedCouple = splitCoupleNames(
+      event.coupleName,
+      event.eInviteGroomName || event.greetingGroomName,
+      event.eInviteBrideName || event.greetingBrideName,
+      event.title
+    );
+    const unifiedCouple =
+      event.coupleName ||
+      (parsedCouple.groom && parsedCouple.bride
+        ? `${parsedCouple.groom} & ${parsedCouple.bride}`
+        : '');
+    setNewEventCoupleName(unifiedCouple);
+    const unifiedVenueName =
+      event.location || event.eInviteVenueName || event.greetingVenueTitle || '';
+    setNewEventLocation(unifiedVenueName);
+    const unifiedVenueAddress =
+      event.eInviteVenueAddress || event.greetingVenueSubtitle || '';
+    setEInviteGroomName(parsedCouple.groom || '');
+    setEInviteBrideName(parsedCouple.bride || '');
+    setEInviteVenueName(unifiedVenueName);
+    setEInviteVenueAddress(unifiedVenueAddress);
     setEInviteMapsUrl(event.eInviteMapsUrl || event.mapsUrl || '');
     setEInviteGreetingText(
       event.eInviteGreetingText ||
@@ -226,6 +294,32 @@ export default function EventsList() {
     setEInviteFooterText(event.eInviteFooterText || 'ATAS KEHADIRAN DAN DOA RESTUNYA');
     setEInviteMode(event.eInviteMode || 'full');
     setIsQuickUploadingTemplate(false);
+    const defGreetTpl = greetingTemplates.find((t) => t.isDefault) || greetingTemplates[0] || DEFAULT_GREETING_TEMPLATES[0];
+    setSelectedGreetingTemplateId(event.greetingTemplateId || defGreetTpl.id);
+    setSelectedGreetingTemplateUrl(event.greetingTemplateUrl || '');
+    setGreetingCouplePhotoUrl(event.greetingCouplePhotoUrl || '');
+    setGreetingUseThumbnailFallback(event.greetingUseThumbnailFallback !== false);
+    setGreetingAutoRemoveBg(event.greetingAutoRemoveBg !== false);
+    setGreetingHeaderText(
+      event.greetingHeaderText && event.greetingHeaderText !== 'WELCOME TO THE WEDDING OF'
+        ? event.greetingHeaderText
+        : 'DI ACARA PERNIKAHAN'
+    );
+    setGreetingGroomName(parsedCouple.groom || '');
+    setGreetingBrideName(parsedCouple.bride || '');
+    setGreetingWelcomeSubtext(
+      event.greetingWelcomeSubtext && event.greetingWelcomeSubtext !== 'Selamat Datang, Bapak/Ibu/Saudara/i:'
+        ? event.greetingWelcomeSubtext
+        : 'BAPAK/IBU'
+    );
+    setGreetingTimeText(event.time || event.greetingTimeText || '10.00 WIB');
+    setGreetingVenueTitle(unifiedVenueName);
+    setGreetingVenueSubtitle(unifiedVenueAddress);
+    setGreetingFooterText(event.greetingFooterText || 'Terima kasih atas kehadiran dan doa restunya.');
+    setGreetingShowLogo(true);
+    setGreetingShowFooterStrip(event.greetingShowFooterStrip !== false);
+    setGreetingPreviewMode('welcome');
+    setIsQuickUploadingGreetingTemplate(false);
     setSeatingTables(Array.isArray(event.seatingTables) ? event.seatingTables : []);
     setNewTableName('');
     setNewTableZone('VIP');
@@ -496,19 +590,51 @@ export default function EventsList() {
       if (sessions && sessions.length > 0) payload.sessions = sessions;
       else if (editingEventId) payload.sessions = deleteField();
 
-      // Save E-Invitation Settings
+      // Master Data from Info Acara (Single Source of Truth for E-Invitation & Layar Sapa)
+      const parsedMasterCouple = splitCoupleNames(newEventCoupleName, '', '', newEventTitle);
+      const masterGroom = parsedMasterCouple.groom || '';
+      const masterBride = parsedMasterCouple.bride || '';
+      const masterVenueName = newEventLocation.trim();
+      const masterVenueAddress = eInviteVenueAddress.trim();
+      const masterMapsUrl = eInviteMapsUrl.trim();
+      const rawTimeTrimmed = newEventTime.trim();
+      const masterGreetingTime = rawTimeTrimmed
+        ? /wib|wita|wit/i.test(rawTimeTrimmed)
+          ? rawTimeTrimmed
+          : `${rawTimeTrimmed.replace(':', '.')} WIB`
+        : '10.00 WIB';
+
+      // Save E-Invitation Settings (Synced with Info Acara)
       payload.eInviteTemplateId = selectedEInviteTemplateId || 'default-blush-arch';
       payload.eInviteTemplateUrl = selectedEInviteTemplateUrl || '';
       payload.eInviteHeaderText = eInviteHeaderText.trim() || 'THE WEDDING OF';
-      payload.eInviteGroomName = eInviteGroomName.trim();
-      payload.eInviteBrideName = eInviteBrideName.trim();
-      payload.eInviteVenueName = eInviteVenueName.trim();
-      payload.eInviteVenueAddress = eInviteVenueAddress.trim();
-      payload.eInviteMapsUrl = eInviteMapsUrl.trim();
-      payload.mapsUrl = eInviteMapsUrl.trim();
+      payload.eInviteGroomName = masterGroom;
+      payload.eInviteBrideName = masterBride;
+      payload.eInviteVenueName = masterVenueName;
+      payload.eInviteVenueAddress = masterVenueAddress;
+      payload.eInviteMapsUrl = masterMapsUrl;
+      payload.mapsUrl = masterMapsUrl;
       payload.eInviteGreetingText = eInviteGreetingText.trim();
       payload.eInviteFooterText = eInviteFooterText.trim();
       payload.eInviteMode = eInviteMode;
+
+      // Save Layar Sapa (Greeting Screen) Settings (Synced with Info Acara)
+      payload.greetingTemplateId = selectedGreetingTemplateId || 'default-blush-stage';
+      payload.greetingTemplateUrl = selectedGreetingTemplateUrl || '';
+      payload.greetingCouplePhotoUrl = greetingCouplePhotoUrl.trim();
+      payload.greetingUseThumbnailFallback = greetingUseThumbnailFallback;
+      payload.greetingAutoRemoveBg = greetingAutoRemoveBg;
+      payload.greetingHeaderText = greetingHeaderText.trim() || 'DI ACARA PERNIKAHAN';
+      payload.greetingGroomName = masterGroom;
+      payload.greetingBrideName = masterBride;
+      payload.greetingWelcomeSubtext = greetingWelcomeSubtext.trim() || 'BAPAK/IBU';
+      payload.greetingTimeText = masterGreetingTime;
+      payload.greetingVenueTitle = masterVenueName;
+      payload.greetingVenueSubtitle = masterVenueAddress;
+      payload.greetingFooterText = greetingFooterText.trim() || 'Terima kasih atas kehadiran dan doa restunya.';
+      payload.greetingShowLogo = true;
+      payload.greetingShowFooterStrip = greetingShowFooterStrip;
+
       payload.seatingTables = seatingTables;
       payload.enableSeatingManagement = seatingTables.length > 0;
 
@@ -851,9 +977,10 @@ export default function EventsList() {
                   navigate(`/auth/login/events/${editingEventId}/edit`, { replace: true });
                 }
               }}
-              className={`${activeTab === 'frame' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors cursor-pointer`}
+              className={`${activeTab === 'frame' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-3 px-1 border-b-2 font-semibold text-sm transition-colors flex items-center gap-1.5 cursor-pointer`}
             >
-              Frame Layar
+              <Monitor className="w-4 h-4 text-indigo-600" />
+              <span>Layar Sapa</span>
             </button>
             <button
               type="button"
@@ -914,6 +1041,13 @@ export default function EventsList() {
         <div className="space-y-6">
           {activeTab === 'info' && (
             <div className="space-y-4">
+              <div className="bg-indigo-50/70 border border-indigo-100 rounded-xl px-4 py-3 flex items-start gap-2.5">
+                <Sparkles className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-indigo-950 leading-relaxed">
+                  <strong>Pusat Data Utama Acara:</strong> Seluruh data yang diisi di sini (<em>Nama Mempelai</em>, <em>Tanggal &amp; Jam</em>, <em>Nama Gedung</em>, <em>Alamat Venue</em>, <em>Link Google Maps</em>, serta <em>Foto Mempelai</em>) otomatis digunakan bersama oleh <strong>Layar Sapa</strong>, <strong>E-Invitation</strong>, <strong>WhatsApp</strong>, dan <strong>Halaman RSVP</strong> tanpa perlu input berulang.
+                </p>
+              </div>
+
               {appUser?.role !== 'client' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Client *</label>
@@ -925,14 +1059,28 @@ export default function EventsList() {
                   </select>
                 </div>
               )}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nama Acara *</label>
-                <input required value={newEventTitle} onChange={e => setNewEventTitle(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: Resepsi Pernikahan John & Jane" />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Nama Acara *</label>
+                  <input required value={newEventTitle} onChange={e => setNewEventTitle(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: The Wedding Of Iklas Dan Yunis" />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-medium text-gray-700">Nama Mempelai (Pria &amp; Wanita)</label>
+                    {(newEventCoupleName.trim() || newEventTitle.trim()) && (() => {
+                      const parsed = splitCoupleNames(newEventCoupleName, '', '', newEventTitle);
+                      return parsed.groom && parsed.bride ? (
+                        <span className="text-[11px] font-semibold text-indigo-600">
+                          {parsed.groom} &amp; {parsed.bride}
+                        </span>
+                      ) : null;
+                    })()}
+                  </div>
+                  <input value={newEventCoupleName} onChange={e => setNewEventCoupleName(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: Iklas & Yunis (atau Iklas dan Yunis)" />
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nama Mempelai</label>
-                <input value={newEventCoupleName} onChange={e => setNewEventCoupleName(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: Romeo & Juliet" />
-              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Tanggal Acara *</label>
@@ -943,19 +1091,63 @@ export default function EventsList() {
                   <input value={newEventTime} onChange={e => setNewEventTime(e.target.value)} type="time" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" />
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Lokasi Acara</label>
-                <input value={newEventLocation} onChange={e => setNewEventLocation(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: Grand Ballroom Hotel XYZ" />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Nama Gedung / Lokasi Acara</label>
+                  <input value={newEventLocation} onChange={e => setNewEventLocation(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: Grand Ballroom / Gedung Graha Mulia" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Alamat Lengkap / Kota Venue</label>
+                  <input value={eInviteVenueAddress} onChange={e => setEInviteVenueAddress(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: Jl. Melati No. 25, Semarang" />
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Link Undangan Digital</label>
-                <input value={newEventDigitalInviteLink} onChange={e => setNewEventDigitalInviteLink(e.target.value)} type="url" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: https://undangan.com/john-jane" />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1.5">
+                    <MapPin className="w-4 h-4 text-rose-500" />
+                    <span>Link Google Maps Lokasi Acara</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="url"
+                      value={eInviteMapsUrl}
+                      onChange={(e) => setEInviteMapsUrl(e.target.value)}
+                      className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="Contoh: https://maps.app.goo.gl/..."
+                    />
+                    {eInviteMapsUrl.trim() && (
+                      <a
+                        href={
+                          /^https?:\/\//i.test(eInviteMapsUrl.trim())
+                            ? eInviteMapsUrl.trim()
+                            : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                                eInviteMapsUrl.trim()
+                              )}`
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-md shrink-0 transition-colors"
+                        title="Cek Link Maps"
+                      >
+                        <span>Cek Maps</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Link Undangan Digital (Opsional)</label>
+                  <input value={newEventDigitalInviteLink} onChange={e => setNewEventDigitalInviteLink(e.target.value)} type="url" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: https://undangan.com/iklas-yunis" />
+                </div>
               </div>
+
               <div className="border border-gray-200 rounded-lg p-4 bg-gray-50/60 space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="block text-sm font-medium text-gray-800 flex items-center gap-1.5">
                     <ImageIcon className="w-4 h-4 text-indigo-600" />
-                    <span>Thumbnail WA / Foto Mempelai (Opsional)</span>
+                    <span>Thumbnail WA / Foto Mempelai Utama (Opsional)</span>
                   </label>
                   {newEventThumbnail && (
                     <button
@@ -968,7 +1160,7 @@ export default function EventsList() {
                   )}
                 </div>
                 <p className="text-xs text-gray-500">
-                  Gambar ini akan muncul sebagai <strong>thumbnail preview link WhatsApp</strong> dan <strong>foto utama di halaman tiket/undangan RSVP</strong> (menggantikan logo default Guestly).
+                  Cukup unggah <strong>1 foto mempelai</strong> di sini untuk otomatis digunakan pada <strong>Preview Link WhatsApp</strong>, <strong>Foto Kartu E-Invitation</strong>, dan <strong>Foto Mempelai Layar Sapa</strong> (dengan Auto Remove BG).
                 </p>
 
                 <MediaUploader
@@ -1061,7 +1253,7 @@ export default function EventsList() {
                       1. Pilih Template Kartu E-Invitation
                     </h4>
                     <p className="text-xs text-slate-500">
-                      Desain diambil dari katalog Cloudflare R2 (<code className="text-indigo-600">guestly-storage/E-Invitation/</code>).
+                      Pilih desain template undangan digital dari katalog sistem atau sesuaikan dengan tema acara Anda.
                     </p>
                   </div>
                   {appUser?.role === 'superadmin' && (
@@ -1088,7 +1280,7 @@ export default function EventsList() {
                 {appUser?.role === 'superadmin' && isQuickUploadingTemplate && (
                   <div className="p-3.5 bg-white border border-indigo-200 rounded-xl space-y-3">
                     <div className="text-xs font-bold text-indigo-900">
-                      Upload Cepat Template ke <code className="font-mono">guestly-storage/E-Invitation/</code>
+                      Upload Cepat Template E-Invitation Baru
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -1202,7 +1394,7 @@ export default function EventsList() {
                             style={{ backgroundColor: tpl.footerColor || '#C27D7A' }}
                           />
                           <span className="text-[10px] text-slate-400 ml-auto">
-                            {tpl.imageUrl ? 'Cloudflare R2' : 'Built-in'}
+                            {tpl.imageUrl ? 'Katalog Kustom' : 'Bawaan'}
                           </span>
                         </div>
                       </button>
@@ -1213,13 +1405,23 @@ export default function EventsList() {
 
               {/* Dynamic Variables Form */}
               <div className="space-y-4 border border-slate-200 rounded-xl p-4 sm:p-5 bg-white shadow-2xs">
-                <div className="border-b border-slate-100 pb-2.5">
-                  <h4 className="text-sm font-bold text-slate-900">
-                    2. Data Dinamis Kartu E-Invitation
-                  </h4>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Sesuaikan informasi mempelai, lokasi gedung, tautan Google Maps, serta teks undangan pada kartu.
-                  </p>
+                <div className="border-b border-slate-100 pb-2.5 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      2. Pengaturan Teks &amp; Mode Kartu E-Invitation
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Data mempelai, tanggal, jam, lokasi gedung, alamat, link Google Maps, dan foto diambil otomatis dari <strong>Tab Info Acara</strong>.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('info')}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors cursor-pointer shrink-0"
+                  >
+                    <Edit className="w-3.5 h-3.5" />
+                    <span>Ubah Data di Info Acara</span>
+                  </button>
                 </div>
 
                 {/* Row 1: Judul Atas Kartu & Mode Tampilan */}
@@ -1258,128 +1460,7 @@ export default function EventsList() {
                   </div>
                 </div>
 
-                {/* Row 2: Mempelai Pria & Mempelai Wanita */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-xs font-semibold text-slate-700">
-                        Nama Mempelai Pria
-                      </label>
-                      <code className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">
-                        {'{{GROOM_NAME}}'}
-                      </code>
-                    </div>
-                    <input
-                      type="text"
-                      value={eInviteGroomName}
-                      onChange={(e) => setEInviteGroomName(e.target.value)}
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="Contoh: Laras"
-                    />
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-xs font-semibold text-slate-700">
-                        Nama Mempelai Wanita
-                      </label>
-                      <code className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">
-                        {'{{BRIDE_NAME}}'}
-                      </code>
-                    </div>
-                    <input
-                      type="text"
-                      value={eInviteBrideName}
-                      onChange={(e) => setEInviteBrideName(e.target.value)}
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="Contoh: Huda"
-                    />
-                  </div>
-                </div>
-
-                {/* Row 3: Nama Gedung/Venue & Alamat Venue */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-xs font-semibold text-slate-700">
-                        Nama Gedung / Venue
-                      </label>
-                      <code className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">
-                        {'{{VENUE_NAME}}'}
-                      </code>
-                    </div>
-                    <input
-                      type="text"
-                      value={eInviteVenueName}
-                      onChange={(e) => setEInviteVenueName(e.target.value)}
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder={newEventLocation || 'Contoh: Gedung Graha Pusennif'}
-                    />
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-xs font-semibold text-slate-700">
-                        Alamat Lengkap Venue
-                      </label>
-                      <code className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">
-                        {'{{VENUE_ADDRESS}}'}
-                      </code>
-                    </div>
-                    <input
-                      type="text"
-                      value={eInviteVenueAddress}
-                      onChange={(e) => setEInviteVenueAddress(e.target.value)}
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="Contoh: Jl. Melati No. 25, Semarang"
-                    />
-                  </div>
-                </div>
-
-                {/* Row 4: Field Maps (Google Maps Link) */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-rose-500" />
-                      <span>Link Google Maps Lokasi Acara</span>
-                    </label>
-                    <code className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">
-                      {'{{MAPS_URL}}'}
-                    </code>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="url"
-                      value={eInviteMapsUrl}
-                      onChange={(e) => setEInviteMapsUrl(e.target.value)}
-                      className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="Contoh: https://maps.app.goo.gl/... atau https://www.google.com/maps/..."
-                    />
-                    {eInviteMapsUrl.trim() && (
-                      <a
-                        href={
-                          /^https?:\/\//i.test(eInviteMapsUrl.trim())
-                            ? eInviteMapsUrl.trim()
-                            : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                                eInviteMapsUrl.trim()
-                              )}`
-                        }
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg shrink-0 transition-colors"
-                        title="Cek Link Maps"
-                      >
-                        <span>Cek Maps</span>
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Digunakan pada tombol <strong>Buka Google Maps</strong> di halaman undangan tamu. Jika dikosongkan, sistem otomatis mengarahkan ke pencarian Nama &amp; Alamat Venue.
-                  </p>
-                </div>
-
-                {/* Row 5: Kalimat Undangan & Teks Penutup Footer */}
+                {/* Row 2: Kalimat Undangan & Teks Penutup Footer */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
@@ -1419,10 +1500,10 @@ export default function EventsList() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-slate-600">
-                    Pratinjau Langsung Kartu E-Invitation
+                    3. Pratinjau Langsung Kartu E-Invitation (16:9)
                   </span>
                   <span className="text-[11px] text-slate-400">
-                    Foto mempelai diambil dari Thumbnail WA / Foto Mempelai di Tab Info Acara
+                    Tersinkronisasi otomatis dengan Tab Info Acara
                   </span>
                 </div>
                 <EInvitationCard
@@ -1440,10 +1521,8 @@ export default function EventsList() {
                     eInviteTemplateId: selectedEInviteTemplateId,
                     eInviteTemplateUrl: selectedEInviteTemplateUrl,
                     eInviteHeaderText,
-                    eInviteGroomName,
-                    eInviteBrideName,
-                    eInviteVenueName,
-                    eInviteVenueAddress,
+                    eInviteVenueName: newEventLocation || undefined,
+                    eInviteVenueAddress: eInviteVenueAddress || undefined,
                     eInviteMapsUrl,
                     eInviteGreetingText,
                     eInviteFooterText,
@@ -1459,33 +1538,469 @@ export default function EventsList() {
           )}
 
           {activeTab === 'frame' && (
-            <div className="space-y-4">
-              <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg text-sm text-blue-800">
-                Gunakan format <strong>PNG transparan</strong> dengan resolusi <strong>1920x1080</strong> untuk hasil terbaik pada layar sapa (overlay).
+            <div className="space-y-5">
+              {/* 1. Template & Background Selection */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      1. Pilih Template / Background Layar Sapa
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      Pilih desain template dari katalog Layar Sapa. Memiliki background kosongan bawaan yang otomatis menyesuaikan jika background diisi.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {editingEventId && (
+                      <a
+                        href={`/events/${editingEventId}/greeting`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors"
+                      >
+                        <Monitor className="w-3.5 h-3.5" />
+                        <span>Buka Layar Sapa</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                    {appUser?.role === 'superadmin' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setIsQuickUploadingGreetingTemplate(!isQuickUploadingGreetingTemplate)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Upload Template Baru</span>
+                        </button>
+                        <Link
+                          to="/auth/login/admin/greeting-templates"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors"
+                        >
+                          <span>Kelola Katalog</span>
+                        </Link>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Quick Upload Form for Super Admin */}
+                {appUser?.role === 'superadmin' && isQuickUploadingGreetingTemplate && (
+                  <div className="p-3.5 bg-white border border-indigo-200 rounded-xl space-y-3">
+                    <div className="text-xs font-bold text-indigo-900">
+                      Upload Cepat Template Layar Sapa Baru
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Nama Template Layar Sapa *
+                      </label>
+                      <input
+                        type="text"
+                        value={quickGreetingTemplateName}
+                        onChange={(e) => setQuickGreetingTemplateName(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-xs"
+                        placeholder="Contoh: Layar Sapa - Blush Stage Arch"
+                      />
+                    </div>
+                    <MediaUploader
+                      category="Layar Sapa"
+                      maxSize={15 * 1024 * 1024}
+                      allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
+                      defaultValue={quickGreetingTemplateUrl || undefined}
+                      onUploadSuccess={(data) => {
+                        setQuickGreetingTemplateUrl(data.url);
+                        setQuickGreetingTemplateKey(data.key);
+                      }}
+                      onUploadError={(err) => showAlert('Gagal Upload', err, 'error')}
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsQuickUploadingGreetingTemplate(false)}
+                        className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!quickGreetingTemplateName.trim() || !quickGreetingTemplateUrl.trim()) {
+                            showAlert('Peringatan', 'Nama dan file gambar template Layar Sapa wajib diisi.', 'warning');
+                            return;
+                          }
+                          const newTpl: GreetingScreenTemplate = {
+                            id: `greet-${Date.now().toString(36)}`,
+                            name: quickGreetingTemplateName.trim(),
+                            imageUrl: quickGreetingTemplateUrl.trim(),
+                            r2Key: quickGreetingTemplateKey || undefined,
+                            primaryColor: '#153B31',
+                            accentColor: '#C98583',
+                            guestBoxBg: '#F4E3E1',
+                            footerColor: '#C27D7A',
+                            showFooterStrip: true,
+                            isDefault: false,
+                            createdAt: new Date().toISOString(),
+                          };
+                          const updated = [...greetingTemplates, newTpl];
+                          await greetingTemplateService.saveTemplates(updated);
+                          setGreetingTemplates(updated);
+                          setSelectedGreetingTemplateId(newTpl.id);
+                          setSelectedGreetingTemplateUrl(newTpl.imageUrl);
+                          setQuickGreetingTemplateName('');
+                          setQuickGreetingTemplateUrl('');
+                          setQuickGreetingTemplateKey('');
+                          setIsQuickUploadingGreetingTemplate(false);
+                          showAlert('Berhasil', 'Template Layar Sapa baru berhasil ditambahkan ke katalog!', 'success');
+                        }}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Simpan &amp; Gunakan Template</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Template Selector Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {greetingTemplates.map((tpl) => {
+                    const isSelected = selectedGreetingTemplateId === tpl.id;
+                    return (
+                      <button
+                        key={tpl.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedGreetingTemplateId(tpl.id);
+                          setSelectedGreetingTemplateUrl(tpl.imageUrl || '');
+                        }}
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-white border-indigo-600 ring-2 ring-indigo-500/20 shadow-xs'
+                            : 'bg-white/70 border-slate-200 hover:bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="text-xs font-bold text-slate-800 truncate">
+                            {tpl.name}
+                          </span>
+                          {isSelected && (
+                            <span className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                              <Check className="w-2.5 h-2.5" />
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-2">
+                          <span
+                            className="w-3 h-3 rounded-full border border-gray-300"
+                            style={{ backgroundColor: tpl.primaryColor || '#153B31' }}
+                          />
+                          <span
+                            className="w-3 h-3 rounded-full border border-gray-300"
+                            style={{ backgroundColor: tpl.accentColor || '#C98583' }}
+                          />
+                          <span
+                            className="w-3 h-3 rounded-full border border-gray-300"
+                            style={{ backgroundColor: tpl.footerColor || '#C27D7A' }}
+                          />
+                          <span className="text-[10px] text-slate-400 ml-auto">
+                            {tpl.imageUrl ? 'Katalog Kustom' : 'Background Kosongan'}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom Background & Couple Photo Upload / Override per Event */}
+                <div className="pt-3 border-t border-slate-200/80 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-bold text-slate-800">
+                          Foto Mempelai Sisi Kiri (Opsional — Otomatis Remove BG)
+                        </span>
+                        <p className="text-[11px] text-slate-500">
+                          Jika dikosongkan, otomatis menggunakan <strong>Fallback Thumbnail Acara</strong> dengan fitur <strong>Auto Remove BG</strong> (atau foto bawaan jika Thumbnail belum diisi).
+                        </p>
+                      </div>
+                      {greetingCouplePhotoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setGreetingCouplePhotoUrl('')}
+                          className="text-[11px] font-semibold text-rose-600 hover:text-rose-700 cursor-pointer shrink-0"
+                        >
+                          Reset ke Fallback Thumbnail
+                        </button>
+                      )}
+                    </div>
+
+                    <MediaUploader
+                      category="Layar Sapa"
+                      maxSize={10 * 1024 * 1024}
+                      allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
+                      defaultValue={greetingCouplePhotoUrl || undefined}
+                      onUploadSuccess={(data) => setGreetingCouplePhotoUrl(data.url)}
+                      onUploadError={(err) => showAlert('Gagal Upload', err, 'error')}
+                    />
+
+                    <div className="pt-1.5 space-y-1.5">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={greetingUseThumbnailFallback}
+                          onChange={(e) => setGreetingUseThumbnailFallback(e.target.checked)}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-[11px] font-semibold text-slate-700">
+                          Gunakan Fallback Thumbnail Acara jika Foto Mempelai tidak ditambahkan
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={greetingAutoRemoveBg}
+                          onChange={(e) => setGreetingAutoRemoveBg(e.target.checked)}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-[11px] font-semibold text-slate-700">
+                          Otomatis Remove Background (Auto Remove BG) pada Foto Mempelai / Thumbnail
+                        </span>
+                      </label>
+                      {!greetingCouplePhotoUrl && greetingUseThumbnailFallback && newEventThumbnail && (
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50 border border-emerald-200 text-[11px] font-medium text-emerald-800">
+                          <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Aktif menggunakan Thumbnail Acara + Auto Remove BG</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-bold text-slate-800">
+                          Background Penuh 16:9 Khusus Acara (Opsional)
+                        </span>
+                        <p className="text-[11px] text-slate-500">
+                          Unggah gambar latar khusus acara (16:9). Kosongkan untuk memakai background + foto mempelai dari template di atas.
+                        </p>
+                      </div>
+                      {newEventFrame && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewEventFrame('');
+                            setSelectedGreetingTemplateUrl('');
+                          }}
+                          className="text-[11px] font-semibold text-rose-600 hover:text-rose-700 cursor-pointer shrink-0"
+                        >
+                          Reset Background
+                        </button>
+                      )}
+                    </div>
+
+                    <MediaUploader
+                      category="Layar Sapa"
+                      maxSize={15 * 1024 * 1024}
+                      allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
+                      defaultValue={newEventFrame || undefined}
+                      onUploadSuccess={(data) => {
+                        setNewEventFrame(data.url);
+                        setSelectedGreetingTemplateUrl(data.url);
+                      }}
+                      onUploadError={(err) => showAlert('Gagal Upload', err, 'error')}
+                    />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Link Frame Overlay (Opsional)</label>
-                <div className="mt-1 flex rounded-md shadow-sm">
-                  <input
-                    type="url"
-                    value={newEventFrame}
-                    onChange={e => setNewEventFrame(e.target.value)}
-                    className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-l-md border border-gray-300 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                    placeholder="Contoh: https://contoh.com/frame.png"
-                  />
+
+              {/* 2. Pengaturan Teks Sapaan & Tampilan Layar Sapa */}
+              <div className="space-y-4 border border-slate-200 rounded-xl p-4 sm:p-5 bg-white shadow-2xs">
+                <div className="border-b border-slate-100 pb-2.5 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      2. Pengaturan Teks Sapaan &amp; Pita Bawah Layar Sapa
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Nama mempelai, tanggal, jam acara, nama gedung, alamat/kota, dan foto mempelai diambil otomatis dari <strong>Tab Info Acara</strong>.
+                    </p>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => setNewEventFrame('')}
-                    className="inline-flex items-center px-3 py-2 border border-l-0 border-gray-300 rounded-r-md bg-gray-50 text-gray-500 hover:bg-gray-100 text-sm font-medium"
+                    onClick={() => setActiveTab('info')}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors cursor-pointer shrink-0"
                   >
-                    Hapus
+                    <Edit className="w-3.5 h-3.5" />
+                    <span>Ubah Data di Info Acara</span>
                   </button>
                 </div>
-                {newEventFrame && (
-                   <div className="mt-2 text-xs text-green-600 truncate">
-                      Frame diset
-                   </div>
-                )}
+
+                {/* Row 1: Salutation & Event Subheader */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Sapaan di Atas Kotak Nama Tamu
+                      </label>
+                      <span className="text-[10px] font-mono text-slate-400">Salutation</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={greetingWelcomeSubtext}
+                      onChange={(e) => setGreetingWelcomeSubtext(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="BAPAK/IBU"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Teks di Atas Nama Mempelai
+                      </label>
+                      <span className="text-[10px] font-mono text-slate-400">Sub-Header</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={greetingHeaderText}
+                      onChange={(e) => setGreetingHeaderText(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="DI ACARA PERNIKAHAN"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 2: Teks Pita Bawah & Toggle Opsi */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-center">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Teks Ucapan Pita Bawah
+                      </label>
+                      <span className="text-[10px] font-mono text-slate-400">Footer</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={greetingFooterText}
+                      onChange={(e) => setGreetingFooterText(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="Terima kasih atas kehadiran dan doa restunya."
+                    />
+                  </div>
+
+                  <div className="space-y-2 pt-1 sm:pt-5">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={greetingShowFooterStrip}
+                        onChange={(e) => setGreetingShowFooterStrip(e.target.checked)}
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-xs font-semibold text-slate-700">
+                        Tampilkan Ucapan Terima Kasih di Pita Bawah
+                      </span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-not-allowed">
+                      <input
+                        type="checkbox"
+                        checked={true}
+                        disabled
+                        readOnly
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-not-allowed"
+                      />
+                      <span className="text-xs font-semibold text-slate-700">
+                        Tampilkan Badge Logo Guestly di Bagian Atas
+                      </span>
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        Wajib
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Live Preview Layar Sapa (16:9) */}
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                    3. Pratinjau Langsung Layar Sapa (16:9)
+                  </span>
+                  <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => setGreetingPreviewMode('welcome')}
+                      className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+                        greetingPreviewMode === 'welcome'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Saat Tamu Check-In
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGreetingPreviewMode('standby')}
+                      className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+                        greetingPreviewMode === 'standby'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Mode Standby
+                    </button>
+                  </div>
+                </div>
+
+                <GreetingScreenCanvas
+                  template={
+                    greetingTemplates.find((t) => t.id === selectedGreetingTemplateId) ||
+                    DEFAULT_GREETING_TEMPLATES[0]
+                  }
+                  mode={greetingPreviewMode}
+                  event={{
+                    title: newEventTitle || 'The Wedding Of Fredi & Lony',
+                    coupleName: newEventCoupleName || 'Fredi & Lony',
+                    date: newEventDate || '2026-10-11',
+                    time: newEventTime || undefined,
+                    location: newEventLocation || 'Gedung Graha Mulia',
+                    thumbnailUrl: newEventThumbnail || undefined,
+                    frameOverlayUrl: newEventFrame || undefined,
+                    greetingTemplateId: selectedGreetingTemplateId,
+                    greetingTemplateUrl: selectedGreetingTemplateUrl || newEventFrame || undefined,
+                    greetingCouplePhotoUrl: greetingCouplePhotoUrl || undefined,
+                    greetingUseThumbnailFallback,
+                    greetingAutoRemoveBg,
+                    greetingHeaderText,
+                    greetingWelcomeSubtext,
+                    greetingTimeText: newEventTime
+                      ? `${newEventTime.replace(':', '.')} WIB`
+                      : '10.00 WIB',
+                    greetingVenueTitle: newEventLocation || 'Gedung Graha Mulia',
+                    greetingVenueSubtitle: eInviteVenueAddress || 'Semarang, Jawa Tengah',
+                    eInviteVenueAddress: eInviteVenueAddress || undefined,
+                    greetingFooterText,
+                    greetingShowLogo: true,
+                    greetingShowFooterStrip,
+                  }}
+                  guest={{
+                    name: greetingPreviewGuestName || 'Iklas Padli',
+                    ticketCode: 'GUEST123456',
+                  }}
+                />
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <label className="text-[11px] font-semibold text-slate-600">
+                    Uji Panjang Nama Tamu (Otomatis Menyesuaikan Kotak):
+                  </label>
+                  <div className="flex items-center gap-1.5 flex-1 max-w-sm">
+                    <input
+                      type="text"
+                      value={greetingPreviewGuestName}
+                      onChange={(e) => setGreetingPreviewGuestName(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-2.5 py-1 text-xs bg-white"
+                      placeholder="Ketik nama tamu untuk tes batas kotak..."
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           )}

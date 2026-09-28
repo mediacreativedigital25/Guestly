@@ -16,13 +16,15 @@ import {
   EyeOff,
   Search,
   Filter,
-  UserCheck
+  UserCheck,
+  Monitor,
+  Radio
 } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { Modal } from '../components/Modal';
 import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
-import { getRoleLabel, canUserAccessEvent, getUserBusinessId, shouldHideServiceInfo, isPartnerBusinessRegistered } from '../lib/utils';
+import { getRoleLabel, canUserAccessEvent, getUserBusinessId, shouldHideServiceInfo, isPartnerBusinessRegistered, isGreetingScreenUser } from '../lib/utils';
 
 export default function UsersList() {
   const [users, setUsers] = useState<User[]>([]);
@@ -127,9 +129,9 @@ export default function UsersList() {
     if (!appUser) return false;
     if (appUser.role === 'superadmin') return true;
 
-    // Owner / Partner can only manage Admin, Staff, and Client within their business
+    // Owner / Partner can only manage Admin, Staff, Layar Sapa, and Client within their business
     if (appUser.role === 'owner' || appUser.role === 'partner') {
-      if (!['admin', 'staff', 'client'].includes(target.role)) return false;
+      if (!['admin', 'staff', 'greeting', 'client'].includes(target.role)) return false;
       const targetBiz = target.partnerId;
       if (targetBiz && currentUserBizId && targetBiz !== currentUserBizId && targetBiz !== appUser.id) {
         return false;
@@ -137,9 +139,9 @@ export default function UsersList() {
       return true;
     }
 
-    // Admin can only manage Staff within their business
+    // Admin can only manage Staff & Layar Sapa within their business
     if (appUser.role === 'admin') {
-      if (target.role !== 'staff') return false;
+      if (target.role !== 'staff' && target.role !== 'greeting') return false;
       const targetBiz = target.partnerId;
       if (targetBiz && currentUserBizId && targetBiz !== currentUserBizId) {
         return false;
@@ -158,6 +160,7 @@ export default function UsersList() {
         { value: 'owner' as Role, label: 'Owner (Pemilik Bisnis / WO)' },
         { value: 'admin' as Role, label: 'Admin Operasional (Back-Office WO)' },
         { value: 'staff' as Role, label: 'Staff Lapangan (Scan Kehadiran / Souvenir)' },
+        { value: 'greeting' as Role, label: 'Layar Sapa (Display TV / Monitor Sambutan)' },
         { value: 'client' as Role, label: 'Client (Pemilik Acara / Mempelai)' },
         { value: 'partner' as Role, label: 'Partner (Vendor White-label)' },
         { value: 'superadmin' as Role, label: 'Super Admin (Pengelola Platform)' },
@@ -167,12 +170,14 @@ export default function UsersList() {
       return [
         { value: 'admin' as Role, label: 'Admin Operasional (Tim Back-Office)' },
         { value: 'staff' as Role, label: 'Staff Lapangan (Scan Kehadiran / Souvenir)' },
+        { value: 'greeting' as Role, label: 'Layar Sapa (Display TV / Monitor Sambutan)' },
         { value: 'client' as Role, label: 'Client (Pemilik Acara / Mempelai)' },
       ];
     }
     if (appUser.role === 'admin') {
       return [
         { value: 'staff' as Role, label: 'Staff Lapangan (Scan Kehadiran / Souvenir)' },
+        { value: 'greeting' as Role, label: 'Layar Sapa (Display TV / Monitor Sambutan)' },
       ];
     }
     return [];
@@ -211,7 +216,7 @@ export default function UsersList() {
             if (myBizId) {
               return u.partnerId === myBizId || u.id === myBizId || u.createdBy === appUser.id;
             }
-            return u.role === 'staff' || u.role === 'admin';
+            return u.role === 'staff' || u.role === 'greeting' || u.role === 'admin';
           });
         }
 
@@ -272,8 +277,17 @@ export default function UsersList() {
   const toggleEventSelection = (
     eventId: string,
     list: string[],
-    setList: React.Dispatch<React.SetStateAction<string[]>>
+    setList: React.Dispatch<React.SetStateAction<string[]>>,
+    singleSelect = false
   ) => {
+    if (singleSelect) {
+      if (list.includes(eventId) && list.length === 1) {
+        setList([]);
+      } else {
+        setList([eventId]);
+      }
+      return;
+    }
     if (list.includes(eventId)) {
       setList(list.filter(id => id !== eventId));
     } else {
@@ -351,9 +365,18 @@ export default function UsersList() {
     setEditUserBusinessCity(user.businessCity || '');
     setEditUserPartnerId(user.partnerId || (user.role === 'owner' || user.role === 'partner' ? user.id || '' : ''));
     setEditUserLogoUrl(user.logoUrl || '');
-    setEditUserRole(user.role);
-    setEditUserStaffType(user.staffType || 'checkin');
-    setEditUserAssignedEvents(Array.isArray(user.assignedEventIds) ? user.assignedEventIds : []);
+    const resolvedEditRole: Role =
+      user.role === 'staff' && user.staffType === 'greeting' ? 'greeting' : user.role;
+    setEditUserRole(resolvedEditRole);
+    setEditUserStaffType(
+      resolvedEditRole === 'greeting' ? 'greeting' : (user.staffType || 'checkin')
+    );
+    const existingAssigned = Array.isArray(user.assignedEventIds) ? user.assignedEventIds : [];
+    setEditUserAssignedEvents(
+      resolvedEditRole === 'greeting' || resolvedEditRole === 'staff'
+        ? existingAssigned.slice(0, 1)
+        : existingAssigned
+    );
     setEditUserClientCredit(user.clientCredit !== undefined ? user.clientCredit : (user.clientQuota || 0));
     setEditUserEventCredit(user.eventCredit !== undefined ? user.eventCredit : (user.eventQuota || 0));
     setEditUserAllowManualEvent(Boolean(user.allowManualEvent ?? user.eventManual));
@@ -391,13 +414,20 @@ export default function UsersList() {
     setError('');
 
     try {
+      const effectiveEditRole: Role =
+        editUserRole === 'staff' && editUserStaffType === 'greeting' ? 'greeting' : editUserRole;
+
       const allowedValues = allowedRoleOptions.map(o => o.value);
-      if (!allowedValues.includes(editUserRole)) {
+      if (!allowedValues.includes(effectiveEditRole)) {
         throw new Error('Anda tidak memiliki izin untuk menetapkan role tersebut.');
       }
 
-      if (editUserRole === 'staff' && editUserAssignedEvents.length === 0) {
-        throw new Error('Petugas Staff wajib ditugaskan minimal ke 1 acara agar dapat membuka Scanner/Souvenir.');
+      if (effectiveEditRole === 'greeting' && editUserAssignedEvents.length !== 1) {
+        throw new Error('Akun Layar Sapa wajib ditugaskan tepat pada 1 acara (1 User = 1 Acara) agar dapat langsung masuk ke Layar Sapa.');
+      }
+
+      if (effectiveEditRole === 'staff' && editUserAssignedEvents.length !== 1) {
+        throw new Error('Petugas Staff wajib ditugaskan tepat pada 1 acara (1 User = 1 Acara).');
       }
 
       // Determine business association & clean up stale role attributes
@@ -405,7 +435,7 @@ export default function UsersList() {
       let resolvedPartnerId: string | null = editUserPartnerId || null;
       let resolvedBizName: string | null = editUserBusinessName?.trim() || null;
 
-      if (editUserRole === 'superadmin') {
+      if (effectiveEditRole === 'superadmin') {
         resolvedPartnerId = null;
         resolvedBizName = null;
       } else if (appUser.role === 'owner' || appUser.role === 'partner') {
@@ -415,7 +445,7 @@ export default function UsersList() {
         resolvedPartnerId = appUser.partnerId || null;
         resolvedBizName = appUser.businessName || null;
       } else if (appUser.role === 'superadmin') {
-        if (editUserRole === 'owner' || editUserRole === 'partner') {
+        if (effectiveEditRole === 'owner' || effectiveEditRole === 'partner') {
           resolvedPartnerId = editingUserId;
           resolvedBizName = editUserBusinessName?.trim() || editUserName.trim();
         } else {
@@ -435,23 +465,36 @@ export default function UsersList() {
       }
 
       const forceHideServices =
-        editUserRole === 'superadmin'
+        effectiveEditRole === 'superadmin'
           ? false
-          : editUserRole === 'staff' ||
-            editUserRole === 'admin' ||
-            (editUserRole === 'client' && Boolean(resolvedPartnerId)) ||
+          : effectiveEditRole === 'staff' ||
+            effectiveEditRole === 'greeting' ||
+            effectiveEditRole === 'admin' ||
+            (effectiveEditRole === 'client' && Boolean(resolvedPartnerId)) ||
             editUserHideServiceInfo;
 
-      const isBusinessRole = editUserRole === 'owner' || editUserRole === 'partner';
+      const isBusinessRole = effectiveEditRole === 'owner' || effectiveEditRole === 'partner';
+
+      const normalizedAssignedEvents =
+        effectiveEditRole === 'greeting' || effectiveEditRole === 'staff'
+          ? editUserAssignedEvents.slice(0, 1)
+          : effectiveEditRole === 'admin'
+          ? editUserAssignedEvents
+          : [];
 
       const updateData: Record<string, any> = {
         name: editUserName.trim(),
         phone: editUserPhone.trim(),
-        role: editUserRole,
-        staffType: editUserRole === 'staff' ? editUserStaffType : null,
-        assignedEventIds: editUserRole === 'staff' || editUserRole === 'admin' ? editUserAssignedEvents : [],
+        role: effectiveEditRole,
+        staffType:
+          effectiveEditRole === 'staff'
+            ? editUserStaffType
+            : effectiveEditRole === 'greeting'
+            ? 'greeting'
+            : null,
+        assignedEventIds: normalizedAssignedEvents,
         partnerId: resolvedPartnerId,
-        clientId: editUserRole === 'client' ? (existingTargetUser?.clientId || editingUserId) : null,
+        clientId: effectiveEditRole === 'client' ? (existingTargetUser?.clientId || editingUserId) : null,
         businessName: resolvedBizName,
         businessAddress: isBusinessRole ? editUserBusinessAddress.trim() : null,
         businessCity: isBusinessRole ? editUserBusinessCity.trim() : null,
@@ -509,8 +552,11 @@ export default function UsersList() {
     setError('');
 
     try {
+      const effectiveNewRole: Role =
+        newUserRole === 'staff' && newUserStaffType === 'greeting' ? 'greeting' : newUserRole;
+
       const allowedValues = allowedRoleOptions.map(o => o.value);
-      if (!allowedValues.includes(newUserRole)) {
+      if (!allowedValues.includes(effectiveNewRole)) {
         throw new Error('Anda tidak memiliki izin untuk membuat user dengan role tersebut.');
       }
 
@@ -518,8 +564,12 @@ export default function UsersList() {
         throw new Error('Password minimal 6 karakter.');
       }
 
-      if (newUserRole === 'staff' && newUserAssignedEvents.length === 0) {
-        throw new Error('Silakan centang minimal 1 Acara yang ditugaskan untuk petugas Staff ini.');
+      if (effectiveNewRole === 'greeting' && newUserAssignedEvents.length !== 1) {
+        throw new Error('Silakan pilih tepat 1 Acara untuk akun Layar Sapa ini (1 User = 1 Acara).');
+      }
+
+      if (effectiveNewRole === 'staff' && newUserAssignedEvents.length !== 1) {
+        throw new Error('Silakan pilih tepat 1 Acara yang ditugaskan untuk petugas Staff ini (1 User = 1 Acara).');
       }
 
       // 1. Create User in Auth via REST API
@@ -536,7 +586,7 @@ export default function UsersList() {
         resolvedPartnerId = appUser.partnerId || null;
         resolvedBusinessName = appUser.businessName || undefined;
       } else if (appUser.role === 'superadmin') {
-        if (newUserRole === 'owner' || newUserRole === 'partner') {
+        if (effectiveNewRole === 'owner' || effectiveNewRole === 'partner') {
           resolvedPartnerId = uid;
           resolvedBusinessName = newUserBusinessName?.trim() || newUserName.trim();
         } else if (newUserPartnerId) {
@@ -548,25 +598,38 @@ export default function UsersList() {
       }
 
       const forceHideServices =
-        newUserRole === 'staff' ||
-        newUserRole === 'admin' ||
-        (newUserRole === 'client' && Boolean(resolvedPartnerId)) ||
+        effectiveNewRole === 'staff' ||
+        effectiveNewRole === 'greeting' ||
+        effectiveNewRole === 'admin' ||
+        (effectiveNewRole === 'client' && Boolean(resolvedPartnerId)) ||
         newUserHideServiceInfo;
+
+      const normalizedNewAssignedEvents =
+        effectiveNewRole === 'greeting' || effectiveNewRole === 'staff'
+          ? newUserAssignedEvents.slice(0, 1)
+          : effectiveNewRole === 'admin'
+          ? newUserAssignedEvents
+          : [];
 
       // 3. Add user document
       const newUserDoc: User = {
         name: newUserName.trim(),
         email: newUserEmail.trim(),
         phone: newUserPhone.trim(),
-        role: newUserRole,
-        staffType: newUserRole === 'staff' ? newUserStaffType : undefined,
-        assignedEventIds: newUserRole === 'staff' || newUserRole === 'admin' ? newUserAssignedEvents : [],
+        role: effectiveNewRole,
+        staffType:
+          effectiveNewRole === 'staff'
+            ? newUserStaffType
+            : effectiveNewRole === 'greeting'
+            ? 'greeting'
+            : undefined,
+        assignedEventIds: normalizedNewAssignedEvents,
         partnerId: resolvedPartnerId,
         businessName: resolvedBusinessName,
-        businessAddress: (newUserRole === 'owner' || newUserRole === 'partner') ? newUserBusinessAddress.trim() : undefined,
-        businessCity: (newUserRole === 'owner' || newUserRole === 'partner') ? newUserBusinessCity.trim() : undefined,
-        clientId: newUserRole === 'client' ? (newUserClientId || uid) : null,
-        logoUrl: newUserRole === 'partner' || newUserRole === 'owner' ? newUserLogoUrl : undefined,
+        businessAddress: (effectiveNewRole === 'owner' || effectiveNewRole === 'partner') ? newUserBusinessAddress.trim() : undefined,
+        businessCity: (effectiveNewRole === 'owner' || effectiveNewRole === 'partner') ? newUserBusinessCity.trim() : undefined,
+        clientId: effectiveNewRole === 'client' ? (newUserClientId || uid) : null,
+        logoUrl: effectiveNewRole === 'partner' || effectiveNewRole === 'owner' ? newUserLogoUrl : undefined,
         clientCredit: appUser.role === 'superadmin' ? (Number(newUserClientCredit) || 0) : 0,
         clientQuota: appUser.role === 'superadmin' ? (Number(newUserClientCredit) || 0) : 0,
         eventCredit: appUser.role === 'superadmin' ? (Number(newUserEventCredit) || 0) : 0,
@@ -588,8 +651,17 @@ export default function UsersList() {
       if (newUserPhone) {
         import('../lib/fonnte').then(({ sendFonnteMessage }) => {
           const loginUrl = `${window.location.origin}/auth/login`;
-          const roleLabel = getRoleLabel(newUserRole, newUserRole === 'staff' ? newUserStaffType : undefined);
+          const roleLabel = getRoleLabel(effectiveNewRole, effectiveNewRole === 'staff' ? newUserStaffType : undefined);
           const bizInfo = resolvedBusinessName ? `\n🏢 *Bisnis / WO* : ${resolvedBusinessName}` : '';
+          const assignedEventTitle =
+            normalizedNewAssignedEvents.length > 0
+              ? events.find(ev => ev.id === normalizedNewAssignedEvents[0])?.title
+              : undefined;
+          const eventInfo = assignedEventTitle ? `\n📅 *Acara Ditugaskan* : ${assignedEventTitle}` : '';
+          const autoRedirectNote =
+            effectiveNewRole === 'greeting'
+              ? `\n📺 *Akses Langsung* : Saat login, Anda akan otomatis masuk langsung ke layar monitor Layar Sapa TV acara tanpa melalui Dashboard.`
+              : '';
           const message = `🔐 *Informasi Akun Guestly*
 
 Halo Kak *${newUserName}*,
@@ -598,8 +670,8 @@ Akun Anda telah terdaftar di sistem Guestly sebagai *${roleLabel}*. Berikut info
 
 📧 *Email* : ${newUserEmail}
 🔑 *Password* : ${newUserPassword}
-👤 *Role* : ${roleLabel}${bizInfo}
-🌐 *Login* : ${loginUrl}
+👤 *Role* : ${roleLabel}${bizInfo}${eventInfo}
+🌐 *Login* : ${loginUrl}${autoRedirectNote}
 
 Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada pihak lain.`;
           sendFonnteMessage(null, newUserPhone, message);
@@ -654,33 +726,70 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
       ? events.filter(ev => !ev.partnerId || ev.partnerId === 'default-partner' || ev.partnerId === targetPartnerId)
       : events;
     const displayEvents = scopedEvents.length > 0 ? scopedEvents : events;
+    const isSingleEventRole = role === 'greeting' || role === 'staff';
 
     return (
-      <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200 space-y-3">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-bold uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
-            <CalendarDays className="w-4 h-4 text-emerald-600" />
-            Penugasan Acara ({selectedIds.length} dipilih)
+      <div
+        className={`p-4 rounded-xl border space-y-3 ${
+          role === 'greeting'
+            ? 'bg-rose-50/60 border-rose-200'
+            : 'bg-emerald-50/60 border-emerald-200'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <label
+            className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${
+              role === 'greeting' ? 'text-rose-900' : 'text-emerald-900'
+            }`}
+          >
+            <CalendarDays
+              className={`w-4 h-4 ${role === 'greeting' ? 'text-rose-600' : 'text-emerald-600'}`}
+            />
+            {isSingleEventRole
+              ? `Penugasan Acara (${selectedIds.length > 0 ? '1 Acara Dipilih' : 'Belum Dipilih'})`
+              : `Penugasan Acara (${selectedIds.length} dipilih)`}
           </label>
-          {displayEvents.length > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                if (selectedIds.length === displayEvents.length) setSelectedIds([]);
-                else setSelectedIds(displayEvents.map(e => e.id!));
-              }}
-              className="text-xs font-medium text-emerald-700 hover:text-emerald-900 underline"
+          {isSingleEventRole ? (
+            <span
+              className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                role === 'greeting'
+                  ? 'bg-rose-100 text-rose-800 border-rose-300'
+                  : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+              }`}
             >
-              {selectedIds.length === displayEvents.length ? 'Batal Pilih Semua' : 'Pilih Semua Acara'}
-            </button>
+              1 User = 1 Acara
+            </span>
+          ) : (
+            displayEvents.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedIds.length === displayEvents.length) setSelectedIds([]);
+                  else setSelectedIds(displayEvents.map(e => e.id!));
+                }}
+                className="text-xs font-medium text-emerald-700 hover:text-emerald-900 underline"
+              >
+                {selectedIds.length === displayEvents.length ? 'Batal Pilih Semua' : 'Pilih Semua Acara'}
+              </button>
+            )
           )}
         </div>
-        <p className="text-xs text-emerald-800 leading-relaxed">
-          {role === 'staff'
-            ? 'Wajib: Petugas Staff hanya bisa membuka dan melakukan scan pada acara yang dicentang di bawah ini (acara lain otomatis disembunyikan & tidak bisa Create Event).'
+        <p
+          className={`text-xs leading-relaxed ${
+            role === 'greeting' ? 'text-rose-800' : 'text-emerald-800'
+          }`}
+        >
+          {role === 'greeting'
+            ? 'Wajib (1 User = 1 Acara): Pilih tepat 1 acara untuk akun Layar Sapa ini. Saat login, akun ini akan otomatis masuk langsung ke layar monitor Layar Sapa TV tanpa melalui Dashboard. Jika ada beberapa acara bersamaan, silakan buat akun baru.'
+            : role === 'staff'
+            ? 'Wajib (1 User = 1 Acara): Pilih 1 acara yang ditugaskan untuk petugas Staff ini. Jika terdapat beberapa acara dalam waktu bersamaan, silakan buat akun petugas baru untuk masing-masing acara.'
             : 'Opsional untuk Admin: Centang acara tertentu jika ingin membatasi Admin hanya pada acara tersebut, atau biarkan kosong untuk akses semua acara di bisnisnya.'}
         </p>
-        <div className="max-h-44 overflow-y-auto space-y-1.5 bg-white p-2.5 rounded-lg border border-emerald-100">
+        <div
+          className={`max-h-44 overflow-y-auto space-y-1.5 bg-white p-2.5 rounded-lg border ${
+            role === 'greeting' ? 'border-rose-100' : 'border-emerald-100'
+          }`}
+        >
           {displayEvents.length === 0 ? (
             <p className="text-xs text-gray-400 text-center py-3">Belum ada acara yang tersedia.</p>
           ) : (
@@ -689,15 +798,31 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
               return (
                 <div
                   key={ev.id}
-                  onClick={() => toggleEventSelection(ev.id!, selectedIds, setSelectedIds)}
+                  onClick={() =>
+                    toggleEventSelection(ev.id!, selectedIds, setSelectedIds, isSingleEventRole)
+                  }
                   className={`flex items-center justify-between p-2 rounded-lg border cursor-pointer transition-colors ${
                     checked
-                      ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                      ? role === 'greeting'
+                        ? 'bg-rose-50 border-rose-300 text-rose-950'
+                        : 'bg-emerald-50 border-emerald-300 text-emerald-950'
                       : 'bg-gray-50/60 border-gray-100 text-gray-700 hover:bg-gray-100'
                   }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
-                    {checked ? (
+                    {isSingleEventRole ? (
+                      <div
+                        className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                          checked
+                            ? role === 'greeting'
+                              ? 'border-rose-600 bg-rose-600'
+                              : 'border-emerald-600 bg-emerald-600'
+                            : 'border-gray-400 bg-white'
+                        }`}
+                      >
+                        {checked && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
+                    ) : checked ? (
                       <CheckSquare className="w-4 h-4 text-emerald-600 shrink-0" />
                     ) : (
                       <Square className="w-4 h-4 text-gray-400 shrink-0" />
@@ -792,6 +917,7 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
               {appUser?.role !== 'admin' && <option value="owner">Owner (Bisnis)</option>}
               <option value="admin">Admin Operasional</option>
               <option value="staff">Staff Lapangan</option>
+              <option value="greeting">Layar Sapa (Display TV)</option>
               {appUser?.role !== 'admin' && <option value="client">Client</option>}
             </select>
           </div>
@@ -830,7 +956,19 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
               onChange={e => {
                 const selectedRole = e.target.value as Role;
                 setNewUserRole(selectedRole);
-                if (selectedRole === 'staff' || selectedRole === 'admin' || selectedRole === 'client') {
+                if (selectedRole === 'greeting') {
+                  setNewUserStaffType('greeting');
+                  setNewUserAssignedEvents(prev => prev.slice(0, 1));
+                } else if (selectedRole === 'staff') {
+                  if (newUserStaffType === 'greeting') setNewUserStaffType('checkin');
+                  setNewUserAssignedEvents(prev => prev.slice(0, 1));
+                }
+                if (
+                  selectedRole === 'staff' ||
+                  selectedRole === 'greeting' ||
+                  selectedRole === 'admin' ||
+                  selectedRole === 'client'
+                ) {
                   setNewUserHideServiceInfo(true);
                 } else {
                   setNewUserHideServiceInfo(false);
@@ -900,9 +1038,12 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
             </div>
           )}
 
-          {/* Super Admin: Select which Business / Owner this Admin, Staff, or Client belongs to */}
+          {/* Super Admin: Select which Business / Owner this Admin, Staff, Layar Sapa, or Client belongs to */}
           {appUser?.role === 'superadmin' &&
-            (newUserRole === 'admin' || newUserRole === 'staff' || newUserRole === 'client') && (
+            (newUserRole === 'admin' ||
+              newUserRole === 'staff' ||
+              newUserRole === 'greeting' ||
+              newUserRole === 'client') && (
               <div className="bg-amber-50/70 p-3.5 rounded-xl border border-amber-200 space-y-2">
                 <label className="block text-xs font-bold uppercase tracking-wider text-amber-900 flex items-center gap-1.5">
                   <Building2 className="w-4 h-4 text-amber-600" />
@@ -948,7 +1089,11 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              {newUserRole === 'staff' ? 'Nama Lengkap / Nama Meja Petugas' : 'Nama Lengkap'}
+              {newUserRole === 'greeting'
+                ? 'Nama Perangkat / Operator Layar Sapa'
+                : newUserRole === 'staff'
+                ? 'Nama Lengkap / Nama Meja Petugas'
+                : 'Nama Lengkap'}
             </label>
             <input
               required
@@ -956,7 +1101,13 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
               onChange={e => setNewUserName(e.target.value)}
               type="text"
               className="w-full border border-gray-300 rounded-md px-3 py-2"
-              placeholder={newUserRole === 'staff' ? 'Contoh: Rina - Gate VIP 1' : 'Masukkan nama lengkap'}
+              placeholder={
+                newUserRole === 'greeting'
+                  ? 'Contoh: TV Layar Sapa - Ballroom Utama'
+                  : newUserRole === 'staff'
+                  ? 'Contoh: Rina - Gate VIP 1'
+                  : 'Masukkan nama lengkap'
+              }
             />
           </div>
 
@@ -1072,11 +1223,51 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                     </p>
                   </div>
                 </label>
+                <label
+                  className="flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors bg-white/60 border-gray-200 hover:border-rose-300"
+                >
+                  <input
+                    type="radio"
+                    name="newStaffType"
+                    checked={false}
+                    onChange={() => {
+                      setNewUserRole('greeting');
+                      setNewUserStaffType('greeting');
+                      setNewUserAssignedEvents(prev => prev.slice(0, 1));
+                    }}
+                    className="mt-1 text-rose-600"
+                  />
+                  <div>
+                    <div className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                      <Monitor className="w-3.5 h-3.5 text-rose-600" /> Layar Sapa (Display TV / Monitor Sambutan)
+                    </div>
+                    <p className="text-[11px] text-gray-500">
+                      Otomatis langsung masuk ke area Layar Sapa TV tanpa ke Dashboard (1 User = 1 Acara).
+                    </p>
+                  </div>
+                </label>
               </div>
             </div>
           )}
 
-          {(newUserRole === 'staff' || newUserRole === 'admin') &&
+          {newUserRole === 'greeting' && (
+            <div className="bg-rose-50/80 p-3.5 rounded-xl border border-rose-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-rose-900 flex items-center gap-1.5">
+                  <Monitor className="w-4 h-4 text-rose-600" />
+                  Mode Fokus Layar Sapa (Auto-Redirect TV)
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
+                  Tanpa Dashboard
+                </span>
+              </div>
+              <p className="text-xs text-rose-900 leading-relaxed">
+                Begitu akun ini login, sistem akan <strong>otomatis langsung membuka layar penuh Layar Sapa</strong> pada 1 acara yang dipilih di bawah ini tanpa masuk ke halaman Dashboard terlebih dahulu.
+              </p>
+            </div>
+          )}
+
+          {(newUserRole === 'staff' || newUserRole === 'greeting' || newUserRole === 'admin') &&
             renderEventAssignmentSelector(
               newUserAssignedEvents,
               setNewUserAssignedEvents,
@@ -1147,8 +1338,8 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
               <div>
                 <p className="text-xs font-semibold text-gray-800">Sembunyikan Modul "Informasi Layanan"</p>
                 <p className="text-[11px] text-gray-500">
-                  {newUserRole === 'staff' || newUserRole === 'admin'
-                    ? 'Otomatis disembunyikan untuk seluruh Staff dan Admin.'
+                  {newUserRole === 'staff' || newUserRole === 'greeting' || newUserRole === 'admin'
+                    ? 'Otomatis disembunyikan untuk seluruh Staff, Layar Sapa, dan Admin.'
                     : 'Menyembunyikan menu harga layanan, katalog paket & invoice dari sidebar user ini.'}
                 </p>
               </div>
@@ -1157,12 +1348,14 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
               type="checkbox"
               checked={
                 newUserRole === 'staff' ||
+                newUserRole === 'greeting' ||
                 newUserRole === 'admin' ||
                 (newUserRole === 'client' && Boolean(newUserPartnerId || appUser?.role !== 'superadmin')) ||
                 newUserHideServiceInfo
               }
               disabled={
                 newUserRole === 'staff' ||
+                newUserRole === 'greeting' ||
                 newUserRole === 'admin' ||
                 appUser?.role !== 'superadmin'
               }
@@ -1223,14 +1416,22 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                   setEditUserAssignedEvents([]);
                   setEditUserHideServiceInfo(false);
                 } else {
-                  // Transitioning to admin, staff, or client
+                  // Transitioning to admin, staff, greeting, or client
                   if (editUserPartnerId === editingUserId) {
                     setEditUserPartnerId('');
                     setEditUserBusinessName('');
                     setEditUserBusinessAddress('');
                     setEditUserBusinessCity('');
                   }
-                  if (nextRole === 'staff' || nextRole === 'admin') {
+                  if (nextRole === 'greeting') {
+                    setEditUserStaffType('greeting');
+                    setEditUserAssignedEvents(prev => prev.slice(0, 1));
+                    setEditUserHideServiceInfo(true);
+                  } else if (nextRole === 'staff') {
+                    if (editUserStaffType === 'greeting') setEditUserStaffType('checkin');
+                    setEditUserAssignedEvents(prev => prev.slice(0, 1));
+                    setEditUserHideServiceInfo(true);
+                  } else if (nextRole === 'admin') {
                     setEditUserHideServiceInfo(true);
                   } else if (nextRole === 'client') {
                     const nextPid = editUserPartnerId === editingUserId ? '' : editUserPartnerId;
@@ -1299,9 +1500,12 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
             </div>
           )}
 
-          {/* Super Admin: Assign Admin / Staff / Client to an Owner's Business */}
+          {/* Super Admin: Assign Admin / Staff / Layar Sapa / Client to an Owner's Business */}
           {appUser?.role === 'superadmin' &&
-            (editUserRole === 'admin' || editUserRole === 'staff' || editUserRole === 'client') && (
+            (editUserRole === 'admin' ||
+              editUserRole === 'staff' ||
+              editUserRole === 'greeting' ||
+              editUserRole === 'client') && (
               <div className="bg-amber-50/70 p-3.5 rounded-xl border border-amber-200 space-y-2">
                 <label className="block text-xs font-bold uppercase tracking-wider text-amber-900 flex items-center gap-1.5">
                   <Building2 className="w-4 h-4 text-amber-600" />
@@ -1359,17 +1563,44 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
               </label>
               <select
                 value={editUserStaffType}
-                onChange={e => setEditUserStaffType(e.target.value as StaffType)}
+                onChange={e => {
+                  const val = e.target.value as StaffType;
+                  if (val === 'greeting') {
+                    setEditUserRole('greeting');
+                    setEditUserStaffType('greeting');
+                    setEditUserAssignedEvents(prev => prev.slice(0, 1));
+                  } else {
+                    setEditUserStaffType(val);
+                  }
+                }}
                 className="w-full border border-indigo-300 rounded-lg px-3 py-2 bg-white text-sm font-semibold text-indigo-950"
               >
                 <option value="checkin">Staff Scan Kehadiran (Fokus Gate Masuk)</option>
                 <option value="souvenir">Staff Souvenir (Fokus Loket & Stok Souvenir)</option>
                 <option value="all">Staff All-in-One (Scan Kehadiran + Souvenir)</option>
+                <option value="greeting">Layar Sapa (Display TV - Otomatis Masuk Layar Sapa)</option>
               </select>
             </div>
           )}
 
-          {(editUserRole === 'staff' || editUserRole === 'admin') &&
+          {editUserRole === 'greeting' && (
+            <div className="bg-rose-50/80 p-3.5 rounded-xl border border-rose-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-rose-900 flex items-center gap-1.5">
+                  <Monitor className="w-4 h-4 text-rose-600" />
+                  Mode Fokus Layar Sapa (Auto-Redirect TV)
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
+                  Tanpa Dashboard
+                </span>
+              </div>
+              <p className="text-xs text-rose-900 leading-relaxed">
+                Akun ini akan <strong>otomatis masuk langsung ke tampilan Layar Sapa TV</strong> dari 1 acara yang ditugaskan begitu berhasil login tanpa melalui Dashboard.
+              </p>
+            </div>
+          )}
+
+          {(editUserRole === 'staff' || editUserRole === 'greeting' || editUserRole === 'admin') &&
             renderEventAssignmentSelector(
               editUserAssignedEvents,
               setEditUserAssignedEvents,
@@ -1440,12 +1671,14 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
               type="checkbox"
               checked={
                 editUserRole === 'staff' ||
+                editUserRole === 'greeting' ||
                 editUserRole === 'admin' ||
                 (editUserRole === 'client' && Boolean(editUserPartnerId)) ||
                 editUserHideServiceInfo
               }
               disabled={
                 editUserRole === 'staff' ||
+                editUserRole === 'greeting' ||
                 editUserRole === 'admin' ||
                 appUser?.role !== 'superadmin'
               }
@@ -1560,6 +1793,8 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                                 ? 'bg-amber-50 text-amber-800 border-amber-200'
                                 : user.role === 'admin'
                                 ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                : isGreetingScreenUser(user)
+                                ? 'bg-rose-50 text-rose-800 border-rose-200'
                                 : user.role === 'staff'
                                 ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                                 : user.role === 'partner'
@@ -1586,10 +1821,16 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                       </td>
 
                       <td className="px-5 py-4 text-sm text-gray-700">
-                        {user.role === 'staff' || user.role === 'admin' ? (
+                        {user.role === 'staff' || user.role === 'greeting' || user.role === 'admin' ? (
                           assignedNames.length > 0 ? (
                             <div className="space-y-1 max-w-xs">
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold border ${
+                                  isGreetingScreenUser(user)
+                                    ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                }`}
+                              >
                                 <CalendarDays className="w-3 h-3" /> {assignedNames.length} Acara Ditugaskan
                               </span>
                               <p className="text-xs text-gray-600 truncate" title={assignedNames.join(', ')}>
@@ -1621,7 +1862,11 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
 
                       <td className="px-5 py-4 whitespace-nowrap text-xs">
                         <div className="flex flex-col gap-1">
-                          {user.role === 'staff' || user.role === 'client' ? (
+                          {isGreetingScreenUser(user) ? (
+                            <span className="inline-flex items-center gap-1 w-fit px-2 py-0.5 rounded font-semibold bg-rose-50 text-rose-700 border border-rose-200 text-[11px]">
+                              <Monitor className="w-3 h-3" /> Auto-Masuk Layar Sapa (Tanpa Dashboard)
+                            </span>
+                          ) : user.role === 'staff' || user.role === 'client' ? (
                             <span className="inline-flex items-center w-fit px-2 py-0.5 rounded font-medium bg-gray-100 text-gray-700 border border-gray-200 text-[11px]">
                               Create Event: Terkunci
                             </span>
