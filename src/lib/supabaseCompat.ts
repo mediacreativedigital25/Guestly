@@ -656,6 +656,17 @@ export async function getDoc(docRef: DocRef): Promise<DocSnapshot> {
   }
 
   if (collectionName === 'settings') {
+    if (id === 'global') {
+      const [{ data: primary }, { data: legacy }] = await Promise.all([
+        supabase.from('settings').select('*').eq('id', 'global').maybeSingle(),
+        supabase.from('settings').select('*').eq('id', 'doc:settings:global').maybeSingle(),
+      ]);
+      if (primary?.data || legacy?.data) {
+        const merged = { ...(legacy?.data || {}), ...(primary?.data || {}) };
+        return new DocSnapshot(id, merged, docRef);
+      }
+      return new DocSnapshot(id, null, docRef);
+    }
     const { data } = await supabase.from('settings').select('*').eq('id', id).maybeSingle();
     if (data && data.data) {
       return new DocSnapshot(id, data.data, docRef);
@@ -983,15 +994,26 @@ export async function setDoc(docRef: DocRef, data: any, options?: { merge?: bool
       if (snap.exists()) existingData = snap.data();
     }
     const updatedData = applyFieldOperators(existingData, data, merge);
+    const nowIso = new Date().toISOString();
     const { error } = await supabase.from('settings').upsert(
       {
         id,
         data: updatedData,
-        updated_at: new Date().toISOString(),
+        updated_at: nowIso,
       },
       { onConflict: 'id' }
     );
     if (error) throw error;
+    if (id === 'global') {
+      await supabase.from('settings').upsert(
+        {
+          id: 'doc:settings:global',
+          data: { ...updatedData, id: 'global' },
+          updated_at: nowIso,
+        },
+        { onConflict: 'id' }
+      );
+    }
     notifyLocalListeners('settings', id);
     return;
   }

@@ -30,7 +30,7 @@ import {
   CheckCircle2,
   Monitor,
 } from 'lucide-react';
-import { cn, getRoleLabel, shouldHideServiceInfo, isGreetingScreenUser } from './lib/utils';
+import { cn, getRoleLabel, shouldHideServiceInfo, isGreetingScreenUser, canUserAccessEvent, getUserBusinessId } from './lib/utils';
 import { showConfirm } from './lib/alerts';
 import RouteBreadcrumbs from './components/RouteBreadcrumbs';
 import { auth, db } from './lib/firebase';
@@ -133,44 +133,188 @@ export default function AppLayout() {
   useEffect(() => {
     if (!appUser) {
       setNotifications([]);
+      setReadNotifIds([]);
       return;
     }
+    try {
+      const savedRead = localStorage.getItem(`guestly_read_notifs_${appUser.id || appUser.email}`);
+      setReadNotifIds(savedRead ? JSON.parse(savedRead) : []);
+    } catch {
+      setReadNotifIds([]);
+    }
+
     let isMounted = true;
     const loadNotifications = async () => {
       try {
         const items: TopbarNotification[] = [];
 
-        // 1. Check pending edit_requests / approvals
-        const reqSnap = await getDocs(query(collection(db, 'edit_requests'), where('status', '==', 'pending')));
-        const pendingReqs = reqSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-        const relevantReqs = pendingReqs.filter(r => {
-          if (appUser.role === 'superadmin') return true;
-          if (appUser.role === 'client') return r.requestedBy === appUser.id;
-          return true;
-        });
+        const isVendorRole = ['owner', 'partner', 'admin'].includes(appUser.role);
+        const [reqSnap, evSnap, usersSnap, clientsSnap] = await Promise.all([
+          getDocs(collection(db, 'guest_edit_requests')),
+          getDocs(collection(db, 'events')),
+          isVendorRole ? getDocs(collection(db, 'users')) : Promise.resolve(null),
+          isVendorRole ? getDocs(collection(db, 'clients')) : Promise.resolve(null),
+        ]);
 
-        if (relevantReqs.length > 0) {
-          items.push({
-            id: `approvals-${relevantReqs.length}`,
-            title: `${relevantReqs.length} Pengajuan Approval Menunggu`,
-            description:
-              appUser.role === 'client'
-                ? 'Pengajuan perubahan data tamu Anda sedang menunggu persetujuan.'
-                : 'Terdapat pengajuan data tamu yang memerlukan persetujuan Anda.',
-            timeLabel: 'Menunggu tindakan',
-            to: '/auth/login/approvals',
-            type: 'approval',
+        const myBizIds = new Set<string>(
+          [appUser.id, appUser.partnerId, getUserBusinessId(appUser)].filter(
+            (id): id is string => Boolean(id && id !== 'default-partner')
+          )
+        );
+        const myClientIds = new Set<string>();
+
+        if (isVendorRole) {
+          usersSnap?.docs.forEach(uDoc => {
+            const u = uDoc.data() as any;
+            if (
+              (u.partnerId && u.partnerId !== 'default-partner' && myBizIds.has(u.partnerId)) ||
+              (u.createdBy && myBizIds.has(u.createdBy)) ||
+              myBizIds.has(uDoc.id)
+            ) {
+              myBizIds.add(uDoc.id);
+              if (u.partnerId && u.partnerId !== 'default-partner') {
+                myBizIds.add(u.partnerId);
+              }
+            }
+          });
+
+          clientsSnap?.docs.forEach(cDoc => {
+            const c = cDoc.data() as any;
+            if (c.partnerId && c.partnerId !== 'default-partner' && myBizIds.has(c.partnerId)) {
+              myClientIds.add(cDoc.id);
+            }
           });
         }
 
-        // 2. Check upcoming published events within 7 days
-        const evSnap = await getDocs(collection(db, 'events'));
-        const now = new Date();
+        const allowedPartnerIds = Array.from(myBizIds);
+        const userPrimaryBizId = getUserBusinessId(appUser) || appUser.id || '';
+        const targetClientId = appUser.clientId || appUser.id || '';
+        const assignedEventIds = Array.isArray(appUser.assignedEventIds)
+          ? appUser.assignedEventIds
+          : Array.isArray((appUser as any).assignedEvents)
+          ? (appUser as any).assignedEvents
+          : [];
+
+        const allEventsMap = new Map<string, any>();
+        const accessibleEventIds = new Set<string>();
+
         evSnap.docs.forEach(docSnap => {
           const ev = docSnap.data() as any;
+          allEventsMap.set(docSnap.id, ev);
+
+          if (appUser.role === 'superadmin') {
+            accessibleEventIds.add(docSnap.id);
+            return;
+          }
+          if (appUser.role === 'client') {
+            if (
+              (targetClientId && ev.clientId === targetClientId) ||
+              assignedEventIds.includes(docSnap.id)
+            ) {
+              accessibleEventIds.add(docSnap.id);
+            }
+            return;
+          }
+          if (appUser.role === 'staff' || appUser.role === 'greeting') {
+            if (assignedEventIds.includes(docSnap.id)) {
+              accessibleEventIds.add(docSnap.id);
+            }
+            return;
+          }
+          if (isVendorRole) {
+            const rawPartnerId =
+              ev.partnerId && ev.partnerId !== 'default-partner' ? ev.partnerId : null;
+            const effectivePartnerId =
+              ev.clientId && myClientIds.has(ev.clientId) ? userPrimaryBizId : rawPartnerId;
+            if (canUserAccessEvent(appUser, docSnap.id, effectivePartnerId, allowedPartnerIds)) {
+              accessibleEventIds.add(docSnap.id);
+            }
+          }
+        });
+
+        // 1. Check guest_edit_requests (pending & resolved approvals)
+        const allReqs = reqSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+
+        if (appUser.role === 'client') {
+          const clientReqs = allReqs.filter(
+            r =>
+              (targetClientId && r.clientId === targetClientId) ||
+              (r.eventId && accessibleEventIds.has(r.eventId))
+          );
+          const approvedReqs = clientReqs.filter(r => r.status === 'approved');
+          const rejectedReqs = clientReqs.filter(r => r.status === 'rejected');
+          const pendingClientReqs = clientReqs.filter(r => r.status === 'pending');
+
+          if (approvedReqs.length > 0) {
+            const latest = approvedReqs[approvedReqs.length - 1];
+            const guestName = latest?.requestedData?.name || 'Tamu';
+            items.push({
+              id: `client-approved-${approvedReqs.length}-${latest?.id || ''}`,
+              title: `${approvedReqs.length} Pengajuan Data Tamu Disetujui ✅`,
+              description: `Pengajuan "${guestName}"${approvedReqs.length > 1 ? ` dan ${approvedReqs.length - 1} lainnya` : ''} telah disetujui.`,
+              timeLabel: 'Lihat Riwayat Approval',
+              to: '/auth/login/approvals?tab=history',
+              type: 'approval',
+            });
+          }
+
+          if (rejectedReqs.length > 0) {
+            const latest = rejectedReqs[rejectedReqs.length - 1];
+            const guestName = latest?.requestedData?.name || 'Tamu';
+            items.push({
+              id: `client-rejected-${rejectedReqs.length}-${latest?.id || ''}`,
+              title: `${rejectedReqs.length} Pengajuan Data Tamu Ditolak`,
+              description: `Pengajuan "${guestName}" tidak disetujui. Cek tab Riwayat untuk detailnya.`,
+              timeLabel: 'Lihat Riwayat Approval',
+              to: '/auth/login/approvals?tab=history',
+              type: 'approval',
+            });
+          }
+
+          if (pendingClientReqs.length > 0) {
+            items.push({
+              id: `approvals-pending-${pendingClientReqs.length}`,
+              title: `${pendingClientReqs.length} Pengajuan Menunggu Persetujuan`,
+              description: 'Pengajuan perubahan data tamu Anda sedang menunggu persetujuan.',
+              timeLabel: 'Menunggu tindakan',
+              to: '/auth/login/approvals',
+              type: 'approval',
+            });
+          }
+        } else if (appUser.role === 'superadmin' || isVendorRole) {
+          const pendingReqs = allReqs.filter(r => {
+            if (r.status !== 'pending') return false;
+            if (appUser.role === 'superadmin') return true;
+
+            if (r.eventId && allEventsMap.has(r.eventId)) {
+              return accessibleEventIds.has(r.eventId);
+            }
+
+            const rawReqPartnerId =
+              r.partnerId && r.partnerId !== 'default-partner' ? r.partnerId : null;
+            const effectivePartnerId =
+              r.clientId && myClientIds.has(r.clientId) ? userPrimaryBizId : rawReqPartnerId;
+            return canUserAccessEvent(appUser, r.eventId, effectivePartnerId, allowedPartnerIds);
+          });
+
+          if (pendingReqs.length > 0) {
+            items.push({
+              id: `approvals-${pendingReqs.length}`,
+              title: `${pendingReqs.length} Pengajuan Approval Menunggu`,
+              description: 'Terdapat pengajuan data tamu dari Client yang memerlukan persetujuan Anda.',
+              timeLabel: 'Menunggu tindakan',
+              to: '/auth/login/approvals',
+              type: 'approval',
+            });
+          }
+        }
+
+        // 2. Check upcoming published events within 7 days (strictly scoped to current user/vendor)
+        const now = new Date();
+        evSnap.docs.forEach(docSnap => {
+          if (!accessibleEventIds.has(docSnap.id)) return;
+          const ev = docSnap.data() as any;
           if (ev.status !== 'published' || !ev.date) return;
-          if (appUser.role === 'client' && ev.clientId !== (appUser.clientId || appUser.id)) return;
-          if (appUser.role === 'staff' && Array.isArray(appUser.assignedEvents) && !appUser.assignedEvents.includes(docSnap.id)) return;
 
           const evDate = new Date(ev.date);
           if (isNaN(evDate.getTime())) return;
@@ -218,8 +362,18 @@ export default function AppLayout() {
     };
 
     loadNotifications();
+
+    const handleCompatChange = (e: any) => {
+      const col = e.detail?.collectionName;
+      if (!col || col === 'guest_edit_requests' || col === 'events' || col === 'clients' || col === 'users') {
+        loadNotifications();
+      }
+    };
+    window.addEventListener('supabase-compat-change', handleCompatChange);
+
     return () => {
       isMounted = false;
+      window.removeEventListener('supabase-compat-change', handleCompatChange);
     };
   }, [appUser]);
 

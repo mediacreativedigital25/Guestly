@@ -3,8 +3,15 @@ export async function onRequestPost(context: any) {
     const { request, env } = context;
     const { target, message, url, token } = await request.json();
 
-    const fonnteToken = token || env.FONNTE_TOKEN;
-    if (!target || !message) {
+    const rawTarget = String(target || '').trim().replace(/[\s\-().]/g, '');
+    const normalizedTarget = rawTarget.startsWith('+62')
+      ? '0' + rawTarget.slice(3)
+      : rawTarget.startsWith('62') && rawTarget.length > 9
+      ? '0' + rawTarget.slice(2)
+      : rawTarget;
+
+    const fonnteToken = (token && String(token).trim()) || env.FONNTE_TOKEN;
+    if (!normalizedTarget || !message) {
       return new Response(JSON.stringify({ success: false, error: 'Target and message are required' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
@@ -12,14 +19,14 @@ export async function onRequestPost(context: any) {
     }
 
     if (!fonnteToken) {
-      return new Response(JSON.stringify({ success: false, error: 'Fonnte token is not configured' }), {
-        status: 400,
+      return new Response(JSON.stringify({ success: false, notConfigured: true, error: 'Token Fonnte belum diatur di menu Pengaturan > Token Fonnte.' }), {
+        status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
     const body = new URLSearchParams();
-    body.append('target', target);
+    body.append('target', normalizedTarget);
     body.append('message', message);
     body.append('countryCode', '62');
     if (url) {

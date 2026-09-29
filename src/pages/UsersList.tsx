@@ -648,21 +648,22 @@ export default function UsersList() {
       setUsers([{ id: uid, ...newUserDoc }, ...users]);
 
       // 4. Send WhatsApp Notification
+      let waResult: { success: boolean; error?: string } | null = null;
       if (newUserPhone) {
-        import('../lib/fonnte').then(({ sendFonnteMessage }) => {
-          const loginUrl = `${window.location.origin}/auth/login`;
-          const roleLabel = getRoleLabel(effectiveNewRole, effectiveNewRole === 'staff' ? newUserStaffType : undefined);
-          const bizInfo = resolvedBusinessName ? `\n🏢 *Bisnis / WO* : ${resolvedBusinessName}` : '';
-          const assignedEventTitle =
-            normalizedNewAssignedEvents.length > 0
-              ? events.find(ev => ev.id === normalizedNewAssignedEvents[0])?.title
-              : undefined;
-          const eventInfo = assignedEventTitle ? `\n📅 *Acara Ditugaskan* : ${assignedEventTitle}` : '';
-          const autoRedirectNote =
-            effectiveNewRole === 'greeting'
-              ? `\n📺 *Akses Langsung* : Saat login, Anda akan otomatis masuk langsung ke layar monitor Layar Sapa TV acara tanpa melalui Dashboard.`
-              : '';
-          const message = `🔐 *Informasi Akun Guestly*
+        const { sendFonnteMessage } = await import('../lib/fonnte');
+        const loginUrl = `${window.location.origin}/auth/login`;
+        const roleLabel = getRoleLabel(effectiveNewRole, effectiveNewRole === 'staff' ? newUserStaffType : undefined);
+        const bizInfo = resolvedBusinessName ? `\n🏢 *Bisnis / WO* : ${resolvedBusinessName}` : '';
+        const assignedEventTitle =
+          normalizedNewAssignedEvents.length > 0
+            ? events.find(ev => ev.id === normalizedNewAssignedEvents[0])?.title
+            : undefined;
+        const eventInfo = assignedEventTitle ? `\n📅 *Acara Ditugaskan* : ${assignedEventTitle}` : '';
+        const autoRedirectNote =
+          effectiveNewRole === 'greeting'
+            ? `\n📺 *Akses Langsung* : Saat login, Anda akan otomatis masuk langsung ke layar monitor Layar Sapa TV acara tanpa melalui Dashboard.`
+            : '';
+        const message = `🔐 *Informasi Akun Guestly*
 
 Halo Kak *${newUserName}*,
 
@@ -674,13 +675,24 @@ Akun Anda telah terdaftar di sistem Guestly sebagai *${roleLabel}*. Berikut info
 🌐 *Login* : ${loginUrl}${autoRedirectNote}
 
 Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada pihak lain.`;
-          sendFonnteMessage(null, newUserPhone, message);
-        });
+        waResult = await sendFonnteMessage(null, newUserPhone, message);
       }
 
       setIsAddingUser(false);
       navigate('/auth/login/users', { replace: true });
-      showAlert('Berhasil', 'User / Petugas berhasil ditambahkan!', 'success');
+      if (newUserPhone && waResult) {
+        if (waResult.success) {
+          showAlert('Berhasil', 'User / Petugas berhasil ditambahkan dan notifikasi akun telah dikirim ke WhatsApp!', 'success');
+        } else {
+          showAlert(
+            'User Dibuat (WA Belum Terkirim)',
+            `User berhasil ditambahkan, namun notifikasi WhatsApp gagal terkirim: ${waResult.error || 'Periksa pengaturan Token Fonnte.'}`,
+            'warning'
+          );
+        }
+      } else {
+        showAlert('Berhasil', 'User / Petugas berhasil ditambahkan!', 'success');
+      }
     } catch (err: any) {
       console.error('Error adding user:', err);
       setError(err.message || 'Gagal menambahkan user');

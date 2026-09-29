@@ -258,12 +258,16 @@ export interface GuestEditRequest {
   eventTitle: string;
   guestId: string;
   clientId: string;
+  clientName?: string;
+  clientPhone?: string;
+  requesterName?: string;
   partnerId?: string | null;
   originalData: Partial<Guest>;
   requestedData: Partial<Guest>;
   status: 'pending' | 'approved' | 'rejected';
   requestedAt: any;
   resolvedAt?: any;
+  resolvedBy?: string;
   type?: 'add' | 'edit' | 'delete';
 }
 

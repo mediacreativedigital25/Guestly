@@ -300,6 +300,8 @@ export default function ClientsList() {
       const matchedPartner = partners.find(p => p.id === partnerId);
       const resolvedBizName = matchedPartner?.name || appUser.businessName || undefined;
 
+      let waResult: { success: boolean; error?: string } | null = null;
+
       if (createAccount) {
          const uid = await createAuthUserSilently(newClientEmail.trim(), newClientPassword);
          const newUserDoc: User = {
@@ -335,9 +337,7 @@ Akun Client Anda telah berhasil dibuat di sistem *Guestly*. Berikut adalah infor
 
 Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada pihak lain. Terima kasih! 🙏`;
 
-           sendFonnteMessage(null, cleanedPhone, message).catch((err) => {
-             console.error('Failed to send WhatsApp notification via Fonnte:', err);
-           });
+           waResult = await sendFonnteMessage(null, cleanedPhone, message);
          }
       }
 
@@ -349,13 +349,23 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
       setNewClientPassword('');
       setIsAddingClient(false);
       navigate('/auth/login/clients', { replace: true });
-      showAlert(
-        'Berhasil',
-        createAccount && cleanedPhone
-          ? 'Client & Akun User berhasil dibuat! Notifikasi informasi akun telah dikirim ke WhatsApp Client.'
-          : 'Client berhasil ditambahkan!',
-        'success'
-      );
+      if (createAccount && cleanedPhone && waResult) {
+        if (waResult.success) {
+          showAlert(
+            'Berhasil',
+            'Client & Akun User berhasil dibuat! Notifikasi informasi akun telah dikirim ke WhatsApp Client.',
+            'success'
+          );
+        } else {
+          showAlert(
+            'Client Dibuat (WA Belum Terkirim)',
+            `Data Client & Akun User berhasil dibuat, namun notifikasi WhatsApp gagal terkirim: ${waResult.error || 'Periksa pengaturan Token Fonnte.'}`,
+            'warning'
+          );
+        }
+      } else {
+        showAlert('Berhasil', 'Client berhasil ditambahkan!', 'success');
+      }
     } catch (error: any) {
       console.error(error);
       setError(error.message || 'Terjadi kesalahan saat menambahkan client.');

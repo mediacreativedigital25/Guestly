@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { UploadCloud, Link as LinkIcon, MessageSquare, CreditCard, Image as ImageIcon, Building } from 'lucide-react';
+import { UploadCloud, Link as LinkIcon, MessageSquare, CreditCard, Image as ImageIcon, Building, Eye, EyeOff, Send, CheckCircle2, AlertCircle } from 'lucide-react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useSettings } from '../../SettingsContext';
 import { showAlert, showConfirm, showCancelAlert } from '../../lib/alerts';
 import AdminSalespageSettings from './AdminSalespageSettings';
 import { MediaUploader } from '../../components/media/MediaUploader';
+import { sendFonnteMessage } from '../../lib/fonnte';
 
 export default function AdminSettings() {
   const [activeTab, setActiveTab] = useState('branding');
@@ -13,6 +14,12 @@ export default function AdminSettings() {
 
   const [logoUrl, setLogoUrl] = useState(settings?.logoUrl || '');
   const [faviconUrl, setFaviconUrl] = useState(settings?.faviconUrl || '');
+  const [fonnteToken, setFonnteToken] = useState(settings?.fonnteToken || '');
+  const [showFonnteToken, setShowFonnteToken] = useState(false);
+  const [serverFonnteStatus, setServerFonnteStatus] = useState<{ configured: boolean; envConfigured: boolean; source: string } | null>(null);
+  const [testWaPhone, setTestWaPhone] = useState('');
+  const [isTestingWa, setIsTestingWa] = useState(false);
+
   const [templateOrderCreated, setTemplateOrderCreated] = useState(settings?.fonnteTemplates?.orderCreated || '');
   const [templateOrderPaid, setTemplateOrderPaid] = useState(settings?.fonnteTemplates?.orderPaid || '');
   const [templateOrderCancelled, setTemplateOrderCancelled] = useState(settings?.fonnteTemplates?.orderCancelled || '');
@@ -33,6 +40,7 @@ export default function AdminSettings() {
     if (settings) {
       setLogoUrl(settings.logoUrl || '');
       setFaviconUrl(settings.faviconUrl || '');
+      setFonnteToken(settings.fonnteToken || '');
       setTemplateOrderCreated(settings.fonnteTemplates?.orderCreated || '');
       setTemplateOrderPaid(settings.fonnteTemplates?.orderPaid || '');
       setTemplateOrderCancelled(settings.fonnteTemplates?.orderCancelled || '');
@@ -49,6 +57,42 @@ export default function AdminSettings() {
       }
     }
   }, [settings]);
+
+  useEffect(() => {
+    if (activeTab === 'fonnte') {
+      fetch('/api/fonnte-status')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data) setServerFonnteStatus(data);
+        })
+        .catch(() => {});
+    }
+  }, [activeTab, settings?.fonnteToken]);
+
+  const handleTestWhatsApp = async () => {
+    if (!testWaPhone.trim()) {
+      showAlert('Perhatian', 'Masukkan nomor WhatsApp tujuan untuk tes pengiriman.', 'warning');
+      return;
+    }
+    setIsTestingWa(true);
+    try {
+      const tokenToUse = fonnteToken.trim() || settings?.fonnteToken || null;
+      const res = await sendFonnteMessage(
+        tokenToUse,
+        testWaPhone.trim(),
+        `✅ *Tes Integrasi WhatsApp Guestly*\n\nSelamat! Koneksi API Token Fonnte Anda telah aktif dan siap digunakan untuk mengirim notifikasi otomatis.`
+      );
+      if (res.success) {
+        showAlert('Berhasil', `Pesan tes WhatsApp berhasil dikirim ke ${testWaPhone.trim()}!`, 'success');
+      } else {
+        showAlert('Gagal Mengirim WA', res.error || 'Gagal mengirim pesan WhatsApp. Pastikan Token Fonnte valid dan perangkat WhatsApp terhubung di dashboard Fonnte.', 'error');
+      }
+    } catch (err: any) {
+      showAlert('Gagal', err.message || 'Terjadi kesalahan saat mengetes pengiriman WhatsApp.', 'error');
+    } finally {
+      setIsTestingWa(false);
+    }
+  };
 
   const updateSP = (key: string, value: any) => {
     setSalespageData((prev: any) => ({ ...prev, [key]: value }));
@@ -72,13 +116,19 @@ export default function AdminSettings() {
       } else if (tab === 'fonnte') {
         await setDoc(globalSettingsRef, { 
           ...currentData, 
+          fonnteToken: fonnteToken.trim(),
           fonnteTemplates: {
             orderCreated: templateOrderCreated,
             orderPaid: templateOrderPaid,
             orderCancelled: templateOrderCancelled
           }
         }, { merge: true });
-        showAlert('Berhasil', 'Fonnte settings saved successfully!', 'success');
+        setServerFonnteStatus(prev => ({
+          configured: Boolean(fonnteToken.trim() || prev?.envConfigured),
+          envConfigured: Boolean(prev?.envConfigured),
+          source: prev?.envConfigured ? 'env' : (fonnteToken.trim() ? 'database' : 'none')
+        }));
+        showAlert('Berhasil', 'Pengaturan & Token Fonnte berhasil disimpan!', 'success');
       } else if (tab === 'payment_methods') {
         await setDoc(globalSettingsRef, { 
           ...currentData, 
@@ -212,14 +262,73 @@ export default function AdminSettings() {
           {activeTab === 'fonnte' && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-lg font-medium text-gray-900 flex items-center gap-2 mb-1">
-                  <MessageSquare className="w-5 h-5 text-indigo-500" /> Integrasi WhatsApp Fonnte (Beta)
-                </h2>
-                <p className="text-sm text-gray-500 mb-4">Template pengiriman pesan WhatsApp.</p>
-                <div className="space-y-4 max-w-3xl">
-                  <div className="bg-blue-50 border border-blue-200 text-blue-800 rounded-md p-4 mb-4">
-                    <p className="text-sm font-medium">Informasi Keamanan</p>
-                    <p className="text-sm mt-1">Demi keamanan maksimum, API Token Fonnte tidak lagi disimpan di database. Silakan atur token Anda melalui Environment Variable <code>FONNTE_TOKEN</code> di sisi server (\`.env\`).</p>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                  <h2 className="text-lg font-medium text-gray-900 flex items-center gap-2">
+                    <MessageSquare className="w-5 h-5 text-indigo-500" /> Integrasi WhatsApp Fonnte (Beta)
+                  </h2>
+                  {Boolean(fonnteToken.trim() || serverFonnteStatus?.configured) ? (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Token Terkonfigurasi
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                      <AlertCircle className="w-3.5 h-3.5" /> Token Belum Diisi
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-gray-500 mb-4">Konfigurasi API Token Fonnte dan template pengiriman pesan WhatsApp otomatis.</p>
+                <div className="space-y-5 max-w-3xl">
+                  <div className="p-4 border border-indigo-100 bg-indigo-50/40 rounded-lg space-y-3">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-900 mb-1">
+                        API Token Fonnte
+                      </label>
+                      <p className="text-xs text-gray-600 mb-2">
+                        Masukkan API Token dari dashboard <a href="https://md.fonnte.com" target="_blank" rel="noreferrer" className="text-indigo-600 underline font-medium">Fonnte</a> (menu Device &rarr; Token). Token ini digunakan untuk mengirim notifikasi akun Client/User baru, undangan tamu, dan invoice.
+                      </p>
+                      <div className="relative">
+                        <input
+                          type={showFonnteToken ? 'text' : 'password'}
+                          value={fonnteToken}
+                          onChange={e => setFonnteToken(e.target.value)}
+                          placeholder={serverFonnteStatus?.envConfigured ? 'Terkonfigurasi via Server ENV (Isi untuk mengganti)...' : 'Masukkan API Token Fonnte Anda...'}
+                          className="w-full border border-gray-300 rounded-md pl-3 pr-10 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowFonnteToken(!showFonnteToken)}
+                          className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                          title={showFonnteToken ? 'Sembunyikan Token' : 'Tampilkan Token'}
+                        >
+                          {showFonnteToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Test Send WhatsApp */}
+                    <div className="pt-3 border-t border-indigo-100">
+                      <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                        Uji Coba Kirim Pesan WhatsApp
+                      </label>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="tel"
+                          value={testWaPhone}
+                          onChange={e => setTestWaPhone(e.target.value)}
+                          placeholder="Nomor WA Tujuan (Contoh: 081234567890)"
+                          className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleTestWhatsApp}
+                          disabled={isTestingWa}
+                          className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 text-sm font-medium transition-colors disabled:opacity-50"
+                        >
+                          <Send className="w-4 h-4" />
+                          {isTestingWa ? 'Mengirim...' : 'Tes Kirim WA'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                   
                   <div className="pt-4 border-t border-gray-200">
@@ -267,6 +376,7 @@ export default function AdminSettings() {
                   disabled={isSaving}
                   onClick={() => {
                     if (settings) {
+                      setFonnteToken(settings.fonnteToken || '');
                       setTemplateOrderCreated(settings.fonnteTemplates?.orderCreated || '');
                       setTemplateOrderPaid(settings.fonnteTemplates?.orderPaid || '');
                       setTemplateOrderCancelled(settings.fonnteTemplates?.orderCancelled || '');

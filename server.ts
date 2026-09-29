@@ -50,12 +50,49 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 }
 });
 
+function normalizePhoneTarget(raw: string): string {
+  const cleaned = String(raw || '').trim().replace(/[\s\-().]/g, '');
+  if (!cleaned) return '';
+  if (cleaned.startsWith('+62')) return '0' + cleaned.slice(3);
+  if (cleaned.startsWith('62') && cleaned.length > 9) return '0' + cleaned.slice(2);
+  return cleaned;
+}
+
+async function resolveServerFonnteToken(customToken?: string | null): Promise<string> {
+  if (customToken && String(customToken).trim()) {
+    return String(customToken).trim();
+  }
+  const envToken = (process.env.FONNTE_TOKEN || process.env.VITE_FONNTE_TOKEN || '').trim();
+  if (envToken) {
+    return envToken;
+  }
+  try {
+    const { data: rows } = await supabase
+      .from('settings')
+      .select('id, data')
+      .in('id', ['global', 'doc:settings:global']);
+    if (rows && rows.length > 0) {
+      for (const r of rows) {
+        const dbToken = r?.data?.fonnteToken;
+        if (dbToken && String(dbToken).trim()) {
+          return String(dbToken).trim();
+        }
+      }
+    }
+  } catch (_e) {
+    // ignore
+  }
+  return '';
+}
+
 async function sendWhatsAppNotification(target: string, message: string) {
-  const token = process.env.FONNTE_TOKEN;
+  const token = await resolveServerFonnteToken();
   if (!token) {
-    console.warn("FONNTE_TOKEN is not set in environment variables. Notification won't be sent.");
+    console.warn("FONNTE_TOKEN is not set in environment variables or database settings. Notification won't be sent.");
     return;
   }
+  const normalizedTarget = normalizePhoneTarget(target);
+  if (!normalizedTarget) return;
   
   try {
     const response = await fetch("https://api.fonnte.com/send", {
@@ -64,7 +101,7 @@ async function sendWhatsAppNotification(target: string, message: string) {
         "Authorization": token
       },
       body: new URLSearchParams({
-        "target": target,
+        "target": normalizedTarget,
         "message": message,
         "countryCode": "62"
       })
@@ -103,7 +140,7 @@ function startCronJob() {
   // Run daily at 08:00 AM
   cron.schedule('0 8 * * *', async () => {
     try {
-      const token = process.env.FONNTE_TOKEN;
+      const token = await resolveServerFonnteToken();
       if (!token) {
         console.log('FONNTE_TOKEN is not set. Skipping daily event notification check.');
         return;
@@ -194,37 +231,42 @@ async function startServer() {
   app.set("trust proxy", true);
   app.use(express.json({ limit: "50mb" }));
 
+  // Check Fonnte token configuration status
+  app.get('/api/fonnte-status', async (_req, res) => {
+    try {
+      const envConfigured = Boolean((process.env.FONNTE_TOKEN || process.env.VITE_FONNTE_TOKEN || '').trim());
+      const resolved = await resolveServerFonnteToken();
+      res.json({
+        configured: Boolean(resolved),
+        envConfigured,
+        source: envConfigured ? 'env' : (resolved ? 'database' : 'none')
+      });
+    } catch (e: any) {
+      res.json({ configured: false, envConfigured: false, source: 'none', error: e.message });
+    }
+  });
+
   // Proxy endpoint for sending WhatsApp messages via Fonnte securely
   app.post('/api/send-whatsapp', async (req, res) => {
     try {
       const { target, message, url, token: customToken } = req.body;
-      let token = process.env.FONNTE_TOKEN || process.env.VITE_FONNTE_TOKEN || customToken;
-      
-      if (!token) {
-        try {
-          const { data: settingsRow } = await supabase
-            .from('settings')
-            .select('data')
-            .eq('id', 'global')
-            .maybeSingle();
-          if (settingsRow?.data?.fonnteToken) {
-            token = settingsRow.data.fonnteToken;
-          }
-        } catch (_e) {
-          // ignore
-        }
+      const normalizedTarget = normalizePhoneTarget(target);
+      if (!normalizedTarget) {
+        return res.status(400).json({ success: false, error: 'Nomor WhatsApp tujuan tidak valid atau kosong.' });
       }
+
+      const token = await resolveServerFonnteToken(customToken);
       
       if (!token) {
         return res.json({ 
           success: false, 
           notConfigured: true, 
-          error: 'Pemberitahuan WhatsApp dilewati karena FONNTE_TOKEN belum diatur di menu Pengaturan.' 
+          error: 'Token Fonnte belum diatur. Silakan isi API Token Fonnte di menu Pengaturan > Token Fonnte.' 
         });
       }
 
       const body = new URLSearchParams({
-        "target": target,
+        "target": normalizedTarget,
         "message": message,
         "countryCode": "62"
       });

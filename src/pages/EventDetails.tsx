@@ -396,7 +396,10 @@ export default function EventDetails() {
           eventId: eventId!,
           eventTitle: event?.title || 'Unknown Event',
           guestId: 'new_guest',
-          clientId: event?.clientId || '',
+          clientId: event?.clientId || appUser?.clientId || '',
+          clientName: clientName || appUser?.name || event?.coupleName || '',
+          clientPhone: appUser?.phone || '',
+          requesterName: appUser?.name || clientName || '',
           partnerId: event?.partnerId || null,
           type: 'add',
           originalData: {},
@@ -440,6 +443,8 @@ export default function EventDetails() {
   };
 
   const [guestToDelete, setGuestToDelete] = useState<string | null>(null);
+  const [rsvpGuestToDelete, setRsvpGuestToDelete] = useState<Guest | null>(null);
+  const [isDeletingRsvpAction, setIsDeletingRsvpAction] = useState(false);
   
   const [isEditingWishes, setIsEditingWishes] = useState(false);
   const [editingWishesGuestId, setEditingWishesGuestId] = useState<string | null>(null);
@@ -465,6 +470,13 @@ export default function EventDetails() {
          stickerUrl: editStickerUrl,
          updatedAt: serverTimestamp()
       });
+      setGuests(prev =>
+        prev.map(g =>
+          g.id === editingWishesGuestId
+            ? { ...g, wishes: editWishesText, stickerUrl: editStickerUrl }
+            : g
+        )
+      );
       showAlert('Berhasil', 'Ucapan berhasil diubah.', 'success');
       setIsEditingWishes(false);
       setEditingWishesGuestId(null);
@@ -474,20 +486,97 @@ export default function EventDetails() {
     }
   };
 
-  const handleDeleteWishes = async (guestId: string) => {
-    const confirmed = await showConfirm("Apakah Anda yakin ingin menghapus ucapan dan stiker dari tamu ini?");
+  const handleDeleteWishes = (guestId: string) => {
+    const found = guests.find(g => g.id === guestId);
+    if (found) {
+      setRsvpGuestToDelete(found);
+    }
+  };
+
+  const handleConfirmResetRsvpAndWishes = async () => {
+    if (!rsvpGuestToDelete?.id) return;
+    const targetId = rsvpGuestToDelete.id;
+    setIsDeletingRsvpAction(true);
+    try {
+      await updateDoc(doc(db, 'events', eventId!, 'guests', targetId), {
+        wishes: '',
+        stickerUrl: '',
+        rsvpStatus: 'pending',
+        status: 'pending',
+        hasResponded: false,
+        updatedAt: serverTimestamp()
+      } as any);
+      setGuests(prev =>
+        prev.map(g =>
+          g.id === targetId
+            ? { ...g, wishes: '', stickerUrl: '', rsvpStatus: 'pending', hasResponded: false }
+            : g
+        )
+      );
+      setSelectedGuestIds(prev => prev.filter(id => id !== targetId));
+      setRsvpGuestToDelete(null);
+      showAlert('Berhasil', 'Ucapan telah dihapus dan tamu dikeluarkan dari daftar RSVP & Ucapan.', 'success');
+    } catch (error) {
+      console.error(error);
+      showAlert('Error', 'Gagal menghapus ucapan dan mereset RSVP.', 'error');
+    } finally {
+      setIsDeletingRsvpAction(false);
+    }
+  };
+
+  const handleConfirmPermanentDeleteFromRsvp = async () => {
+    if (!rsvpGuestToDelete?.id) return;
+    const targetId = rsvpGuestToDelete.id;
+    setIsDeletingRsvpAction(true);
+    try {
+      await deleteDoc(doc(db, 'events', eventId!, 'guests', targetId));
+      setGuests(prev => prev.filter(g => g.id !== targetId));
+      setSelectedGuestIds(prev => prev.filter(id => id !== targetId));
+      setRsvpGuestToDelete(null);
+      showAlert('Berhasil', 'Ucapan beserta data tamu telah dihapus permanen dari acara!', 'success');
+    } catch (error) {
+      console.error(error);
+      showAlert('Gagal', 'Gagal menghapus data tamu secara permanen.', 'error');
+      handleFirestoreError(error, OperationType.DELETE, `events/${eventId}/guests/${targetId}`);
+    } finally {
+      setIsDeletingRsvpAction(false);
+    }
+  };
+
+  const handleBulkResetRsvpAndWishes = async () => {
+    if (selectedGuestIds.length === 0) return;
+    const confirmed = await showConfirm(
+      `Apakah Anda yakin ingin menghapus ucapan dan mengeluarkan ${selectedGuestIds.length} tamu terpilih dari daftar RSVP & Ucapan?\n\n(Data tamu tetap tersimpan di Daftar Tamu utama)`
+    );
     if (!confirmed) return;
 
     try {
-      await updateDoc(doc(db, 'events', eventId!, 'guests', guestId), {
-         wishes: '',
-         stickerUrl: '',
-         updatedAt: serverTimestamp()
-      });
-      showAlert('Berhasil', 'Ucapan berhasil dihapus.', 'success');
+      await Promise.all(
+        selectedGuestIds.map(id =>
+          updateDoc(doc(db, 'events', eventId!, 'guests', id), {
+            wishes: '',
+            stickerUrl: '',
+            rsvpStatus: 'pending',
+            status: 'pending',
+            hasResponded: false,
+            updatedAt: serverTimestamp()
+          } as any)
+        )
+      );
+      const selectedSet = new Set(selectedGuestIds);
+      setGuests(prev =>
+        prev.map(g =>
+          g.id && selectedSet.has(g.id)
+            ? { ...g, wishes: '', stickerUrl: '', rsvpStatus: 'pending', hasResponded: false }
+            : g
+        )
+      );
+      const count = selectedGuestIds.length;
+      setSelectedGuestIds([]);
+      showAlert('Berhasil', `${count} ucapan berhasil dihapus dan dikeluarkan dari daftar RSVP & Ucapan!`, 'success');
     } catch (error) {
-      console.error(error);
-      showAlert('Error', 'Gagal menghapus ucapan.', 'error');
+      console.error('Error resetting bulk RSVP:', error);
+      showAlert('Gagal', 'Gagal menghapus beberapa ucapan terpilih.', 'error');
     }
   };
 
@@ -1293,8 +1382,12 @@ export default function EventDetails() {
           eventId: eventId,
           eventTitle: event.title || 'Unknown Event',
           guestId: editingGuestId,
-          clientId: event.clientId || '', 
+          clientId: event.clientId || appUser?.clientId || '',
+          clientName: clientName || appUser?.name || event.coupleName || '',
+          clientPhone: appUser?.phone || '',
+          requesterName: appUser?.name || clientName || '',
           partnerId: event.partnerId || null,
+          type: 'edit',
           originalData: {
             name: originalGuest.name,
             address: originalGuest.address || '',
@@ -1949,27 +2042,15 @@ export default function EventDetails() {
 
                       <button
                         onClick={() => {
-                          if (isAddingGuest) {
-                            setIsAddingGuest(false);
-                            if (location.pathname.endsWith('/guests/add')) {
-                              navigate(`/auth/login/events/${eventId}`);
-                            }
-                            showCancelAlert('Penambahan tamu baru telah dibatalkan.');
-                          } else {
-                            setIsAddingGuest(true);
-                            if (eventId && !location.pathname.endsWith('/guests/add')) {
-                              navigate(`/auth/login/events/${eventId}/guests/add`);
-                            }
+                          setIsAddingGuest(true);
+                          if (eventId && !location.pathname.endsWith('/guests/add')) {
+                            navigate(`/auth/login/events/${eventId}/guests/add`);
                           }
                         }}
-                        className={`h-8.5 px-3 text-xs font-medium flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap ${
-                          isAddingGuest
-                            ? 'text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300'
-                            : 'text-white bg-indigo-600 hover:bg-indigo-700 shadow-xs'
-                        }`}
+                        className="h-8.5 px-3 text-xs font-medium flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap text-white bg-indigo-600 hover:bg-indigo-700 shadow-xs cursor-pointer"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        <span>{isAddingGuest ? 'Batal' : 'Tambah Tamu'}</span>
+                        <span>Tambah Tamu</span>
                       </button>
                     </div>
                   )}
@@ -2139,113 +2220,6 @@ export default function EventDetails() {
             </div>
 
         <div className="p-0">
-          {isAddingGuest && (
-            <div className="p-6 bg-gray-50 border-b border-gray-100">
-              <form onSubmit={handleAddGuest} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-                 <h3 className="text-md font-medium text-gray-800 mb-4">Data Tamu Baru</h3>
-                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Nama *</label>
-                      <input required value={newGuestName} onChange={e => setNewGuestName(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Budi Santoso" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">No HP</label>
-                      <input value={newGuestPhone} onChange={e => setNewGuestPhone(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="08123456789" />
-                    </div>
-                    <div className="md:col-span-2 lg:col-span-1">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Alamat</label>
-                      <input value={newGuestAddress} onChange={e => setNewGuestAddress(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Jl. Sudirman No 1" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Kategori Tamu</label>
-                      <select 
-                        value={newGuestCategory} 
-                        onChange={e => setNewGuestCategory(e.target.value)} 
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      >
-                        <option value="">-- Pilih Kategori --</option>
-                        {availableCategories.map(cat => (
-                          <option key={cat} value={cat}>{cat}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Tipe Undangan</label>
-                      <select 
-                        value={newGuestInvitationType} 
-                        onChange={e => setNewGuestInvitationType(e.target.value)} 
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      >
-                        <option value="">-- Pilih Tipe Undangan --</option>
-                        {availableInvitationTypes.map(invType => (
-                          <option key={invType} value={invType}>{invType}</option>
-                        ))}
-                      </select>
-                    </div>
-                    {event?.sessions && event.sessions.length > 0 && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Sesi Acara</label>
-                        <select 
-                          value={newGuestSession} 
-                          onChange={e => setNewGuestSession(e.target.value)} 
-                          className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
-                        >
-                          <option value="">-- Pilih Sesi --</option>
-                          {event.sessions.map(ses => (
-                            <option key={ses} value={ses}>{ses}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Jumlah Orang (Pax)</label>
-                      <div className="relative">
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min={1}
-                          max={999}
-                          required
-                          value={newGuestPax}
-                          onChange={e => {
-                            const val = e.target.value.replace(/[^0-9]/g, '');
-                            setNewGuestPax(val);
-                          }}
-                          onBlur={() => {
-                            const num = parseInt(newGuestPax, 10);
-                            if (!num || num < 1) setNewGuestPax('1');
-                          }}
-                          placeholder="Contoh: 2"
-                          className="w-full border border-gray-300 rounded-md pl-3 pr-16 py-2 focus:ring-indigo-500 focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                        <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-xs font-medium text-gray-500">
-                          Orang
-                        </span>
-                      </div>
-                    </div>
-                 </div>
-                 <div className="flex justify-end gap-2">
-                   <button
-                     type="button"
-                     onClick={() => {
-                       setIsAddingGuest(false);
-                       if (location.pathname.endsWith('/guests/add')) {
-                         navigate(`/auth/login/events/${eventId}`);
-                       }
-                       showCancelAlert('Penambahan tamu baru telah dibatalkan.');
-                     }}
-                     className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 font-medium text-sm transition-colors"
-                   >
-                     Batal
-                   </button>
-                   <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium text-sm transition-colors">
-                     Simpan Tamu
-                   </button>
-                 </div>
-              </form>
-            </div>
-          )}
-          
           {loading ? (
             <div className="p-6">
               <p className="text-gray-500 text-sm">Memuat daftar tamu...</p>
@@ -2258,9 +2232,9 @@ export default function EventDetails() {
             <>
               <div className="overflow-x-auto">
                 {selectedGuestIds.length > 0 && (
-                <div className="bg-indigo-50 px-6 py-3 border-b border-indigo-100 flex items-center justify-between">
+                <div className="bg-indigo-50 px-6 py-3 border-b border-indigo-100 flex flex-wrap items-center justify-between gap-2">
                   <span className="text-sm text-indigo-700 font-medium">{selectedGuestIds.length} tamu terpilih</span>
-                  <div className="flex items-center space-x-4">
+                  <div className="flex flex-wrap items-center gap-3">
                     <button 
                       onClick={() => {
                         setSinglePrintGuest(null);
@@ -2272,16 +2246,26 @@ export default function EventDetails() {
                       <Printer className="w-3.5 h-3.5" />
                       <span>Cetak QR ({selectedGuestIds.length} Tamu)</span>
                     </button>
+                    {activeTab === 'rsvp' && !isStaff && (
+                      <button
+                        onClick={handleBulkResetRsvpAndWishes}
+                        className="px-3 py-1.5 bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="Hapus ucapan & keluarkan dari list RSVP (Data tamu tetap ada di Daftar Tamu)"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-amber-700" />
+                        <span>Hapus Ucapan & Keluarkan dari List ({selectedGuestIds.length})</span>
+                      </button>
+                    )}
                     {(appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'admin' || appUser?.role === 'partner') && (
                       <button 
                         onClick={handleBulkDeleteGuests} 
-                        className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center transition-colors"
+                        className="text-xs sm:text-sm text-red-600 hover:text-red-800 font-medium flex items-center transition-colors cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4 mr-1" />
-                        Hapus Terpilih
+                        {activeTab === 'rsvp' ? 'Hapus Permanen Tamu' : 'Hapus Terpilih'}
                       </button>
                     )}
-                    <button onClick={() => setSelectedGuestIds([])} className="text-sm text-indigo-600 hover:text-indigo-800 underline transition-colors">Batal Pilih Semua</button>
+                    <button onClick={() => setSelectedGuestIds([])} className="text-xs sm:text-sm text-indigo-600 hover:text-indigo-800 underline transition-colors">Batal Pilih Semua</button>
                   </div>
                 </div>
               )}
@@ -2628,6 +2612,142 @@ export default function EventDetails() {
       </Modal>
 
       <Modal
+        isOpen={isAddingGuest}
+        onClose={() => {
+          setIsAddingGuest(false);
+          if (location.pathname.endsWith('/guests/add')) {
+            navigate(`/auth/login/events/${eventId}`);
+          }
+        }}
+        title="Data Tamu Baru"
+        maxWidth="max-w-2xl"
+      >
+        <form onSubmit={handleAddGuest} className="p-4 bg-white">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Nama *</label>
+              <input
+                required
+                value={newGuestName}
+                onChange={e => setNewGuestName(e.target.value)}
+                type="text"
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="Budi Santoso"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">No HP</label>
+              <input
+                value={newGuestPhone}
+                onChange={e => setNewGuestPhone(e.target.value)}
+                type="text"
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="08123456789"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Alamat</label>
+              <input
+                value={newGuestAddress}
+                onChange={e => setNewGuestAddress(e.target.value)}
+                type="text"
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="Jl. Sudirman No 1"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Kategori Tamu</label>
+              <select
+                value={newGuestCategory}
+                onChange={e => setNewGuestCategory(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="">-- Pilih Kategori --</option>
+                {availableCategories.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tipe Undangan</label>
+              <select
+                value={newGuestInvitationType}
+                onChange={e => setNewGuestInvitationType(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="">-- Pilih Tipe Undangan --</option>
+                {availableInvitationTypes.map(invType => (
+                  <option key={invType} value={invType}>{invType}</option>
+                ))}
+              </select>
+            </div>
+            {event?.sessions && event.sessions.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Sesi Acara</label>
+                <select
+                  value={newGuestSession}
+                  onChange={e => setNewGuestSession(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="">-- Pilih Sesi --</option>
+                  {event.sessions.map(ses => (
+                    <option key={ses} value={ses}>{ses}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Jumlah Orang (Pax)</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={999}
+                  required
+                  value={newGuestPax}
+                  onChange={e => {
+                    const val = e.target.value.replace(/[^0-9]/g, '');
+                    setNewGuestPax(val);
+                  }}
+                  onBlur={() => {
+                    const num = parseInt(newGuestPax, 10);
+                    if (!num || num < 1) setNewGuestPax('1');
+                  }}
+                  placeholder="Contoh: 2"
+                  className="w-full border border-gray-300 rounded-md pl-3 pr-16 py-2 focus:ring-indigo-500 focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-xs font-medium text-gray-500">
+                  Orang
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={() => {
+                setIsAddingGuest(false);
+                if (location.pathname.endsWith('/guests/add')) {
+                  navigate(`/auth/login/events/${eventId}`);
+                }
+                showCancelAlert('Penambahan tamu baru telah dibatalkan.');
+              }}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors cursor-pointer"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700 transition-colors cursor-pointer"
+            >
+              {appUser?.role === 'client' ? 'Ajukan Tambah Tamu' : 'Simpan Tamu'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
         isOpen={isEditingGuest}
         onClose={() => {
           setIsEditingGuest(false);
@@ -2841,6 +2961,86 @@ export default function EventDetails() {
             Ya, Hapus
           </button>
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!rsvpGuestToDelete}
+        onClose={() => {
+          if (!isDeletingRsvpAction) setRsvpGuestToDelete(null);
+        }}
+        title="Hapus Ucapan & Data RSVP"
+        maxWidth="max-w-lg"
+      >
+        {rsvpGuestToDelete && (
+          <div className="space-y-4">
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+              <div className="text-sm font-semibold text-slate-900">{rsvpGuestToDelete.name}</div>
+              {rsvpGuestToDelete.wishes ? (
+                <p className="text-xs text-slate-600 mt-1 italic line-clamp-3">
+                  "{rsvpGuestToDelete.stickerUrl ? `${rsvpGuestToDelete.stickerUrl} ` : ''}{rsvpGuestToDelete.wishes}"
+                </p>
+              ) : (
+                <p className="text-xs text-slate-500 mt-1">Tidak ada teks ucapan (Status RSVP: {rsvpGuestToDelete.rsvpStatus === 'attending' ? 'Hadir' : rsvpGuestToDelete.rsvpStatus === 'declined' ? 'Tidak Hadir' : 'Pending'})</p>
+              )}
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Pilih tindakan penghapusan yang Anda inginkan untuk data di atas:
+            </p>
+
+            <div className="space-y-2.5">
+              {/* Opsi 1: Hapus Ucapan & Keluarkan dari List RSVP */}
+              <button
+                type="button"
+                disabled={isDeletingRsvpAction}
+                onClick={handleConfirmResetRsvpAndWishes}
+                className="w-full text-left p-3.5 rounded-xl border border-amber-200 bg-amber-50/60 hover:bg-amber-100/70 transition-colors flex items-start justify-between gap-3 cursor-pointer disabled:opacity-50"
+              >
+                <div>
+                  <div className="text-sm font-bold text-amber-900">
+                    1. Hapus Ucapan & Keluarkan dari List RSVP
+                  </div>
+                  <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
+                    Menghapus pesan ucapan/stiker dan mengeluarkan baris ini dari tab <strong>RSVP & Ucapan</strong>. Data tamu di tab <strong>Daftar Tamu utama tetap aman</strong>.
+                  </p>
+                </div>
+                <Trash2 className="w-4 h-4 text-amber-700 shrink-0 mt-1" />
+              </button>
+
+              {/* Opsi 2: Hapus Permanen Beserta Data Tamu */}
+              <button
+                type="button"
+                disabled={isDeletingRsvpAction}
+                onClick={handleConfirmPermanentDeleteFromRsvp}
+                className="w-full text-left p-3.5 rounded-xl border border-rose-200 bg-rose-50/60 hover:bg-rose-100/70 transition-colors flex items-start justify-between gap-3 cursor-pointer disabled:opacity-50"
+              >
+                <div>
+                  <div className="text-sm font-bold text-rose-900">
+                    2. Hapus Permanen Tamu & Ucapan
+                  </div>
+                  <p className="text-xs text-rose-800 mt-0.5 leading-relaxed">
+                    Menghapus ucapan sekaligus menghapus data tamu ini <strong>secara permanen</strong> dari seluruh daftar acara (cocok untuk menghapus input spam).
+                  </p>
+                </div>
+                <Trash2 className="w-4 h-4 text-rose-700 shrink-0 mt-1" />
+              </button>
+            </div>
+
+            <div className="flex justify-end pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isDeletingRsvpAction}
+                onClick={() => {
+                  setRsvpGuestToDelete(null);
+                  showCancelAlert('Penghapusan telah dibatalkan.');
+                }}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       <Modal isOpen={!!activeQrGuest} onClose={() => setActiveQrGuest(null)} title="Bagikan & Cetak Kartu QR">
