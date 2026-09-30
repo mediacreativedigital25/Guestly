@@ -276,6 +276,7 @@ export default function Approvals() {
         : '*❌ Notifikasi Guestly — Pengajuan Ditolak*';
     const statusText = decision === 'approved' ? '*DISETUJUI*' : '*DITOLAK*';
 
+    const guestTitle = request.requestedData?.title || '';
     const guestName = request.requestedData?.name || request.originalData?.name || '-';
     const guestCategory = request.requestedData?.category || '-';
     const guestInviteType = request.requestedData?.invitationType || '-';
@@ -287,7 +288,8 @@ export default function Approvals() {
         ? 'Data tamu tersebut kini telah otomatis diperbarui pada Daftar Tamu acara Anda di sistem Guestly.'
         : 'Pengajuan perubahan ini tidak diterapkan pada Daftar Tamu acara Anda. Silakan hubungi tim WO/Admin jika memerlukan konfirmasi lebih lanjut.';
 
-    const message = `${statusHeader}\n\nHalo Kak *${clientDisplayName}*,\nPengajuan data tamu Anda untuk acara *${request.eventTitle}* telah ${statusText}.\n\n*Detail Pengajuan:*\n• Jenis: ${typeLabel}\n• Nama Tamu: *${guestName}*\n• Kategori: ${guestCategory}\n• Tipe Undangan: ${guestInviteType}\n• Sesi: ${guestSession}\n• Jumlah Pax: ${guestPax} Orang\n\n${actionClosing}\n\nTerima kasih,\n_Notifikasi Otomatis Guestly_`;
+    const titleLine = guestTitle ? `\n• Pangkat/Jabatan: ${guestTitle}` : '';
+    const message = `${statusHeader}\n\nHalo Kak *${clientDisplayName}*,\nPengajuan data tamu Anda untuk acara *${request.eventTitle}* telah ${statusText}.\n\n*Detail Pengajuan:*\n• Jenis: ${typeLabel}${titleLine}\n• Nama Tamu: *${guestName}*\n• Kategori: ${guestCategory}\n• Tipe Undangan: ${guestInviteType}\n• Sesi: ${guestSession}\n• Jumlah Pax: ${guestPax} Orang\n\n${actionClosing}\n\nTerima kasih,\n_Notifikasi Otomatis Guestly_`;
 
     try {
       const res = await sendFonnteMessage(null, clientPhone, message);
@@ -746,6 +748,10 @@ export default function Approvals() {
                   </h4>
                   <div className="space-y-2.5 text-slate-700">
                     <div className="grid grid-cols-[120px_1fr] gap-2">
+                      <span className="text-slate-400">Pangkat/Jabatan:</span>
+                      <span>{selectedRequest.originalData?.title || '-'}</span>
+                    </div>
+                    <div className="grid grid-cols-[120px_1fr] gap-2">
                       <span className="text-slate-400">Nama:</span>
                       <span className="font-medium text-slate-800">{selectedRequest.originalData?.name || '-'}</span>
                     </div>
@@ -782,6 +788,20 @@ export default function Approvals() {
                   Data Baru
                 </h4>
                 <div className="space-y-2.5 text-slate-800">
+                  <div className="grid grid-cols-[120px_1fr] gap-2">
+                    <span className="text-slate-400 font-normal">Pangkat/Jabatan:</span>
+                    <span
+                      className={
+                        selectedRequest.type !== 'add' &&
+                        (selectedRequest.originalData?.title || '') !==
+                          (selectedRequest.requestedData?.title || '')
+                          ? 'font-semibold text-indigo-700'
+                          : ''
+                      }
+                    >
+                      {selectedRequest.requestedData?.title || '-'}
+                    </span>
+                  </div>
                   <div className="grid grid-cols-[120px_1fr] gap-2">
                     <span className="text-slate-400 font-normal">Nama:</span>
                     <span

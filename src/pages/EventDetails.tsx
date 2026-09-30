@@ -6,7 +6,7 @@ import { collection, query, getDocs, addDoc, serverTimestamp, doc, getDoc, delet
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { supabaseDb } from '../lib/supabaseDb';
 import { Guest, EventRecord, WATemplate, EInviteTemplate } from '../types';
-import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel, exportCardToPng, resolveMediaUrl } from '../lib/utils';
+import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel, exportCardToPng, resolveMediaUrl, getGuestBaseName, formatGuestFullName } from '../lib/utils';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -31,6 +31,10 @@ export default function EventDetails() {
   const isStaff = appUser?.role === 'staff';
   const isStaffCheckinOnly = isStaff && appUser?.staffType === 'checkin';
   const isStaffSouvenirOnly = isStaff && appUser?.staffType === 'souvenir';
+  const canDirectEditRank =
+    appUser?.role === 'superadmin' ||
+    appUser?.role === 'owner' ||
+    appUser?.role === 'partner';
   const [event, setEvent] = useState<EventRecord | null>(null);
   const [clientName, setClientName] = useState<string>('');
   const [clientPartnerId, setClientPartnerId] = useState<string | null>(null);
@@ -39,6 +43,7 @@ export default function EventDetails() {
   const [waTemplates, setWaTemplates] = useState<WATemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddingGuest, setIsAddingGuest] = useState(false);
+  const [newGuestTitle, setNewGuestTitle] = useState('');
   const [newGuestName, setNewGuestName] = useState('');
   const [newGuestAddress, setNewGuestAddress] = useState('');
   const [newGuestPhone, setNewGuestPhone] = useState('');
@@ -84,7 +89,13 @@ export default function EventDetails() {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [isEditingGuest, setIsEditingGuest] = useState(false);
   const [editingGuestId, setEditingGuestId] = useState<string | null>(null);
+  const [editGuestTitle, setEditGuestTitle] = useState('');
   const [editGuestName, setEditGuestName] = useState('');
+  const [inlineTitleDrafts, setInlineTitleDrafts] = useState<Record<string, string>>({});
+  const [savingTitleGuestId, setSavingTitleGuestId] = useState<string | null>(null);
+  const [isBulkRankModalOpen, setIsBulkRankModalOpen] = useState(false);
+  const [bulkRankValue, setBulkRankValue] = useState('');
+  const [isSavingBulkRank, setIsSavingBulkRank] = useState(false);
   const [editGuestAddress, setEditGuestAddress] = useState('');
   const [editGuestPhone, setEditGuestPhone] = useState('');
   const [editGuestCategory, setEditGuestCategory] = useState('');
@@ -326,7 +337,8 @@ export default function EventDetails() {
         const target = guests.find(g => g.id === routeGuestId);
         if (target) {
           setEditingGuestId(target.id!);
-          setEditGuestName(target.name || '');
+          setEditGuestTitle(target.title || '');
+          setEditGuestName(getGuestBaseName(target.name || '', target.title || ''));
           setEditGuestAddress(target.address || '');
           setEditGuestPhone(target.phone || '');
           setEditGuestCategory(target.category || '');
@@ -365,7 +377,9 @@ export default function EventDetails() {
     const confirmed = await showConfirm("Apakah Anda yakin ingin menambahkan tamu ini?");
     if (!confirmed) return;
     
-    const cleanedGuestName = newGuestName.trim();
+    const cleanedGuestTitle = newGuestTitle.trim();
+    const cleanedBaseName = newGuestName.trim();
+    const cleanedGuestName = formatGuestFullName(cleanedBaseName, cleanedGuestTitle);
     if (guests.some(g => g.name.toLowerCase() === cleanedGuestName.toLowerCase())) {
       showAlert('Peringatan', `Tamu dengan nama "${cleanedGuestName}" sudah tersedia di daftar.`, 'warning');
       return;
@@ -376,6 +390,7 @@ export default function EventDetails() {
       const parsedPax = Math.max(1, Number(newGuestPax) || 1);
       const payload: any = {
         eventId: eventId!,
+        title: cleanedGuestTitle,
         name: cleanedGuestName,
         ticketCode: ticketCode,
         pax: parsedPax,
@@ -404,6 +419,7 @@ export default function EventDetails() {
           type: 'add',
           originalData: {},
           requestedData: {
+            title: cleanedGuestTitle,
             name: cleanedGuestName,
             address: newGuestAddress || '',
             phone: newGuestPhone || '',
@@ -425,6 +441,7 @@ export default function EventDetails() {
         showAlert('Berhasil', "Tamu berhasil ditambahkan!", "success");
       }
 
+      setNewGuestTitle('');
       setNewGuestName('');
       setNewGuestAddress('');
       setNewGuestPhone('');
@@ -1031,7 +1048,9 @@ export default function EventDetails() {
       const effectivePax = guest.rsvpStatus === 'declined' ? 0 : Math.max(1, Number(guest.pax) || 1);
       return {
         "No": index + 1,
+        "Pangkat / Jabatan": guest.title || '-',
         "Nama Tamu": guest.name,
+        "Kode Tiket": guest.ticketCode || '-',
         "Alamat": guest.address || '-',
         "No. Hp": guest.phone || '-',
         "Kategori": guest.category || '-',
@@ -1055,6 +1074,7 @@ export default function EventDetails() {
 
   const handleDownloadTemplate = () => {
     const data = [{
+      "Pangkat / Jabatan": '',
       "Nama Tamu": '',
       "Alamat": '',
       "No. Hp": '',
@@ -1097,7 +1117,11 @@ export default function EventDetails() {
           let guestName = row["Nama Tamu"] || row.Nama || row["nama"] || row["Nama Lengkap"];
           if (!guestName) continue;
           
-          const cleanedName = String(guestName).trim();
+          const rawTitle = String(
+            row["Pangkat / Jabatan"] || row["Pangkat"] || row["Jabatan"] || row["Gelar"] || ""
+          ).trim();
+          const cleanRowTitle = rawTitle === '-' ? '' : rawTitle;
+          const cleanedName = formatGuestFullName(String(guestName).trim(), cleanRowTitle);
           if (!cleanedName) continue;
 
           if (existingNames.has(cleanedName.toLowerCase())) {
@@ -1118,6 +1142,7 @@ export default function EventDetails() {
           const pax = Math.max(1, parseInt(String(rawPax), 10) || 1);
 
           validRows.push({
+            title: cleanRowTitle,
             name: cleanedName,
             ticketCode,
             phone: String(phone),
@@ -1155,6 +1180,7 @@ export default function EventDetails() {
             const guestDocRef = doc(collection(db, 'events', eventId!, 'guests'));
             const payload: any = {
               eventId: eventId!,
+              title: item.title || '',
               name: item.name,
               ticketCode: item.ticketCode,
               pax: item.pax || 1,
@@ -1351,9 +1377,94 @@ export default function EventDetails() {
     }
   };
 
+  const handleQuickSaveGuestTitle = async (guest: Guest, rawDraftTitle: string) => {
+    if (!canDirectEditRank || !guest.id || !eventId) return;
+    const nextTitle = rawDraftTitle.trim();
+    const prevTitle = (guest.title || '').trim();
+    if (nextTitle === prevTitle) return;
+
+    const nextFullName = formatGuestFullName(guest.name, nextTitle, prevTitle);
+    setSavingTitleGuestId(guest.id);
+
+    setGuests(prev =>
+      prev.map(g => (g.id === guest.id ? { ...g, title: nextTitle, name: nextFullName } : g))
+    );
+
+    try {
+      await updateDoc(doc(db, 'events', eventId, 'guests', guest.id), {
+        title: nextTitle,
+        name: nextFullName,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error('Error updating guest rank/title:', error);
+      showAlert('Gagal', 'Gagal menyimpan pangkat/jabatan tamu.', 'error');
+      fetchGuests(false);
+    } finally {
+      setSavingTitleGuestId(null);
+    }
+  };
+
+  const handleBulkSetRank = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canDirectEditRank || !eventId || selectedGuestIds.length === 0) return;
+
+    const nextTitle = bulkRankValue.trim();
+    setIsSavingBulkRank(true);
+
+    try {
+      const targetGuests = guests.filter(g => g.id && selectedGuestIds.includes(g.id));
+      await Promise.all(
+        targetGuests.map(g => {
+          const nextFullName = formatGuestFullName(g.name, nextTitle, g.title || '');
+          return updateDoc(doc(db, 'events', eventId, 'guests', g.id!), {
+            title: nextTitle,
+            name: nextFullName,
+            updatedAt: serverTimestamp(),
+          });
+        })
+      );
+
+      setGuests(prev =>
+        prev.map(g => {
+          if (!g.id || !selectedGuestIds.includes(g.id)) return g;
+          return {
+            ...g,
+            title: nextTitle,
+            name: formatGuestFullName(g.name, nextTitle, g.title || ''),
+          };
+        })
+      );
+
+      setInlineTitleDrafts(prev => {
+        const next = { ...prev };
+        selectedGuestIds.forEach(id => {
+          next[id] = nextTitle;
+        });
+        return next;
+      });
+
+      setIsBulkRankModalOpen(false);
+      setBulkRankValue('');
+      showAlert(
+        'Berhasil',
+        nextTitle
+          ? `Pangkat/Jabatan "${nextTitle}" berhasil diterapkan ke ${targetGuests.length} tamu terpilih tanpa mengubah QR Code.`
+          : `Pangkat/Jabatan pada ${targetGuests.length} tamu terpilih berhasil dikosongkan.`,
+        'success'
+      );
+    } catch (error) {
+      console.error('Error bulk updating rank:', error);
+      showAlert('Gagal', 'Gagal memperbarui pangkat/jabatan secara massal.', 'error');
+    } finally {
+      setIsSavingBulkRank(false);
+    }
+  };
+
   const handleEditGuestClick = (guest: Guest) => {
     setEditingGuestId(guest.id!);
-    setEditGuestName(guest.name || '');
+    setEditGuestTitle(guest.title || '');
+    setEditGuestName(getGuestBaseName(guest.name || '', guest.title || ''));
     setEditGuestAddress(guest.address || '');
     setEditGuestPhone(guest.phone || '');
     setEditGuestCategory(guest.category || '');
@@ -1375,6 +1486,12 @@ export default function EventDetails() {
       const originalGuest = guests.find(g => g.id === editingGuestId);
       if (!originalGuest) return;
       const finalPax = editGuestRsvpStatus === 'declined' ? 0 : Math.max(1, Number(editGuestPax) || 1);
+      const cleanedTitle = editGuestTitle.trim();
+      const finalFullName = formatGuestFullName(
+        editGuestName.trim(),
+        cleanedTitle,
+        originalGuest.title || ''
+      );
 
       if (appUser?.role === 'client') {
         // Create approval request
@@ -1389,6 +1506,7 @@ export default function EventDetails() {
           partnerId: event.partnerId || null,
           type: 'edit',
           originalData: {
+            title: originalGuest.title || '',
             name: originalGuest.name,
             address: originalGuest.address || '',
             phone: originalGuest.phone || '',
@@ -1399,7 +1517,8 @@ export default function EventDetails() {
             rsvpStatus: originalGuest.rsvpStatus || 'pending',
           },
           requestedData: {
-            name: editGuestName,
+            title: cleanedTitle,
+            name: finalFullName,
             address: editGuestAddress,
             phone: editGuestPhone,
             category: editGuestCategory,
@@ -1419,7 +1538,7 @@ export default function EventDetails() {
               const partnerData = partnerDoc.data();
               if (partnerData.phone) {
                 const { sendFonnteMessage } = await import('../lib/fonnte');
-                const message = `*🔔 Notifikasi Guestly - Pengajuan Edit Tamu*\n\nHalo, terdapat pengajuan perubahan data tamu dari Klien untuk acara *${event.title || 'Unknown Event'}*.\n\n*Data Lama:*\n- Nama: ${originalGuest.name}\n- No HP: ${originalGuest.phone || '-'}\n- Kategori: ${originalGuest.category || '-'}\n- Tipe Undangan: ${originalGuest.invitationType || '-'}\n- Alamat: ${originalGuest.address || '-'}\n- Sesi: ${originalGuest.session || '-'}\n- Pax: ${originalGuest.pax ?? 1} Orang\n\n*Data Baru:*\n- Nama: ${editGuestName}\n- No HP: ${editGuestPhone || '-'}\n- Kategori: ${editGuestCategory || '-'}\n- Tipe Undangan: ${editGuestInvitationType || '-'}\n- Alamat: ${editGuestAddress || '-'}\n- Sesi: ${editGuestSession || '-'}\n- Pax: ${finalPax} Orang\n\nSilakan login ke dashboard Guestly dan cek menu *Approvals* untuk menyetujui atau menolak perubahan ini.`;
+                const message = `*🔔 Notifikasi Guestly - Pengajuan Edit Tamu*\n\nHalo, terdapat pengajuan perubahan data tamu dari Klien untuk acara *${event.title || 'Unknown Event'}*.\n\n*Data Lama:*\n- Pangkat/Jabatan: ${originalGuest.title || '-'}\n- Nama: ${originalGuest.name}\n- No HP: ${originalGuest.phone || '-'}\n- Kategori: ${originalGuest.category || '-'}\n- Tipe Undangan: ${originalGuest.invitationType || '-'}\n- Alamat: ${originalGuest.address || '-'}\n- Sesi: ${originalGuest.session || '-'}\n- Pax: ${originalGuest.pax ?? 1} Orang\n\n*Data Baru:*\n- Pangkat/Jabatan: ${cleanedTitle || '-'}\n- Nama: ${finalFullName}\n- No HP: ${editGuestPhone || '-'}\n- Kategori: ${editGuestCategory || '-'}\n- Tipe Undangan: ${editGuestInvitationType || '-'}\n- Alamat: ${editGuestAddress || '-'}\n- Sesi: ${editGuestSession || '-'}\n- Pax: ${finalPax} Orang\n\nSilakan login ke dashboard Guestly dan cek menu *Approvals* untuk menyetujui atau menolak perubahan ini.`;
                 await sendFonnteMessage(null, partnerData.phone, message);
               }
             }
@@ -1432,7 +1551,8 @@ export default function EventDetails() {
       } else {
         // Save directly
         await updateDoc(doc(db, 'events', eventId!, 'guests', editingGuestId), {
-           name: editGuestName,
+           title: cleanedTitle,
+           name: finalFullName,
            address: editGuestAddress,
            phone: editGuestPhone,
            category: editGuestCategory,
@@ -1444,7 +1564,8 @@ export default function EventDetails() {
         });
         setGuests(guests.map(g => g.id === editingGuestId ? {
           ...g,
-          name: editGuestName,
+          title: cleanedTitle,
+          name: finalFullName,
           address: editGuestAddress,
           phone: editGuestPhone,
           category: editGuestCategory,
@@ -1453,6 +1574,7 @@ export default function EventDetails() {
           pax: finalPax,
           rsvpStatus: editGuestRsvpStatus
         } : g));
+        setInlineTitleDrafts(prev => ({ ...prev, [editingGuestId]: cleanedTitle }));
         showAlert('Berhasil', 'Data tamu berhasil diubah.', 'success');
       }
       setIsEditingGuest(false);
@@ -1516,9 +1638,19 @@ export default function EventDetails() {
                  <span className="hidden sm:inline">Embed</span>
                  <span className="sm:hidden">Embed</span>
                </button>
+              {guests.length > 0 && (
+                <Link
+                  to={`/rsvp/${eventId}/${guests[0].ticketCode}`}
+                  className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 font-medium text-sm sm:text-base"
+                  title="Lihat tampilan Kartu E-Invitation + Form RSVP & Ucapan Tamu"
+                >
+                  <QrCode className="w-4 sm:w-5 h-4 sm:h-5 hidden sm:block" />
+                  <span className="hidden sm:inline">Lihat E-Invitation &amp; RSVP</span>
+                  <span className="sm:hidden">E-Invite</span>
+                </Link>
+              )}
               <Link
                  to={`/public/rsvp/${eventId}`}
-                 target="_blank"
                  className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-pink-500 text-white rounded-md hover:bg-pink-600 font-medium text-sm sm:text-base"
                >
                  <FileText className="w-4 sm:w-5 h-4 sm:h-5 hidden sm:block" />
@@ -2246,6 +2378,20 @@ export default function EventDetails() {
                       <Printer className="w-3.5 h-3.5" />
                       <span>Cetak QR ({selectedGuestIds.length} Tamu)</span>
                     </button>
+                    {canDirectEditRank && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBulkRankValue('');
+                          setIsBulkRankModalOpen(true);
+                        }}
+                        className="px-3.5 py-1.5 bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-100 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                        title="Tambahkan atau ubah Pangkat / Jabatan ke semua tamu terpilih sekaligus tanpa mengubah QR Code"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                        <span>Set Pangkat / Jabatan ({selectedGuestIds.length})</span>
+                      </button>
+                    )}
                     {activeTab === 'rsvp' && !isStaff && (
                       <button
                         onClick={handleBulkResetRsvpAndWishes}
@@ -2281,6 +2427,14 @@ export default function EventDetails() {
                       />
                     </th>
                     <th className="px-3 py-3.5 text-left text-xs font-semibold text-slate-600 w-12">No</th>
+                    <th className="px-3 py-3.5 text-left text-xs font-semibold text-slate-600 w-40">
+                      <div className="flex flex-col">
+                        <span>Pangkat / Jabatan</span>
+                        {canDirectEditRank && (
+                          <span className="text-[10px] font-normal text-indigo-600">Ketik & Enter</span>
+                        )}
+                      </div>
+                    </th>
                     <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Nama Tamu</th>
                     {(activeTab === 'guest-list' || activeTab === 'attended') && (
                       <>
@@ -2329,6 +2483,54 @@ export default function EventDetails() {
                         />
                       </td>
                       <td className="px-3 py-3.5 whitespace-nowrap text-xs text-slate-400 font-mono tabular-nums">{startIndex + index + 1}</td>
+                      <td className="px-3 py-3.5 whitespace-nowrap">
+                        {canDirectEditRank ? (
+                          <div className="relative flex items-center">
+                            <input
+                              type="text"
+                              value={
+                                guest.id && inlineTitleDrafts[guest.id] !== undefined
+                                  ? inlineTitleDrafts[guest.id]
+                                  : guest.title || ''
+                              }
+                              onChange={e => {
+                                if (!guest.id) return;
+                                setInlineTitleDrafts(prev => ({
+                                  ...prev,
+                                  [guest.id!]: e.target.value,
+                                }));
+                              }}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  e.currentTarget.blur();
+                                } else if (e.key === 'Escape' && guest.id) {
+                                  setInlineTitleDrafts(prev => ({
+                                    ...prev,
+                                    [guest.id!]: guest.title || '',
+                                  }));
+                                  e.currentTarget.blur();
+                                }
+                              }}
+                              onBlur={e => {
+                                handleQuickSaveGuestTitle(guest, e.target.value);
+                              }}
+                              placeholder="+ Pangkat/Gelar..."
+                              className="w-36 px-2.5 py-1 text-xs font-medium text-slate-800 bg-slate-50/80 hover:bg-white focus:bg-white border border-slate-200 focus:border-indigo-500 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/15 transition-all placeholder:text-slate-400 placeholder:font-normal"
+                              title="Ketik Pangkat/Jabatan (contoh: Letkol, Mayor, Bpk., Ibu) lalu tekan Enter"
+                            />
+                            {savingTitleGuestId === guest.id && (
+                              <Loader2 className="w-3.5 h-3.5 text-indigo-600 animate-spin absolute right-2" />
+                            )}
+                          </div>
+                        ) : guest.title ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-xs font-medium border border-slate-200/80">
+                            {guest.title}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">-</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3.5 whitespace-nowrap">
                         <div className="text-sm font-semibold text-slate-900">{guest.name}</div>
                         {guest.ticketCode && (
@@ -2612,6 +2814,75 @@ export default function EventDetails() {
       </Modal>
 
       <Modal
+        isOpen={isBulkRankModalOpen}
+        onClose={() => {
+          if (!isSavingBulkRank) setIsBulkRankModalOpen(false);
+        }}
+        title={`Set Pangkat / Jabatan (${selectedGuestIds.length} Tamu Terpilih)`}
+        maxWidth="max-w-lg"
+      >
+        <form onSubmit={handleBulkSetRank} className="p-4 bg-white space-y-4">
+          <div className="p-3 rounded-lg bg-indigo-50/70 border border-indigo-100 text-xs text-indigo-900 leading-relaxed">
+            Pangkat/Jabatan yang Anda masukkan akan otomatis digabungkan di depan nama asli tamu (contoh: <strong>Letkol Adi Saputra</strong>) <strong>tanpa mengubah Kode Tiket / QR Code</strong>.
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Pangkat / Gelar / Jabatan
+            </label>
+            <input
+              type="text"
+              value={bulkRankValue}
+              onChange={e => setBulkRankValue(e.target.value)}
+              placeholder="Contoh: Letkol, Mayor, Kolonel, Bpk., Ibu..."
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+            />
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {['Letkol', 'Mayor', 'Kolonel', 'Kapten', 'Lettu', 'Letda', 'Jenderal', 'Bpk.', 'Ibu', 'Dr.', 'Ir.', 'H.', 'Hj.'].map(preset => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setBulkRankValue(preset)}
+                  className={`px-2 py-1 rounded text-xs font-medium border transition-colors cursor-pointer ${
+                    bulkRankValue === preset
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-indigo-50 hover:border-indigo-200'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+              {bulkRankValue && (
+                <button
+                  type="button"
+                  onClick={() => setBulkRankValue('')}
+                  className="px-2 py-1 rounded text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 cursor-pointer"
+                >
+                  Kosongkan Pangkat
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+            <button
+              type="button"
+              disabled={isSavingBulkRank}
+              onClick={() => setIsBulkRankModalOpen(false)}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors cursor-pointer"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              disabled={isSavingBulkRank}
+              className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {isSavingBulkRank ? 'Menyimpan...' : `Terapkan ke ${selectedGuestIds.length} Tamu`}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
         isOpen={isAddingGuest}
         onClose={() => {
           setIsAddingGuest(false);
@@ -2623,7 +2894,17 @@ export default function EventDetails() {
         maxWidth="max-w-2xl"
       >
         <form onSubmit={handleAddGuest} className="p-4 bg-white">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Pangkat / Jabatan</label>
+              <input
+                value={newGuestTitle}
+                onChange={e => setNewGuestTitle(e.target.value)}
+                type="text"
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="Contoh: Letkol / Bpk."
+              />
+            </div>
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Nama *</label>
               <input
@@ -2632,9 +2913,19 @@ export default function EventDetails() {
                 onChange={e => setNewGuestName(e.target.value)}
                 type="text"
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
-                placeholder="Budi Santoso"
+                placeholder="Adi Saputra"
               />
             </div>
+            {(newGuestTitle.trim() || newGuestName.trim()) && (
+              <div className="sm:col-span-3 px-3 py-2 rounded-lg bg-indigo-50/70 border border-indigo-100 flex items-center justify-between text-xs">
+                <span className="text-slate-600">Hasil Akhir Nama Tamu:</span>
+                <span className="font-bold text-indigo-900">
+                  {formatGuestFullName(newGuestName, newGuestTitle)}
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">No HP</label>
               <input
@@ -2757,13 +3048,34 @@ export default function EventDetails() {
           }
         }}
         title="Edit Tamu"
+        maxWidth="max-w-2xl"
       >
         <form onSubmit={handleSaveEditGuest} className="p-4 bg-white">
           <div className="grid grid-cols-1 gap-4 mb-4">
-             <div>
-               <label className="block text-sm font-medium text-gray-700 mb-1">Nama *</label>
-               <input required value={editGuestName} onChange={e => setEditGuestName(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Budi Santoso" />
+             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+               <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">Pangkat / Jabatan</label>
+                 <input
+                   value={editGuestTitle}
+                   onChange={e => setEditGuestTitle(e.target.value)}
+                   type="text"
+                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+                   placeholder="Contoh: Letkol / Bpk."
+                 />
+               </div>
+               <div className="sm:col-span-2">
+                 <label className="block text-sm font-medium text-gray-700 mb-1">Nama *</label>
+                 <input required value={editGuestName} onChange={e => setEditGuestName(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Adi Saputra" />
+               </div>
              </div>
+             {(editGuestTitle.trim() || editGuestName.trim()) && (
+               <div className="px-3 py-2 rounded-lg bg-indigo-50/70 border border-indigo-100 flex items-center justify-between text-xs">
+                 <span className="text-slate-600">Hasil Akhir Nama Tamu (QR Tetap Sama):</span>
+                 <span className="font-bold text-indigo-900">
+                   {formatGuestFullName(editGuestName, editGuestTitle)}
+                 </span>
+               </div>
+             )}
              <div>
                <label className="block text-sm font-medium text-gray-700 mb-1">No HP</label>
                <input value={editGuestPhone} onChange={e => setEditGuestPhone(e.target.value)} type="text" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="08123456789" />
@@ -3197,7 +3509,6 @@ export default function EventDetails() {
                   </button>
                   <Link
                     to={`/rsvp/${eventId}/${activeQrGuest.ticketCode}`}
-                    target="_blank"
                     className="flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold text-rose-700 bg-rose-50 rounded-lg hover:bg-rose-100 transition-colors"
                   >
                     <QrCode className="w-4 h-4" /> Buka Link

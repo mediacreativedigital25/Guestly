@@ -489,8 +489,8 @@ export default function Dashboard() {
                     className="w-full"
                   />
                 </div>
-                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 lg:col-span-2">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 border-b pb-3">
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 lg:col-span-2 flex flex-col">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 border-b border-gray-100 pb-3.5">
                     <div>
                       <h3 className="text-base font-semibold text-gray-900">
                         {isFilteringByDate
@@ -500,22 +500,23 @@ export default function Dashboard() {
                       <p className="text-xs text-gray-500 mt-0.5">
                         {isFilteringByDate
                           ? 'Menampilkan acara berstatus Published pada tanggal yang dipilih.'
-                          : `${format(todayStart, 'dd MMM yyyy', { locale: localeId })} – ${format(threeMonthsLimit, 'dd MMM yyyy', { locale: localeId })} • Status: Published (${upcomingThreeMonthsEvents.length} Acara)`}
+                          : `${format(todayStart, 'dd MMM yyyy', { locale: localeId })} – ${format(threeMonthsLimit, 'dd MMM yyyy', { locale: localeId })} · ${upcomingThreeMonthsEvents.length} Acara Aktif`}
                       </p>
                     </div>
                     {isFilteringByDate && (
                       <button
                         type="button"
                         onClick={() => setIsFilteringByDate(false)}
-                        className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors self-start sm:self-auto shrink-0"
+                        className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors self-start sm:self-auto shrink-0 cursor-pointer"
                       >
                         Lihat 3 Bulan ke Depan
                       </button>
                     )}
                   </div>
+
                   {displayedScheduleEvents.length > 0 ? (
-                    <div className="space-y-3.5 max-h-[420px] overflow-y-auto pr-1">
-                      {displayedScheduleEvents.map(event => {
+                    <div className="divide-y divide-gray-100 border border-gray-200/80 rounded-xl overflow-hidden bg-white max-h-[380px] overflow-y-auto">
+                      {displayedScheduleEvents.map((event) => {
                         const parsedDate = parseFirestoreDate(event.date);
                         const diffDays = parsedDate ? differenceInCalendarDays(parsedDate, todayStart) : 0;
                         const isWarning = diffDays >= 0 && diffDays <= 3;
@@ -525,83 +526,108 @@ export default function Dashboard() {
                             : diffDays > 0 && diffDays <= 7
                             ? `H-${diffDays}`
                             : `${diffDays} Hari Lagi`;
-                        
+
                         return (
                           <div
                             key={event.id}
-                            className={`p-4 rounded-xl border transition-colors ${
+                            onClick={() => navigate(`/auth/login/events/${event.id}`)}
+                            className={`group flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 p-3.5 sm:px-4 sm:py-3.5 transition-colors cursor-pointer ${
                               isWarning
-                                ? 'border-orange-300 bg-orange-50/70'
-                                : 'border-gray-200 bg-gray-50/70 hover:bg-gray-100/70'
+                                ? 'bg-amber-50/40 hover:bg-amber-50/80'
+                                : 'bg-white hover:bg-slate-50/90'
                             }`}
                           >
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-gray-200/70">
-                              <div className="flex items-center gap-2 text-xs font-semibold text-indigo-700">
-                                <svg className="w-4 h-4 text-indigo-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                                <span>
-                                  {parsedDate
-                                    ? format(parsedDate, 'EEEE, dd MMMM yyyy', { locale: localeId })
-                                    : event.date}
+                            <div className="flex items-start sm:items-center gap-3.5 min-w-0 flex-1">
+                              {/* Compact Calendar Date Badge */}
+                              <div
+                                className={`w-13 h-13 rounded-xl border flex flex-col items-center justify-center shrink-0 text-center ${
+                                  isWarning
+                                    ? 'bg-amber-100/70 border-amber-300 text-amber-900'
+                                    : 'bg-indigo-50/60 border-indigo-100 text-indigo-700'
+                                }`}
+                              >
+                                <span className="text-[10px] font-bold uppercase tracking-wider leading-none">
+                                  {parsedDate ? format(parsedDate, 'MMM', { locale: localeId }) : 'TGL'}
+                                </span>
+                                <span className="text-lg font-extrabold font-mono tabular-nums leading-tight mt-0.5">
+                                  {parsedDate ? format(parsedDate, 'dd', { locale: localeId }) : '--'}
                                 </span>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                                    isWarning
-                                      ? 'bg-orange-100 text-orange-800 border border-orange-200'
-                                      : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                                  }`}
-                                >
-                                  {countdownLabel}
-                                </span>
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                  Published
-                                </span>
-                              </div>
-                            </div>
 
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                              <div>
-                                <h4 className="font-bold text-gray-900 text-sm sm:text-base">{event.title}</h4>
-                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 text-xs sm:text-sm text-gray-600">
-                                  <span className="flex items-center">
-                                    <svg className="w-4 h-4 mr-1 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                              {/* Event Title & Metadata */}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                  <h4 className="font-bold text-gray-900 text-sm sm:text-base truncate group-hover:text-indigo-600 transition-colors">
+                                    {event.title}
+                                  </h4>
+                                  <span
+                                    className={`text-xs font-semibold ${
+                                      isWarning ? 'text-amber-700' : 'text-indigo-600'
+                                    }`}
+                                  >
+                                    · {countdownLabel}
+                                  </span>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-gray-500">
+                                  <span className="font-medium text-gray-700">
+                                    {parsedDate
+                                      ? format(parsedDate, 'EEEE, dd MMMM yyyy', { locale: localeId })
+                                      : event.date}
+                                  </span>
+                                  <span aria-hidden="true" className="text-gray-300">•</span>
+                                  <span className="inline-flex items-center gap-1">
+                                    <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
                                     {event.time || 'Waktu belum diatur'}
                                   </span>
                                   {event.location && (
-                                    <span className="flex items-center">
-                                      <svg className="w-4 h-4 mr-1 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                                      {event.location}
-                                    </span>
+                                    <>
+                                      <span aria-hidden="true" className="text-gray-300">•</span>
+                                      <span className="inline-flex items-center gap-1 truncate max-w-[240px] sm:max-w-[300px]" title={event.location}>
+                                        <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                        </svg>
+                                        <span className="truncate">{event.location}</span>
+                                      </span>
+                                    </>
                                   )}
                                 </div>
+
+                                {isWarning && (
+                                  <p className="mt-1.5 text-[11px] font-medium text-amber-800 flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                                    <span>
+                                      {diffDays === 0
+                                        ? 'Berlangsung hari ini — pastikan seluruh tim & perlengkapan siap.'
+                                        : `Berlangsung dalam H-${diffDays} — mohon pastikan perlengkapan siap.`}
+                                    </span>
+                                  </p>
+                                )}
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => navigate(`/auth/login/events/${event.id}`)}
-                                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-white border border-indigo-200 hover:border-indigo-300 px-3 py-1.5 rounded-lg transition-colors self-start sm:self-center shrink-0"
-                              >
-                                Lihat Acara &rarr;
-                              </button>
                             </div>
-                            {isWarning && (
-                              <div className="mt-3 text-xs sm:text-sm text-orange-800 bg-orange-100/70 p-2.5 rounded-lg flex items-start">
-                                <svg className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-                                <span>
-                                  {diffDays === 0
-                                    ? 'Acara ini berlangsung HARI INI. Pastikan seluruh tim dan perlengkapan siap.'
-                                    : `Acara ini akan berlangsung dalam H-${diffDays}. Mohon pastikan segala perlengkapan siap.`}
-                                </span>
-                              </div>
-                            )}
+
+                            {/* Action Button */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/auth/login/events/${event.id}`);
+                              }}
+                              className="text-xs font-semibold text-indigo-600 group-hover:text-white bg-indigo-50/70 group-hover:bg-indigo-600 border border-indigo-200/80 group-hover:border-indigo-600 px-3.5 py-2 rounded-lg transition-all self-end sm:self-center shrink-0 cursor-pointer whitespace-nowrap"
+                            >
+                              Lihat Acara &rarr;
+                            </button>
                           </div>
                         );
                       })}
                     </div>
                   ) : (
-                    <div className="text-center py-8 text-gray-500">
+                    <div className="text-center py-10 text-gray-500">
                       <svg className="w-12 h-12 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                      <p>
+                      <p className="text-sm">
                         {isFilteringByDate
                           ? 'Tidak ada jadwal acara berstatus Published pada tanggal ini.'
                           : 'Belum ada jadwal acara berstatus Published untuk 3 bulan ke depan.'}

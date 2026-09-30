@@ -80,6 +80,32 @@ export function getOperatorLabel(user?: { name?: string; email?: string; role?: 
   return `${name} (${roleLabel})`;
 }
 
+export function getGuestBaseName(fullName?: string, currentTitle?: string): string {
+  const rawName = (fullName || '').trim();
+  const rawTitle = (currentTitle || '').trim();
+  if (!rawName) return '';
+  if (!rawTitle) return rawName;
+  if (rawName.toLowerCase().startsWith(rawTitle.toLowerCase() + ' ')) {
+    return rawName.slice(rawTitle.length).trim();
+  }
+  return rawName;
+}
+
+export function formatGuestFullName(
+  baseOrFullName?: string,
+  newTitle?: string,
+  oldTitle?: string
+): string {
+  const baseName = getGuestBaseName(baseOrFullName, oldTitle !== undefined ? oldTitle : newTitle);
+  const cleanTitle = (newTitle || '').trim();
+  if (!cleanTitle) return baseName;
+  if (!baseName) return cleanTitle;
+  if (baseName.toLowerCase().startsWith(cleanTitle.toLowerCase() + ' ')) {
+    return baseName;
+  }
+  return `${cleanTitle} ${baseName}`;
+}
+
 export function getUserBusinessId(
   user?: { id?: string; role?: string; partnerId?: string | null } | null
 ): string | null {

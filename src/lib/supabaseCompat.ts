@@ -414,14 +414,41 @@ function eventModelToRow(id: string, data: any, existingRow?: any): any {
   };
 }
 
+function decodeGuestTitleAndEmail(rawEmail?: string | null): { title: string; email: string } {
+  const raw = (rawEmail || '').trim();
+  if (!raw) return { title: '', email: '' };
+  if (raw.startsWith('rank:')) {
+    const rest = raw.slice(5);
+    const sepIdx = rest.indexOf('|');
+    if (sepIdx !== -1) {
+      return {
+        title: rest.slice(0, sepIdx).trim(),
+        email: rest.slice(sepIdx + 1).trim(),
+      };
+    }
+    return { title: rest.trim(), email: '' };
+  }
+  return { title: '', email: raw };
+}
+
+function encodeGuestTitleAndEmail(title?: string | null, email?: string | null): string | null {
+  const cleanTitle = (title || '').trim();
+  const cleanEmail = (email || '').trim().replace(/^rank:[^|]*\|?/, '');
+  if (cleanTitle && cleanEmail) return `rank:${cleanTitle}|${cleanEmail}`;
+  if (cleanTitle) return `rank:${cleanTitle}`;
+  return cleanEmail || null;
+}
+
 function rowToGuestModel(row: any): any {
+  const { title, email } = decodeGuestTitleAndEmail(row.email);
   return hydrateDates({
     id: row.id,
     eventId: row.event_id,
     ticketCode: row.ticket_code || '',
+    title,
     name: row.name || '',
     phone: row.phone || '',
-    email: row.email || '',
+    email,
     category: row.category || 'Reguler',
     invitationType: row.invitation_type || row.qr_code || '',
     tableNumber: row.seat || '',
@@ -450,6 +477,11 @@ function rowToGuestModel(row: any): any {
 
 function guestModelToRow(id: string, eventId: string, data: any, existingRow?: any): any {
   const s = serializeForStorage(data);
+  const existingDecoded = decodeGuestTitleAndEmail(existingRow?.email);
+  const resolvedTitle =
+    s.title !== undefined ? String(s.title || '').trim() : existingDecoded.title;
+  const resolvedEmail =
+    s.email !== undefined ? String(s.email || '').trim() : existingDecoded.email;
   const checkInRaw =
     s.checkInTime !== undefined
       ? s.checkInTime
@@ -467,7 +499,7 @@ function guestModelToRow(id: string, eventId: string, data: any, existingRow?: a
     ticket_code: s.ticketCode !== undefined ? s.ticketCode : existingRow?.ticket_code ?? null,
     name: s.name !== undefined ? s.name : existingRow?.name ?? 'Tamu',
     phone: s.phone !== undefined ? s.phone : existingRow?.phone ?? null,
-    email: s.email !== undefined ? s.email : existingRow?.email ?? null,
+    email: encodeGuestTitleAndEmail(resolvedTitle, resolvedEmail),
     category: s.category !== undefined ? s.category : existingRow?.category ?? 'Reguler',
     qr_code: s.invitationType !== undefined ? (s.invitationType || null) : existingRow?.qr_code ?? null,
     seat: s.tableNumber !== undefined ? s.tableNumber : s.seat !== undefined ? s.seat : existingRow?.seat ?? null,

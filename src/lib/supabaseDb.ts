@@ -330,13 +330,28 @@ function eventToRow(event: any): any {
 }
 
 function rowToGuest(row: any): Guest {
+  const rawEmail = (row.email || '').trim();
+  let title = '';
+  let email = rawEmail;
+  if (rawEmail.startsWith('rank:')) {
+    const rest = rawEmail.slice(5);
+    const sepIdx = rest.indexOf('|');
+    if (sepIdx !== -1) {
+      title = rest.slice(0, sepIdx).trim();
+      email = rest.slice(sepIdx + 1).trim();
+    } else {
+      title = rest.trim();
+      email = '';
+    }
+  }
   return {
     id: row.id,
     eventId: row.event_id,
     ticketCode: row.ticket_code || '',
+    title,
     name: row.name,
     phone: row.phone,
-    email: row.email,
+    email,
     category: row.category,
     invitationType: row.invitation_type || row.qr_code || '',
     tableNumber: row.seat,
@@ -359,13 +374,21 @@ function rowToGuest(row: any): Guest {
 }
 
 function guestToRow(guest: any): any {
+  const cleanTitle = (guest.title || '').trim();
+  const cleanEmail = (guest.email || '').trim().replace(/^rank:[^|]*\|?/, '');
+  const encodedEmail =
+    cleanTitle && cleanEmail
+      ? `rank:${cleanTitle}|${cleanEmail}`
+      : cleanTitle
+      ? `rank:${cleanTitle}`
+      : cleanEmail || null;
   return {
     id: guest.id,
     event_id: guest.eventId,
     ticket_code: guest.ticketCode || null,
     name: guest.name,
     phone: guest.phone || null,
-    email: guest.email || null,
+    email: encodedEmail,
     category: guest.category || 'Reguler',
     qr_code: guest.invitationType || null,
     seat: guest.tableNumber || null,

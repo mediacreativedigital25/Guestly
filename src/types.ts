@@ -186,6 +186,7 @@ export interface WATemplate {
 export interface Guest {
   id?: string;
   eventId: string;
+  title?: string;
   name: string;
   email?: string;
   phone?: string;
