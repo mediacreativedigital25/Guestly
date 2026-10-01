@@ -6,7 +6,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './AuthContext';
 import { SettingsProvider } from './SettingsContext';
-import { PresenceProvider } from './PresenceContext';
 import AppLayout from './AppLayout';
 import Dashboard from './pages/Dashboard';
 import EventsList from './pages/EventsList';
@@ -46,8 +45,7 @@ export default function App() {
     <SettingsProvider>
       <AuthProvider>
         <BrowserRouter>
-          <PresenceProvider>
-            <Routes>
+          <Routes>
           <Route path="/" element={<SalesPage />} />
           <Route path="/auth/login" element={<AppLayout />}>
             <Route index element={<Dashboard />} />
@@ -97,8 +95,7 @@ export default function App() {
           <Route path="/public/qr" element={<PublicQR />} />
           <Route path="/events/:eventId/greeting" element={<GreetingScreen />} />
           <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </PresenceProvider>
+          </Routes>
         </BrowserRouter>
       </AuthProvider>
     </SettingsProvider>

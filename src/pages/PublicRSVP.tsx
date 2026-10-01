@@ -148,8 +148,8 @@ export default function PublicRSVP() {
             setEventData(eData);
           }
 
-          const allGuests = await supabaseDb.getGuests(eventId);
-          setGuestsWithWishes(allGuests.filter(g => g.wishes && g.wishes.trim().length > 0));
+          const wishesList = await supabaseDb.getEventWishes(eventId, 50);
+          setGuestsWithWishes(wishesList);
         }
       } catch (error) {
         console.error("Error fetching event data", error);
@@ -159,35 +159,6 @@ export default function PublicRSVP() {
       }
     };
     fetchData();
-
-    if (!eventId) return;
-
-    const refreshWishes = async () => {
-      try {
-        const allGuests = await supabaseDb.getGuests(eventId);
-        setGuestsWithWishes(allGuests.filter(g => g.wishes && g.wishes.trim().length > 0));
-      } catch {
-        // ignore silent refresh error
-      }
-    };
-
-    const unsubscribeRealtime = supabaseDb.subscribeToGuests(eventId, () => {
-      refreshWishes();
-    });
-
-    const handleCompatChange = (e: any) => {
-      const col = e.detail?.collectionName;
-      if (!col || col === 'guests') {
-        refreshWishes();
-      }
-    };
-
-    window.addEventListener('supabase-compat-change', handleCompatChange);
-
-    return () => {
-      unsubscribeRealtime();
-      window.removeEventListener('supabase-compat-change', handleCompatChange);
-    };
   }, [eventId]);
 
   const handleSubmit = async (e: React.FormEvent) => {

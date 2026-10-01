@@ -215,14 +215,7 @@ export default function RSVP() {
 
   const fetchWishesWall = async (targetEventId: string) => {
     try {
-      const allGuests = await supabaseDb.getGuests(targetEventId);
-      const withWishes = allGuests
-        .filter((g) => g.wishes && g.wishes.trim().length > 0)
-        .sort((a, b) => {
-          const tA = parseFirestoreDate(a.updatedAt || a.createdAt)?.getTime() || 0;
-          const tB = parseFirestoreDate(b.updatedAt || b.createdAt)?.getTime() || 0;
-          return tB - tA;
-        });
+      const withWishes = await supabaseDb.getEventWishes(targetEventId, 50);
       setGuestsWithWishes(withWishes);
     } catch {
       // ignore wishes fetch error
@@ -233,42 +226,56 @@ export default function RSVP() {
     const fetchRSVP = async () => {
       if (!eventId || !ticketCode) return;
       try {
-        const { getDoc } = await import('firebase/firestore');
-        const guestsRef = collection(db, 'events', eventId, 'guests');
-        const q = query(guestsRef, where('ticketCode', '==', ticketCode), limit(1));
+        // Non-blocking wishes wall fetch so QR pass query gets 100% priority
+        fetchWishesWall(eventId);
 
-        // Fetch Guest, Event & Wishes Wall in parallel for minimal latency
-        const [snapshot, eventSnap] = await Promise.all([
-          getDocs(q),
-          getDoc(doc(db, 'events', eventId)),
-          fetchWishesWall(eventId),
+        // Direct single-row lookup (1 guest row + 1 event row)
+        const [directGuest, directEvent] = await Promise.all([
+          supabaseDb.getGuestByTicket(eventId, ticketCode).catch(() => null),
+          supabaseDb.getEvent(eventId).catch(() => null),
         ]);
 
         let currentSession = '';
-        let fetchedGuest: Guest | null = null;
+        let fetchedGuest: Guest | null = directGuest;
+        let resolvedEvent: EventRecord | null = directEvent;
 
-        if (!snapshot.empty) {
-          const guestDoc = snapshot.docs[0];
-          const guestData = { id: guestDoc.id, ...guestDoc.data() } as Guest;
-          fetchedGuest = guestData;
-          setGuest(guestData);
-          setNotFound(false);
-          if (guestData.rsvpStatus) {
-            setRsvpChoice(guestData.rsvpStatus as 'attending' | 'pending' | 'declined');
+        if (!fetchedGuest) {
+          const guestsRef = collection(db, 'events', eventId, 'guests');
+          const q = query(guestsRef, where('ticketCode', '==', ticketCode), limit(1));
+          const snapshot = await getDocs(q);
+          if (!snapshot.empty) {
+            const guestDoc = snapshot.docs[0];
+            fetchedGuest = { id: guestDoc.id, ...guestDoc.data() } as Guest;
           }
-          if (guestData.wishes) setWishesInput(guestData.wishes);
-          if (guestData.stickerUrl) setSelectedSticker(guestData.stickerUrl);
-          if (guestData.pax && guestData.pax > 0) setPaxInput(String(Number(guestData.pax)));
-          if (guestData.session) {
-            setSessionInput(guestData.session);
-            currentSession = guestData.session;
+        }
+
+        if (!resolvedEvent) {
+          const { getDoc } = await import('firebase/firestore');
+          const eventSnap = await getDoc(doc(db, 'events', eventId));
+          if (eventSnap.exists()) {
+            resolvedEvent = { id: eventSnap.id, ...eventSnap.data() } as EventRecord;
+          }
+        }
+
+        if (fetchedGuest) {
+          setGuest(fetchedGuest);
+          setNotFound(false);
+          if (fetchedGuest.rsvpStatus) {
+            setRsvpChoice(fetchedGuest.rsvpStatus as 'attending' | 'pending' | 'declined');
+          }
+          if (fetchedGuest.wishes) setWishesInput(fetchedGuest.wishes);
+          if (fetchedGuest.stickerUrl) setSelectedSticker(fetchedGuest.stickerUrl);
+          if (fetchedGuest.pax && fetchedGuest.pax > 0) setPaxInput(String(Number(fetchedGuest.pax)));
+          if (fetchedGuest.session) {
+            setSessionInput(fetchedGuest.session);
+            currentSession = fetchedGuest.session;
           }
         } else if (!initialCached) {
           setNotFound(true);
         }
 
-        if (eventSnap.exists()) {
-          const evData = { id: eventSnap.id, ...eventSnap.data() } as EventRecord;
+        if (resolvedEvent) {
+          const evData = resolvedEvent;
           const pageTitle =
             evData.title ||
             (evData.coupleName ? `The Wedding Of ${evData.coupleName}` : 'Undangan Acara');
@@ -314,26 +321,6 @@ export default function RSVP() {
     };
 
     fetchRSVP();
-
-    if (!eventId) return;
-
-    const unsubscribeRealtime = supabaseDb.subscribeToGuests(eventId, () => {
-      fetchWishesWall(eventId);
-    });
-
-    const handleCompatChange = (e: any) => {
-      const col = e.detail?.collectionName;
-      if (!col || col === 'guests') {
-        fetchWishesWall(eventId);
-      }
-    };
-
-    window.addEventListener('supabase-compat-change', handleCompatChange);
-
-    return () => {
-      unsubscribeRealtime();
-      window.removeEventListener('supabase-compat-change', handleCompatChange);
-    };
   }, [eventId, ticketCode]);
 
   useEffect(() => {

@@ -1,6 +1,9 @@
 import { supabase } from './supabase';
 import { EventRecord, Guest, User } from '../types';
 
+const activeBroadcastChannels = new Map<string, ReturnType<typeof supabase.channel>>();
+const subscribedChannels = new Set<string>();
+
 export const supabaseDb = {
   // ================= EVENTS =================
   async getEvents(): Promise<EventRecord[]> {
@@ -90,6 +93,7 @@ export const supabaseDb = {
       .select('*')
       .eq('event_id', eventId)
       .ilike('ticket_code', cleanCode)
+      .limit(1)
       .maybeSingle();
 
     if (error) {
@@ -97,6 +101,74 @@ export const supabaseDb = {
       throw error;
     }
     return data ? rowToGuest(data) : null;
+  },
+
+  async getEventWishes(eventId: string, maxCount = 50): Promise<Guest[]> {
+    const { data, error } = await supabase
+      .from('guests')
+      .select('*')
+      .eq('event_id', eventId)
+      .not('wishes', 'is', null)
+      .neq('wishes', '')
+      .order('updated_at', { ascending: false })
+      .limit(maxCount);
+
+    if (error) {
+      console.warn(`Error fetching wishes for event ${eventId}:`, error);
+      return [];
+    }
+    return (data || [])
+      .map(rowToGuest)
+      .filter((g) => g.wishes && g.wishes.trim().length > 0);
+  },
+
+  async getGuestsUpdatedSince(eventId: string, sinceIso: string): Promise<Guest[]> {
+    const { data, error } = await supabase
+      .from('guests')
+      .select('*')
+      .eq('event_id', eventId)
+      .gte('updated_at', sinceIso)
+      .order('updated_at', { ascending: false })
+      .limit(250);
+
+    if (error) {
+      console.warn(`Error fetching delta guests for event ${eventId}:`, error);
+      return [];
+    }
+    return (data || []).map(rowToGuest);
+  },
+
+  async getGuestsSummaryForEvents(
+    eventIds: string[]
+  ): Promise<Array<{ eventId: string; pax: number; rsvpStatus: string; attended: boolean }>> {
+    if (!eventIds || eventIds.length === 0) return [];
+    const PAGE_SIZE = 1000;
+    let allRows: any[] = [];
+    let from = 0;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from('guests')
+        .select('event_id, pax, rsvp_status, attended')
+        .in('event_id', eventIds)
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) {
+        console.warn('Error fetching guests summary for dashboard:', error);
+        throw error;
+      }
+      if (!data || data.length === 0) break;
+      allRows = allRows.concat(data);
+      if (data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+
+    return allRows.map((row) => ({
+      eventId: row.event_id,
+      pax: row.pax ?? 1,
+      rsvpStatus: row.rsvp_status || 'pending',
+      attended: Boolean(row.attended),
+    }));
   },
 
   async upsertGuest(guest: Partial<Guest> & { eventId: string; name: string }): Promise<Guest> {
@@ -168,7 +240,7 @@ export const supabaseDb = {
     }
   },
 
-  // Realtime subscription for Scanner & Greeting Screen
+  // Realtime subscription for Scanner & Greeting Screen (Exclusive High-Priority Lane)
   subscribeToGuests(eventId: string, callback: (guest: any) => void) {
     const channelName = `guests-realtime-${eventId}-${Math.random().toString(36).slice(2, 7)}`;
     const channel = supabase
@@ -189,8 +261,11 @@ export const supabaseDb = {
       )
       .subscribe();
 
+    const sharedChannelName = `guests-realtime-${eventId}`;
     const broadcastChannel = supabase
-      .channel(`guests-realtime-${eventId}`)
+      .channel(sharedChannelName, {
+        config: { broadcast: { self: false } },
+      })
       .on(
         'broadcast',
         { event: 'guest_checked_in' },
@@ -198,9 +273,18 @@ export const supabaseDb = {
           callback({ new: payload.payload, eventType: 'BROADCAST' });
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          activeBroadcastChannels.set(eventId, broadcastChannel);
+          subscribedChannels.add(eventId);
+        }
+      });
+
+    activeBroadcastChannels.set(eventId, broadcastChannel);
 
     return () => {
+      subscribedChannels.delete(eventId);
+      activeBroadcastChannels.delete(eventId);
       supabase.removeChannel(channel);
       supabase.removeChannel(broadcastChannel);
     };
@@ -208,19 +292,61 @@ export const supabaseDb = {
 
   async broadcastGuestArrival(eventId: string, guest: any) {
     try {
-      const channel = supabase.channel(`guests-realtime-${eventId}`);
+      const existing = activeBroadcastChannels.get(eventId);
+      if (existing && subscribedChannels.has(eventId)) {
+        await existing.send({
+          type: 'broadcast',
+          event: 'guest_checked_in',
+          payload: guest,
+        });
+        return;
+      }
+
+      const channel = existing || supabase.channel(`guests-realtime-${eventId}`);
+      activeBroadcastChannels.set(eventId, channel);
       channel.subscribe((status) => {
         if (status === 'SUBSCRIBED') {
+          subscribedChannels.add(eventId);
           channel.send({
             type: 'broadcast',
             event: 'guest_checked_in',
-            payload: guest
+            payload: guest,
           });
         }
       });
     } catch (e) {
       console.warn('Failed to broadcast guest arrival:', e);
     }
+  },
+
+  mapRealtimeGuest(raw: any): Guest | null {
+    if (!raw || typeof raw !== 'object') return null;
+    if (raw.event_id || raw.ticket_code !== undefined || raw.check_in_time !== undefined) {
+      return rowToGuest(raw);
+    }
+    return {
+      id: raw.id || raw.guestDocId || raw.guestId,
+      eventId: raw.eventId || raw.event_id || '',
+      ticketCode: raw.ticketCode || raw.ticket_code || '',
+      name: raw.name || raw.guestName || 'Tamu Undangan',
+      category: raw.category || 'Reguler',
+      tableNumber: raw.tableNumber || raw.seat || '',
+      pax: raw.pax ?? 1,
+      session: raw.session || '',
+      rsvpStatus: raw.rsvpStatus || raw.rsvp_status || 'attending',
+      attended: Boolean(raw.attended),
+      attendedAt: raw.attendedAt || raw.check_in_time,
+      checkInTime: raw.checkInTime || raw.attendedAt || raw.check_in_time,
+      checkInStaff: raw.checkInStaff || raw.check_in_staff,
+      souvenirTaken: Boolean(raw.souvenirTaken ?? raw.souvenir_taken),
+      souvenirName: raw.souvenirName || raw.souvenir_type,
+      souvenirTakenAt: raw.souvenirTakenAt || raw.souvenir_time,
+      souvenirTakenBy: raw.souvenirTakenBy,
+      wishes: raw.wishes,
+      stickerUrl: raw.stickerUrl || raw.sticker_url,
+      createdAt: raw.createdAt || raw.created_at,
+      updatedAt: raw.updatedAt || raw.updated_at || new Date().toISOString(),
+    };
   },
 
   // ================= USERS =================

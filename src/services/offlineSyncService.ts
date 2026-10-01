@@ -49,6 +49,30 @@ export interface OfflineProcessResult {
 }
 
 const activeFlushLocks = new Set<string>();
+const memorySnapshotCache = new Map<string, Guest[]>();
+const debouncedSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleSnapshotPersist(eventId: string, guests: Guest[]) {
+  if (typeof window === 'undefined' || !eventId) return;
+  const prevTimer = debouncedSaveTimers.get(eventId);
+  if (prevTimer) clearTimeout(prevTimer);
+
+  const timer = setTimeout(() => {
+    debouncedSaveTimers.delete(eventId);
+    try {
+      localStorage.setItem(`${OFFLINE_GUESTS_PREFIX}${eventId}`, JSON.stringify(guests));
+      const meta: OfflineSnapshotMeta = {
+        updatedAt: new Date().toISOString(),
+        count: guests.length,
+      };
+      localStorage.setItem(`${OFFLINE_META_PREFIX}${eventId}`, JSON.stringify(meta));
+    } catch (e) {
+      console.warn('Failed to persist offline guests snapshot:', e);
+    }
+  }, 300);
+
+  debouncedSaveTimers.set(eventId, timer);
+}
 
 function notifyQueueChanged(eventId: string) {
   if (typeof window !== 'undefined') {
@@ -117,28 +141,39 @@ export const offlineSyncService = {
   },
 
   // ================= GUEST SNAPSHOT CACHE =================
-  saveGuestsSnapshot(eventId: string, guests: Guest[]): Guest[] {
+  saveGuestsSnapshot(eventId: string, guests: Guest[], immediate = false): Guest[] {
     if (!eventId || typeof window === 'undefined') return guests;
     const mergedWithQueue = this.mergeGuestsWithPendingQueue(eventId, guests);
-    try {
-      localStorage.setItem(`${OFFLINE_GUESTS_PREFIX}${eventId}`, JSON.stringify(mergedWithQueue));
-      const meta: OfflineSnapshotMeta = {
-        updatedAt: new Date().toISOString(),
-        count: mergedWithQueue.length,
-      };
-      localStorage.setItem(`${OFFLINE_META_PREFIX}${eventId}`, JSON.stringify(meta));
-    } catch (e) {
-      console.warn('Failed to save offline guests snapshot:', e);
+    memorySnapshotCache.set(eventId, mergedWithQueue);
+
+    if (immediate) {
+      try {
+        localStorage.setItem(`${OFFLINE_GUESTS_PREFIX}${eventId}`, JSON.stringify(mergedWithQueue));
+        const meta: OfflineSnapshotMeta = {
+          updatedAt: new Date().toISOString(),
+          count: mergedWithQueue.length,
+        };
+        localStorage.setItem(`${OFFLINE_META_PREFIX}${eventId}`, JSON.stringify(meta));
+      } catch (e) {
+        console.warn('Failed to save offline guests snapshot:', e);
+      }
+    } else {
+      scheduleSnapshotPersist(eventId, mergedWithQueue);
     }
     return mergedWithQueue;
   },
 
   getGuestsSnapshot(eventId: string): Guest[] {
     if (!eventId || typeof window === 'undefined') return [];
+    const inMem = memorySnapshotCache.get(eventId);
+    if (inMem && inMem.length > 0) {
+      return this.mergeGuestsWithPendingQueue(eventId, inMem);
+    }
     try {
       const raw = localStorage.getItem(`${OFFLINE_GUESTS_PREFIX}${eventId}`);
       if (!raw) return [];
       const parsed: Guest[] = JSON.parse(raw);
+      memorySnapshotCache.set(eventId, parsed);
       return this.mergeGuestsWithPendingQueue(eventId, parsed);
     } catch {
       return [];
@@ -147,15 +182,20 @@ export const offlineSyncService = {
 
   getSnapshotMeta(eventId: string): OfflineSnapshotMeta {
     if (!eventId || typeof window === 'undefined') return { updatedAt: null, count: 0 };
+    const inMem = memorySnapshotCache.get(eventId);
     try {
       const raw = localStorage.getItem(`${OFFLINE_META_PREFIX}${eventId}`);
       if (!raw) {
-        const guests = this.getGuestsSnapshot(eventId);
+        const guests = inMem || this.getGuestsSnapshot(eventId);
         return { updatedAt: null, count: guests.length };
       }
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw) as OfflineSnapshotMeta;
+      if (inMem && inMem.length > 0) {
+        return { ...parsed, count: inMem.length };
+      }
+      return parsed;
     } catch {
-      return { updatedAt: null, count: 0 };
+      return { updatedAt: null, count: inMem ? inMem.length : 0 };
     }
   },
 
@@ -163,8 +203,20 @@ export const offlineSyncService = {
     if (!eventId || !guestId || typeof window === 'undefined') return;
     try {
       const current = this.getGuestsSnapshot(eventId);
-      const updated = current.map((g) => (g.id === guestId ? { ...g, ...updates } : g));
-      localStorage.setItem(`${OFFLINE_GUESTS_PREFIX}${eventId}`, JSON.stringify(updated));
+      if (current.length === 0) return;
+      let found = false;
+      const updated = current.map((g) => {
+        if (g.id === guestId) {
+          found = true;
+          return { ...g, ...updates };
+        }
+        return g;
+      });
+      if (!found && updates.name) {
+        updated.unshift({ id: guestId, eventId, ...updates } as Guest);
+      }
+      memorySnapshotCache.set(eventId, updated);
+      scheduleSnapshotPersist(eventId, updated);
     } catch (e) {
       console.warn('Failed to update guest in local snapshot:', e);
     }
@@ -517,7 +569,7 @@ export const offlineSyncService = {
     try {
       for (const item of queue) {
         try {
-          // 1. Update Supabase guests table directly
+          // 1. Single direct update to Supabase guests table by primary key
           await supabaseDb.updateGuest(item.guestId, {
             attended: item.attended,
             attendedAt: item.attendedAt,
@@ -533,42 +585,23 @@ export const offlineSyncService = {
               : {}),
           });
 
-          // 2. Also update compat layer so all views stay in sync
-          try {
-            const guestDocRef = doc(db, 'events', eventId, 'guests', item.guestId);
-            await updateDoc(guestDocRef, {
-              attended: item.attended,
-              attendedAt: item.attendedAt || serverTimestamp(),
-              checkInStaff: item.checkInStaff,
-              ...(item.souvenirGiven
-                ? {
-                    souvenirTaken: true,
-                    souvenirTakenAt: item.souvenirTakenAt || serverTimestamp(),
-                    souvenirId: item.souvenirId,
-                    souvenirName: item.souvenirName,
-                    souvenirQuantity: 1,
-                    souvenirTakenBy: item.souvenirTakenBy,
-                  }
-                : {}),
-              updatedAt: serverTimestamp(),
+          // 2. Only broadcast to Greeting Screen TV if scan happened within the last 25 seconds
+          // (prevents flooding the TV with old arrivals when syncing a batch later)
+          const itemAgeMs = Date.now() - (new Date(item.createdAt || item.attendedAt).getTime() || 0);
+          if (itemAgeMs >= 0 && itemAgeMs <= 25000) {
+            await supabaseDb.broadcastGuestArrival(eventId, {
+              id: item.guestId,
+              event_id: eventId,
+              name: item.guestName,
+              category: item.category,
+              ticketCode: item.ticketCode,
+              ticket_code: item.ticketCode,
+              session: item.session,
+              attended: true,
+              attendedAt: item.attendedAt,
+              check_in_time: item.attendedAt,
             });
-          } catch {
-            // Compat update is secondary to Supabase
           }
-
-          // 3. Broadcast to Greeting Screen TV
-          await supabaseDb.broadcastGuestArrival(eventId, {
-            id: item.guestId,
-            event_id: eventId,
-            name: item.guestName,
-            category: item.category,
-            ticketCode: item.ticketCode,
-            ticket_code: item.ticketCode,
-            session: item.session,
-            attended: true,
-            attendedAt: item.attendedAt,
-            check_in_time: item.attendedAt,
-          });
 
           syncedCount++;
         } catch (err) {

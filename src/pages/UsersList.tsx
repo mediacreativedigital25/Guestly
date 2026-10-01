@@ -18,20 +18,9 @@ import {
   Filter,
   UserCheck,
   Monitor,
-  Radio,
-  Smartphone,
-  Tablet,
-  Tv,
-  Globe,
-  MapPin,
-  Wifi,
-  Clock,
-  Activity
+  Radio
 } from 'lucide-react';
-import { formatDistanceToNow, format } from 'date-fns';
-import { id as localeId } from 'date-fns/locale';
 import { useAuth } from '../AuthContext';
-import { usePresence } from '../PresenceContext';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { Modal } from '../components/Modal';
 import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
@@ -50,8 +39,6 @@ export default function UsersList() {
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [businessFilter, setBusinessFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'online' | 'offline'>('all');
-  const [inspectingUser, setInspectingUser] = useState<User | null>(null);
 
   // Add User state
   const [isAddingUser, setIsAddingUser] = useState(false);
@@ -95,7 +82,6 @@ export default function UsersList() {
   const [editUserHideServiceInfo, setEditUserHideServiceInfo] = useState<boolean>(true);
 
   const { appUser } = useAuth();
-  const { isUserOnline, getUserTelemetry, getScopedOnlineUsers } = usePresence();
   const navigate = useNavigate();
   const location = useLocation();
   const { userId: routeUserId } = useParams<{ userId?: string }>();
@@ -724,24 +710,9 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
     }
   };
 
-  // Online / Offline metrics across scoped users
-  const scopedOnlineSessions = useMemo(
-    () => getScopedOnlineUsers(appUser, users),
-    [getScopedOnlineUsers, appUser, users]
-  );
-
-  const onlineUserCount = useMemo(
-    () => users.filter(u => isUserOnline(u.id, u)).length,
-    [users, isUserOnline]
-  );
-  const offlineUserCount = Math.max(0, users.length - onlineUserCount);
-
   // Filtered users for table display
   const filteredUsers = useMemo(() => {
     return users.filter(u => {
-      const online = isUserOnline(u.id, u);
-      if (statusFilter === 'online' && !online) return false;
-      if (statusFilter === 'offline' && online) return false;
       if (roleFilter !== 'all' && u.role !== roleFilter) return false;
       if (businessFilter !== 'all') {
         const userBiz = u.partnerId || (u.role === 'owner' || u.role === 'partner' ? u.id : '');
@@ -749,18 +720,14 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const tel = getUserTelemetry(u);
         const nameMatch = u.name?.toLowerCase().includes(q);
         const emailMatch = u.email?.toLowerCase().includes(q);
         const bizMatch = (getBusinessLabelForUser(u) || '').toLowerCase().includes(q);
-        const ipMatch = tel.ip.toLowerCase().includes(q);
-        const locMatch = tel.location.toLowerCase().includes(q);
-        const devMatch = tel.deviceLabel.toLowerCase().includes(q);
-        if (!nameMatch && !emailMatch && !bizMatch && !ipMatch && !locMatch && !devMatch) return false;
+        if (!nameMatch && !emailMatch && !bizMatch) return false;
       }
       return true;
     });
-  }, [users, statusFilter, roleFilter, businessFilter, searchQuery, businessOwners, isUserOnline, getUserTelemetry]);
+  }, [users, roleFilter, businessFilter, searchQuery, businessOwners]);
 
   if (!canManageUsers) {
     return (
@@ -946,138 +913,6 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
         </div>
       </div>
 
-      {/* Real-Time Online Monitor & Status Filter Bar */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-3.5">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <span className="relative flex h-3 w-3 shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-            </span>
-            <div>
-              <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                Monitor Status Online, Lokasi, IP & Perangkat (Real-Time)
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  {onlineUserCount} Aktif Sekarang
-                </span>
-              </h3>
-              <p className="text-xs text-gray-500">
-                Melacak koneksi aktif secara langsung (WebSocket Presence) beserta lokasi kota, IP Address, dan jenis perangkat.
-              </p>
-            </div>
-          </div>
-
-          {/* Status Filter Tabs */}
-          <div className="inline-flex items-center p-1 bg-gray-100 rounded-lg border border-gray-200 self-start lg:self-auto">
-            <button
-              type="button"
-              onClick={() => setStatusFilter('all')}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                statusFilter === 'all'
-                  ? 'bg-white text-gray-900 shadow-2xs'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Semua ({users.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('online')}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                statusFilter === 'online'
-                  ? 'bg-emerald-600 text-white shadow-2xs'
-                  : 'text-emerald-700 hover:bg-emerald-50'
-              }`}
-            >
-              <span className={`w-2 h-2 rounded-full ${statusFilter === 'online' ? 'bg-white' : 'bg-emerald-500'}`} />
-              Sedang Online ({onlineUserCount})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('offline')}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                statusFilter === 'offline'
-                  ? 'bg-gray-800 text-white shadow-2xs'
-                  : 'text-gray-600 hover:bg-gray-200/70'
-              }`}
-            >
-              <span className="w-2 h-2 rounded-full bg-gray-400" />
-              Offline ({offlineUserCount})
-            </button>
-          </div>
-        </div>
-
-        {/* Live Active Sessions Strip */}
-        {scopedOnlineSessions.length > 0 && (
-          <div className="pt-3 border-t border-gray-100">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-2 flex items-center gap-1.5">
-              <Wifi className="w-3.5 h-3.5 text-emerald-500" />
-              Sesi Perangkat yang Sedang Online Detik Ini ({scopedOnlineSessions.length})
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-              {scopedOnlineSessions.slice(0, 6).map(sess => {
-                const matchedUser = users.find(u => u.id === sess.userId);
-                const DeviceIcon =
-                  sess.deviceType === 'mobile'
-                    ? Smartphone
-                    : sess.deviceType === 'tablet'
-                    ? Tablet
-                    : sess.deviceType === 'tv'
-                    ? Tv
-                    : Monitor;
-                return (
-                  <div
-                    key={sess.userId}
-                    onClick={() => matchedUser && setInspectingUser(matchedUser)}
-                    className="flex items-start justify-between gap-2.5 p-2.5 rounded-lg border border-emerald-200/80 bg-emerald-50/40 hover:bg-emerald-50/80 transition-colors cursor-pointer"
-                  >
-                    <div className="flex items-start gap-2.5 min-w-0">
-                      <div className="relative shrink-0 mt-0.5">
-                        <div className="w-8 h-8 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center">
-                          {sess.name?.charAt(0)?.toUpperCase() || 'U'}
-                        </div>
-                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <p className="text-xs font-bold text-gray-900 truncate">{sess.name}</p>
-                          <span className="text-[10px] font-semibold px-1.5 py-0.2 bg-white text-emerald-800 border border-emerald-200 rounded shrink-0">
-                            {getRoleLabel(sess.role, sess.staffType)}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-600 mt-0.5">
-                          <span className="inline-flex items-center gap-1 font-medium text-emerald-800">
-                            <Activity className="w-3 h-3 text-emerald-600 shrink-0" />
-                            {sess.activePageLabel || 'Panel Guestly'}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500 mt-0.5">
-                          <span className="inline-flex items-center gap-1">
-                            <DeviceIcon className="w-3 h-3 text-gray-400 shrink-0" />
-                            {sess.device || 'Browser'}
-                          </span>
-                          {sess.location && sess.location !== '-' && (
-                            <span className="inline-flex items-center gap-0.5">
-                              <MapPin className="w-2.5 h-2.5 text-rose-500 shrink-0" />
-                              {sess.location}
-                            </span>
-                          )}
-                          {sess.ip && sess.ip !== '-' && (
-                            <span className="font-mono text-[10px] text-indigo-700 bg-indigo-50 px-1 rounded">
-                              {sess.ip}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-
       {/* Filter & Search Bar */}
       <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
@@ -1086,7 +921,7 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Cari nama user, email, bisnis, IP Address, lokasi kota, atau perangkat..."
+            placeholder="Cari nama user, email, atau nama bisnis..."
             className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
           />
         </div>
@@ -1923,9 +1758,6 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                     User / Petugas
                   </th>
                   <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status Online, Lokasi & Perangkat
-                  </th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Role & Spesialisasi
                   </th>
                   <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1951,111 +1783,22 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                   const bizLabel = getBusinessLabelForUser(user);
                   const canModify = canModifyTargetUser(user);
                   const serviceHidden = shouldHideServiceInfo(user);
-                  const telemetry = getUserTelemetry(user);
-                  const DeviceIcon =
-                    telemetry.deviceType === 'mobile'
-                      ? Smartphone
-                      : telemetry.deviceType === 'tablet'
-                      ? Tablet
-                      : telemetry.deviceType === 'tv'
-                      ? Tv
-                      : Monitor;
 
                   return (
                     <tr key={user.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-5 py-4 whitespace-nowrap">
                         <div className="flex items-center">
-                          <div className="relative flex-shrink-0">
-                            <div className="h-10 w-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold">
-                              {user.name?.charAt(0)?.toUpperCase() || 'U'}
-                            </div>
-                            {telemetry.isOnline ? (
-                              <span
-                                title="Sedang Online"
-                                className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center"
-                              >
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 ring-2 ring-white" />
-                              </span>
-                            ) : (
-                              <span
-                                title="Offline"
-                                className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-gray-300 ring-2 ring-white"
-                              />
-                            )}
+                          <div className="flex-shrink-0 h-10 w-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold">
+                            {user.name?.charAt(0)?.toUpperCase() || 'U'}
                           </div>
                           <div className="ml-3.5">
-                            <div className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
-                              <span>{user.name}</span>
-                              {user.id === appUser?.id && (
-                                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                  Anda
-                                </span>
-                              )}
-                            </div>
+                            <div className="text-sm font-semibold text-gray-900">{user.name}</div>
                             <div className="text-xs text-gray-500">{user.email}</div>
                             {user.phone && <div className="text-[11px] text-gray-400">{user.phone}</div>}
                             {user.createdByName && (
                               <div className="text-[10px] text-gray-400 mt-0.5">
                                 Dibuat oleh: <span className="font-medium text-gray-600">{user.createdByName}</span>
                               </div>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Status Online, Lokasi, IP & Perangkat */}
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <div
-                          onClick={() => setInspectingUser(user)}
-                          title="Klik untuk melihat detail lengkap Lokasi, IP & Perangkat"
-                          className="flex flex-col gap-1 cursor-pointer group max-w-[260px]"
-                        >
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            {telemetry.isOnline ? (
-                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                Online Sekarang
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600 border border-gray-200">
-                                <Clock className="w-3 h-3 text-gray-400" />
-                                {telemetry.lastSeenDate && !isNaN(telemetry.lastSeenDate.getTime())
-                                  ? `Aktif ${formatDistanceToNow(telemetry.lastSeenDate, {
-                                      addSuffix: true,
-                                      locale: localeId,
-                                    })}`
-                                  : 'Belum tercatat'}
-                              </span>
-                            )}
-                            {telemetry.activePageLabel && (
-                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-50/80 text-indigo-700 border border-indigo-100 truncate max-w-[145px]">
-                                {telemetry.activePageLabel}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Perangkat / OS / Browser */}
-                          <div className="flex items-center gap-1.5 text-[11px] text-gray-600">
-                            <DeviceIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                            <span className="truncate font-medium">
-                              {telemetry.deviceLabel !== '-' ? telemetry.deviceLabel : 'Perangkat belum terdeteksi'}
-                            </span>
-                          </div>
-
-                          {/* Lokasi & IP Address */}
-                          <div className="flex items-center gap-2 text-[11px] text-gray-500">
-                            <span className="inline-flex items-center gap-1 truncate max-w-[140px]">
-                              <MapPin className="w-3 h-3 text-rose-500 shrink-0" />
-                              <span className="truncate">
-                                {telemetry.location !== '-' ? telemetry.location : 'Lokasi belum tercatat'}
-                              </span>
-                            </span>
-                            {telemetry.ip !== '-' && (
-                              <span className="inline-flex items-center gap-1 font-mono text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 border border-slate-200 shrink-0 group-hover:border-indigo-300 group-hover:text-indigo-700">
-                                <Globe className="w-2.5 h-2.5 text-indigo-500" />
-                                {telemetry.ip}
-                              </span>
                             )}
                           </div>
                         </div>
@@ -2196,7 +1939,7 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                 })}
                 {filteredUsers.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
                       Tidak ada user yang sesuai dengan filter.
                     </td>
                   </tr>
@@ -2217,158 +1960,6 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
           )}
         </div>
       )}
-
-      {/* Modal Detail Sesi, Lokasi, IP & Perangkat */}
-      <Modal
-        isOpen={Boolean(inspectingUser)}
-        onClose={() => setInspectingUser(null)}
-        title="Detail Status Online, Lokasi, IP & Perangkat"
-      >
-        {inspectingUser && (() => {
-          const tel = getUserTelemetry(inspectingUser);
-          const DeviceIcon =
-            tel.deviceType === 'mobile'
-              ? Smartphone
-              : tel.deviceType === 'tablet'
-              ? Tablet
-              : tel.deviceType === 'tv'
-              ? Tv
-              : Monitor;
-          return (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-3.5 rounded-xl bg-gray-50 border border-gray-200">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="relative shrink-0">
-                    <div className="w-11 h-11 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-base">
-                      {inspectingUser.name?.charAt(0)?.toUpperCase() || 'U'}
-                    </div>
-                    <span
-                      className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full ring-2 ring-white ${
-                        tel.isOnline ? 'bg-emerald-500' : 'bg-gray-400'
-                      }`}
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <h4 className="text-sm font-bold text-gray-900 truncate">{inspectingUser.name}</h4>
-                    <p className="text-xs text-gray-500 truncate">{inspectingUser.email}</p>
-                    <span className="inline-block mt-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
-                      {getRoleLabel(inspectingUser.role, inspectingUser.staffType)}
-                    </span>
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  {tel.isOnline ? (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                      <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
-                      ONLINE
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-200 text-gray-700">
-                      OFFLINE
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div className="p-3 rounded-lg border border-gray-200 bg-white space-y-1">
-                  <div className="text-gray-400 font-semibold uppercase tracking-wider text-[10px] flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-indigo-500" />
-                    Waktu Aktivitas Terakhir
-                  </div>
-                  <p className="font-semibold text-gray-900 text-sm">
-                    {tel.isOnline
-                      ? 'Sedang Aktif Sekarang (Real-Time)'
-                      : tel.lastSeenDate && !isNaN(tel.lastSeenDate.getTime())
-                      ? formatDistanceToNow(tel.lastSeenDate, { addSuffix: true, locale: localeId })
-                      : 'Belum tercatat'}
-                  </p>
-                  {tel.lastSeenDate && !isNaN(tel.lastSeenDate.getTime()) && (
-                    <p className="text-[11px] text-gray-500">
-                      {format(tel.lastSeenDate, 'dd MMMM yyyy, HH:mm:ss', { locale: localeId })}
-                    </p>
-                  )}
-                </div>
-
-                <div className="p-3 rounded-lg border border-gray-200 bg-white space-y-1">
-                  <div className="text-gray-400 font-semibold uppercase tracking-wider text-[10px] flex items-center gap-1">
-                    <Activity className="w-3.5 h-3.5 text-emerald-500" />
-                    Halaman / Modul Terakhir
-                  </div>
-                  <p className="font-semibold text-gray-900 text-sm">
-                    {tel.activePageLabel || 'Panel Guestly'}
-                  </p>
-                  {tel.activePath && (
-                    <p className="text-[11px] font-mono text-gray-400 truncate" title={tel.activePath}>
-                      {tel.activePath}
-                    </p>
-                  )}
-                </div>
-
-                <div className="p-3 rounded-lg border border-gray-200 bg-white space-y-1">
-                  <div className="text-gray-400 font-semibold uppercase tracking-wider text-[10px] flex items-center gap-1">
-                    <DeviceIcon className="w-3.5 h-3.5 text-indigo-500" />
-                    Perangkat & Browser
-                  </div>
-                  <p className="font-semibold text-gray-900 text-sm">
-                    {tel.deviceLabel !== '-' ? tel.deviceLabel : 'Belum terdeteksi'}
-                  </p>
-                  <p className="text-[11px] text-gray-500">
-                    Tipe:{' '}
-                    <span className="font-medium uppercase">{tel.deviceType || 'Desktop'}</span>
-                    {tel.os ? ` • OS: ${tel.os}` : ''}
-                    {tel.browser ? ` • Browser: ${tel.browser}` : ''}
-                  </p>
-                </div>
-
-                <div className="p-3 rounded-lg border border-gray-200 bg-white space-y-1">
-                  <div className="text-gray-400 font-semibold uppercase tracking-wider text-[10px] flex items-center gap-1">
-                    <Globe className="w-3.5 h-3.5 text-indigo-500" />
-                    IP Address & Jaringan (ISP)
-                  </div>
-                  <p className="font-mono font-bold text-indigo-700 text-sm">
-                    {tel.ip !== '-' ? tel.ip : 'Belum tercatat'}
-                  </p>
-                  <p className="text-[11px] text-gray-500 truncate">
-                    {tel.isp ? `ISP: ${tel.isp}` : 'Jaringan Publik Standar'}
-                  </p>
-                </div>
-
-                <div className="p-3 rounded-lg border border-gray-200 bg-white space-y-1 sm:col-span-2">
-                  <div className="text-gray-400 font-semibold uppercase tracking-wider text-[10px] flex items-center gap-1">
-                    <MapPin className="w-3.5 h-3.5 text-rose-500" />
-                    Estimasi Lokasi Geografis (Geo-IP)
-                  </div>
-                  <p className="font-semibold text-gray-900 text-sm">
-                    {tel.location !== '-' ? tel.location : 'Lokasi belum tercatat'}
-                  </p>
-                  {(tel.city || tel.region || tel.country) && (
-                    <p className="text-[11px] text-gray-500">
-                      {[
-                        tel.city ? `Kota: ${tel.city}` : '',
-                        tel.region ? `Provinsi/Wilayah: ${tel.region}` : '',
-                        tel.country ? `Negara: ${tel.country}` : '',
-                      ]
-                        .filter(Boolean)
-                        .join(' • ')}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex justify-end pt-2">
-                <button
-                  type="button"
-                  onClick={() => setInspectingUser(null)}
-                  className="px-4 py-2 bg-gray-900 text-white text-xs font-semibold rounded-lg hover:bg-gray-800 cursor-pointer"
-                >
-                  Tutup
-                </button>
-              </div>
-            </div>
-          );
-        })()}
-      </Modal>
     </div>
   );
 }

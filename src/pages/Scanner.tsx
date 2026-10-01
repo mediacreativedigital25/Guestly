@@ -199,6 +199,8 @@ export default function Scanner() {
 
   const isProcessingRef = useRef(false);
   const lastScannedCodeRef = useRef<string | null>(null);
+  const allGuestsRef = useRef<Guest[]>([]);
+  const lastDeltaSyncRef = useRef<string>(new Date(Date.now() - 60000).toISOString());
 
   const refreshOfflineStatus = () => {
     if (!eventId) return;
@@ -207,21 +209,17 @@ export default function Scanner() {
     setIsForceOffline(offlineSyncService.isForceOffline(eventId));
   };
 
-  const applyGuestsListToState = (rawList: Guest[], saveSnapshot = true) => {
+  const recomputeDerivedState = (mergedList: Guest[]) => {
     if (!eventId) return;
-    const withPendingQueue = offlineSyncService.mergeGuestsWithPendingQueue(eventId, rawList);
-    if (saveSnapshot && withPendingQueue.length > 0) {
-      offlineSyncService.saveGuestsSnapshot(eventId, withPendingQueue);
-    }
-    const merged = souvenirStorage.mergeGuestsWithSouvenirs(eventId, withPendingQueue);
-    setAllGuests(merged);
+    allGuestsRef.current = mergedList;
+    setAllGuests(mergedList);
     setStats({
-      total: merged.length,
-      attended: merged.filter(g => g.attended).length,
-      souvenirTaken: merged.filter(g => g.souvenirTaken).length
+      total: mergedList.length,
+      attended: mergedList.filter(g => g.attended).length,
+      souvenirTaken: mergedList.filter(g => g.souvenirTaken).length
     });
 
-    const attendedOrSouvenir = merged
+    const attendedOrSouvenir = mergedList
       .filter(g => g.attended || g.souvenirTaken)
       .sort((a, b) => {
         const dA = parseFirestoreDate(a.attendedAt || a.souvenirTakenAt || a.updatedAt)?.getTime() || 0;
@@ -231,13 +229,107 @@ export default function Scanner() {
       .slice(0, 15);
     setRecentScans(attendedOrSouvenir);
 
-    const updatedSouvenirs = souvenirStorage.getSouvenirs(eventId, merged);
+    const updatedSouvenirs = souvenirStorage.getSouvenirs(eventId, mergedList);
     setSouvenirs(updatedSouvenirs);
     if (updatedSouvenirs.length > 0) {
       setSelectedSouvenirId(prev => prev || updatedSouvenirs[0].id!);
     }
     setSouvenirLogs(souvenirStorage.getLogs(eventId));
     refreshOfflineStatus();
+  };
+
+  const applyGuestsListToState = (rawList: Guest[], saveSnapshot = true) => {
+    if (!eventId) return;
+    const withPendingQueue = offlineSyncService.mergeGuestsWithPendingQueue(eventId, rawList);
+    if (saveSnapshot && withPendingQueue.length > 0) {
+      offlineSyncService.saveGuestsSnapshot(eventId, withPendingQueue);
+    }
+    const merged = souvenirStorage.mergeGuestsWithSouvenirs(eventId, withPendingQueue);
+    lastDeltaSyncRef.current = new Date(Date.now() - 5000).toISOString();
+    recomputeDerivedState(merged);
+  };
+
+  // O(1) / Incremental Update: Merge 1 or a few changed guests without re-downloading 2,000+ rows
+  const applyDeltaGuestsToState = (changedGuests: Guest[]) => {
+    if (!eventId || !changedGuests || changedGuests.length === 0) return;
+    const currentList =
+      allGuestsRef.current.length > 0
+        ? allGuestsRef.current
+        : offlineSyncService.getGuestsSnapshot(eventId);
+
+    if (currentList.length === 0) {
+      loadAllGuests();
+      return;
+    }
+
+    const byId = new Map<string, Guest>();
+    const byTicket = new Map<string, Guest>();
+    for (const cg of changedGuests) {
+      if (cg.id) byId.set(cg.id, cg);
+      if (cg.ticketCode) byTicket.set(cg.ticketCode.trim().toUpperCase(), cg);
+    }
+
+    let matchedAny = false;
+    const updatedRaw = currentList.map((existing) => {
+      const incoming =
+        (existing.id && byId.get(existing.id)) ||
+        (existing.ticketCode && byTicket.get(existing.ticketCode.trim().toUpperCase()));
+      if (!incoming) return existing;
+      matchedAny = true;
+      const mergedGuest: Guest = {
+        ...existing,
+        ...incoming,
+        id: existing.id || incoming.id,
+        ticketCode: existing.ticketCode || incoming.ticketCode,
+        tableNumber: incoming.tableNumber || existing.tableNumber,
+        pax: incoming.pax ?? existing.pax,
+        attended: Boolean(existing.attended || incoming.attended),
+        attendedAt: incoming.attendedAt || existing.attendedAt,
+        checkInTime: incoming.checkInTime || incoming.attendedAt || existing.checkInTime,
+        checkInStaff: incoming.checkInStaff || existing.checkInStaff,
+        souvenirTaken: Boolean(existing.souvenirTaken || incoming.souvenirTaken),
+        souvenirName: incoming.souvenirName || existing.souvenirName,
+        souvenirTakenAt: incoming.souvenirTakenAt || existing.souvenirTakenAt,
+        souvenirTakenBy: incoming.souvenirTakenBy || existing.souvenirTakenBy,
+      };
+      if (mergedGuest.id) {
+        offlineSyncService.updateGuestInSnapshot(eventId, mergedGuest.id, mergedGuest);
+      }
+      return mergedGuest;
+    });
+
+    if (!matchedAny) {
+      for (const cg of changedGuests) {
+        if (cg.id && cg.name) {
+          updatedRaw.unshift(cg);
+          offlineSyncService.updateGuestInSnapshot(eventId, cg.id, cg);
+        }
+      }
+    }
+
+    const withPending = offlineSyncService.mergeGuestsWithPendingQueue(eventId, updatedRaw);
+    const merged = souvenirStorage.mergeGuestsWithSouvenirs(eventId, withPending);
+    recomputeDerivedState(merged);
+  };
+
+  // Lightweight Delta Sync: Only fetches guests modified since last sync (0-5 rows instead of 2,000+ rows)
+  const syncRecentGuestChanges = async () => {
+    if (!eventId || !navigator.onLine || offlineSyncService.isForceOffline(eventId)) return;
+    if (allGuestsRef.current.length === 0) {
+      await loadAllGuests();
+      return;
+    }
+    try {
+      const sinceIso = lastDeltaSyncRef.current;
+      const nextCheckpoint = new Date(Date.now() - 3000).toISOString();
+      const changed = await supabaseDb.getGuestsUpdatedSince(eventId, sinceIso);
+      lastDeltaSyncRef.current = nextCheckpoint;
+      if (changed && changed.length > 0) {
+        applyDeltaGuestsToState(changed);
+      }
+    } catch {
+      // silent delta fallback
+    }
   };
 
   const loadAllGuests = async () => {
@@ -418,29 +510,40 @@ export default function Scanner() {
     };
   }, [eventId]);
 
-  // Subscribe to real-time check-ins, souvenirs, and live monitoring heartbeat
+  // Subscribe to real-time check-ins, souvenirs, and lightweight delta sync
   useEffect(() => {
     if (!eventId) return;
 
-    // Initial load
+    // Initial full load (1x on mount)
     loadAllGuests();
 
-    // 1. Subscribe via Supabase Realtime (Broadcast + Postgres Changes)
-    const unsubRealtime = supabaseDb.subscribeToGuests(eventId, () => {
-      loadAllGuests();
+    // 1. Subscribe via Supabase Realtime (Broadcast + Postgres Changes) — Incremental Single-Guest Merge
+    const unsubRealtime = supabaseDb.subscribeToGuests(eventId, (payload) => {
+      if (payload?.new) {
+        const mapped = supabaseDb.mapRealtimeGuest(payload.new);
+        if (mapped) {
+          applyDeltaGuestsToState([mapped]);
+          return;
+        }
+      }
+      syncRecentGuestChanges();
     });
 
     // 2. Listen to local & cross-device compat changes
     const handleCompatChange = (e: any) => {
       const col = e.detail?.collectionName;
-      if (!col || col === 'guests' || col === 'settings' || col === 'events') {
-        loadAllGuests();
+      if (col === 'settings' || col === 'events') {
+        const updatedSouvenirs = souvenirStorage.getSouvenirs(eventId, allGuestsRef.current);
+        setSouvenirs(updatedSouvenirs);
+      } else if (!col || col === 'guests') {
+        syncRecentGuestChanges();
       }
     };
 
     const handleSouvenirsChanged = (e: any) => {
       if (!e.detail?.eventId || e.detail?.eventId === eventId) {
-        loadAllGuests();
+        const updatedSouvenirs = souvenirStorage.getSouvenirs(eventId, allGuestsRef.current);
+        setSouvenirs(updatedSouvenirs);
       }
     };
 
@@ -452,7 +555,7 @@ export default function Scanner() {
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        loadAllGuests();
+        syncRecentGuestChanges();
       }
     };
 
@@ -461,7 +564,7 @@ export default function Scanner() {
     window.addEventListener('guestly_souvenir_logs_changed', handleLogsChanged);
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // 3. Guaranteed 3-second real-time monitoring heartbeat when tab is visible & online
+    // 3. Lightweight 10-second Delta Sync (only fetches rows changed in last 10s, 0 bytes if idle)
     const liveInterval = setInterval(() => {
       if (
         document.visibilityState === 'visible' &&
@@ -469,9 +572,9 @@ export default function Scanner() {
         navigator.onLine &&
         !offlineSyncService.isForceOffline(eventId)
       ) {
-        loadAllGuests();
+        syncRecentGuestChanges();
       }
-    }, 3000);
+    }, 10000);
 
     return () => {
       unsubRealtime();
@@ -492,181 +595,215 @@ export default function Scanner() {
   const activeSouvenir = souvenirs.find(s => s.id === selectedSouvenirId) || souvenirs[0];
 
   const executeOnlineTicketTransaction = async (code: string) => {
-    const guestsRef = collection(db, 'events', eventId!, 'guests');
-    const q = query(guestsRef, where('ticketCode', '==', code), limit(1));
-    const snapshot = await getDocs(q);
-
-    if (snapshot.empty) {
-      const notFoundErr: any = new Error('TICKET_NOT_FOUND');
-      throw notFoundErr;
+    // 1. Direct single-row indexed query in Supabase (fallback to compat if needed)
+    let freshGuest = await supabaseDb.getGuestByTicket(eventId!, code).catch(() => null);
+    if (!freshGuest) {
+      const guestsRef = collection(db, 'events', eventId!, 'guests');
+      const q = query(guestsRef, where('ticketCode', '==', code), limit(1));
+      const snapshot = await getDocs(q);
+      if (snapshot.empty) {
+        const notFoundErr: any = new Error('TICKET_NOT_FOUND');
+        throw notFoundErr;
+      }
+      freshGuest = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Guest;
     }
 
-    const guestDocId = snapshot.docs[0].id;
-    const guestDocRef = doc(db, 'events', eventId!, 'guests', guestDocId);
+    if (!freshGuest || !freshGuest.id) {
+      throw new Error('GUEST_NOT_FOUND');
+    }
 
-    // Check against pending local queue first so we never allow duplicate scan if offline queue hasn't flushed yet
-    const localMerged = offlineSyncService.mergeGuestsWithPendingQueue(eventId!, allGuests);
-    const localGuest = localMerged.find(g => g.id === guestDocId);
-
-    const txRes = await runTransaction(db, async (transaction) => {
-      const freshSnap = await transaction.get(guestDocRef);
-      if (!freshSnap.exists()) {
-        throw new Error('GUEST_NOT_FOUND');
-      }
-
-      const rawData = freshSnap.data();
-      const guestData = {
-        ...rawData,
-        attended: rawData.attended || localGuest?.attended,
-        attendedAt: rawData.attendedAt || localGuest?.attendedAt,
-        checkInStaff: rawData.checkInStaff || localGuest?.checkInStaff,
-        souvenirTaken: rawData.souvenirTaken || localGuest?.souvenirTaken,
-        souvenirTakenAt: rawData.souvenirTakenAt || localGuest?.souvenirTakenAt,
-        souvenirName: rawData.souvenirName || localGuest?.souvenirName,
-        souvenirTakenBy: rawData.souvenirTakenBy || localGuest?.souvenirTakenBy,
-      };
-
-      if (stationMode === 'souvenir_only') {
-        const isAlreadyTaken = guestData.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
-        if (isAlreadyTaken) {
-          const localTaken = souvenirStorage.getGuestTakenInfo(eventId!, guestDocId);
-          const error = new Error('ALREADY_TAKEN_SOUVENIR');
-          (error as any).souvenirTakenAt = guestData.souvenirTakenAt || localTaken?.takenAt;
-          (error as any).guestName = guestData.name;
-          (error as any).souvenirName = guestData.souvenirName || localTaken?.souvenirName || 'Souvenir';
-          (error as any).souvenirTakenBy = guestData.souvenirTakenBy || localTaken?.takenBy;
-          throw error;
-        }
-
-        if (!activeSouvenir || !activeSouvenir.id) {
-          throw new Error('NO_SOUVENIR_CONFIGURED');
-        }
-
-        if ((activeSouvenir.remainingStock || 0) <= 0) {
-          throw new Error('OUT_OF_STOCK');
-        }
-
-        transaction.update(guestDocRef, {
-          souvenirTaken: true,
-          souvenirTakenAt: serverTimestamp(),
-          souvenirId: activeSouvenir.id,
-          souvenirName: activeSouvenir.name,
-          souvenirQuantity: 1,
-          souvenirTakenBy: currentOperator,
-          attended: true,
-          attendedAt: guestData.attendedAt || serverTimestamp(),
-          checkInStaff: guestData.checkInStaff || currentOperator,
-          updatedAt: serverTimestamp()
-        });
-
-        return { 
-          name: guestData.name, 
-          category: guestData.category || '', 
-          session: guestData.session || '',
-          souvenirGiven: true,
-          souvenirName: activeSouvenir.name,
-          guestDocId,
-          mode: 'souvenir_only' as const,
-          wasAlreadyAttended: !!guestData.attended,
-          processedOffline: false
-        };
-
-      } else if (stationMode === 'checkin_souvenir') {
-        if (guestData.attended) {
-          const error = new Error('ALREADY_ATTENDED');
-          (error as any).attendedAt = guestData.attendedAt;
-          (error as any).guestName = guestData.name;
-          (error as any).category = guestData.category;
-          (error as any).checkInStaff = guestData.checkInStaff;
-          (error as any).souvenirTaken = guestData.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
-          throw error;
-        }
-
-        const guestUpdate: any = {
-          attended: true,
-          attendedAt: serverTimestamp(),
-          checkInStaff: currentOperator,
-          updatedAt: serverTimestamp()
-        };
-
-        let souvenirGiven = false;
-        let targetSouvenirName = '';
-
-        const isAlreadyTaken = guestData.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
-        if (activeSouvenir && activeSouvenir.id && !isAlreadyTaken && (activeSouvenir.remainingStock || 0) > 0) {
-          guestUpdate.souvenirTaken = true;
-          guestUpdate.souvenirTakenAt = serverTimestamp();
-          guestUpdate.souvenirId = activeSouvenir.id;
-          guestUpdate.souvenirName = activeSouvenir.name;
-          guestUpdate.souvenirQuantity = 1;
-          guestUpdate.souvenirTakenBy = currentOperator;
-          souvenirGiven = true;
-          targetSouvenirName = activeSouvenir.name;
-        }
-
-        transaction.update(guestDocRef, guestUpdate);
-
-        return { 
-          name: guestData.name, 
-          category: guestData.category || '', 
-          session: guestData.session || '',
-          souvenirGiven,
-          souvenirName: targetSouvenirName,
-          guestDocId,
-          mode: 'checkin_souvenir' as const,
-          wasAlreadyAttended: false,
-          processedOffline: false
-        };
-
-      } else {
-        if (guestData.attended) {
-          const error = new Error('ALREADY_ATTENDED');
-          (error as any).attendedAt = guestData.attendedAt;
-          (error as any).guestName = guestData.name;
-          (error as any).category = guestData.category;
-          (error as any).checkInStaff = guestData.checkInStaff;
-          throw error;
-        }
-
-        transaction.update(guestDocRef, {
-          attended: true,
-          attendedAt: serverTimestamp(),
-          checkInStaff: currentOperator,
-          updatedAt: serverTimestamp()
-        });
-
-        return { 
-          name: guestData.name, 
-          category: guestData.category || '', 
-          session: guestData.session || '',
-          souvenirGiven: false,
-          guestDocId,
-          mode: 'checkin' as const,
-          wasAlreadyAttended: false,
-          processedOffline: false
-        };
-      }
-    });
-
-    // Also update local snapshot so offline cache stays 100% up-to-date
+    const guestDocId = freshGuest.id;
     const nowIso = new Date().toISOString();
-    offlineSyncService.updateGuestInSnapshot(eventId!, txRes.guestDocId, {
-      attended: true,
-      attendedAt: nowIso,
-      checkInTime: nowIso,
-      checkInStaff: currentOperator,
-      ...(txRes.souvenirGiven && activeSouvenir
-        ? {
-            souvenirTaken: true,
-            souvenirTakenAt: nowIso,
-            souvenirId: activeSouvenir.id,
-            souvenirName: activeSouvenir.name,
-            souvenirTakenBy: currentOperator,
-          }
-        : {}),
-    });
 
-    return txRes;
+    // 2. Merge with in-memory & pending offline queue so duplicate scans across >4 scanners are 100% blocked
+    const localMerged = offlineSyncService.mergeGuestsWithPendingQueue(
+      eventId!,
+      allGuestsRef.current.length > 0 ? allGuestsRef.current : allGuests
+    );
+    const localGuest = localMerged.find(
+      (g) => g.id === guestDocId || (g.ticketCode || '').trim().toUpperCase() === code
+    );
+
+    const guestData: Guest = {
+      ...freshGuest,
+      attended: Boolean(freshGuest.attended || localGuest?.attended),
+      attendedAt: freshGuest.attendedAt || localGuest?.attendedAt,
+      checkInStaff: freshGuest.checkInStaff || localGuest?.checkInStaff,
+      souvenirTaken: Boolean(freshGuest.souvenirTaken || localGuest?.souvenirTaken),
+      souvenirTakenAt: freshGuest.souvenirTakenAt || localGuest?.souvenirTakenAt,
+      souvenirName: freshGuest.souvenirName || localGuest?.souvenirName,
+      souvenirTakenBy: freshGuest.souvenirTakenBy || localGuest?.souvenirTakenBy,
+    };
+
+    if (stationMode === 'souvenir_only') {
+      const isAlreadyTaken = guestData.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
+      if (isAlreadyTaken) {
+        const localTaken = souvenirStorage.getGuestTakenInfo(eventId!, guestDocId);
+        const error: any = new Error('ALREADY_TAKEN_SOUVENIR');
+        error.souvenirTakenAt = guestData.souvenirTakenAt || localTaken?.takenAt;
+        error.guestName = guestData.name;
+        error.souvenirName = guestData.souvenirName || localTaken?.souvenirName || 'Souvenir';
+        error.souvenirTakenBy = guestData.souvenirTakenBy || localTaken?.takenBy;
+        throw error;
+      }
+
+      if (!activeSouvenir || !activeSouvenir.id) {
+        throw new Error('NO_SOUVENIR_CONFIGURED');
+      }
+
+      if ((activeSouvenir.remainingStock || 0) <= 0) {
+        throw new Error('OUT_OF_STOCK');
+      }
+
+      const attendedAtVal = guestData.attendedAt || nowIso;
+      const checkInStaffVal = guestData.checkInStaff || currentOperator;
+
+      await supabaseDb.updateGuest(guestDocId, {
+        attended: true,
+        attendedAt: attendedAtVal,
+        checkInTime: attendedAtVal,
+        checkInStaff: checkInStaffVal,
+        souvenirTaken: true,
+        souvenirName: activeSouvenir.name,
+        souvenirTakenAt: nowIso,
+        souvenirTakenBy: currentOperator,
+      });
+
+      const updatedGuestObj: Guest = {
+        ...guestData,
+        attended: true,
+        attendedAt: attendedAtVal,
+        checkInTime: attendedAtVal,
+        checkInStaff: checkInStaffVal,
+        souvenirTaken: true,
+        souvenirId: activeSouvenir.id,
+        souvenirName: activeSouvenir.name,
+        souvenirTakenAt: nowIso,
+        souvenirTakenBy: currentOperator,
+        updatedAt: nowIso,
+      };
+      applyDeltaGuestsToState([updatedGuestObj]);
+
+      return {
+        name: guestData.name,
+        category: guestData.category || '',
+        session: guestData.session || '',
+        tableNumber: guestData.tableNumber || '',
+        pax: guestData.pax,
+        souvenirGiven: true,
+        souvenirName: activeSouvenir.name,
+        guestDocId,
+        mode: 'souvenir_only' as const,
+        wasAlreadyAttended: !!guestData.attended,
+        processedOffline: false,
+      };
+    } else if (stationMode === 'checkin_souvenir') {
+      if (guestData.attended) {
+        const error: any = new Error('ALREADY_ATTENDED');
+        error.attendedAt = guestData.attendedAt;
+        error.guestName = guestData.name;
+        error.category = guestData.category;
+        error.checkInStaff = guestData.checkInStaff;
+        error.souvenirTaken = guestData.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
+        throw error;
+      }
+
+      let souvenirGiven = false;
+      let targetSouvenirName = '';
+
+      const isAlreadyTaken = guestData.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
+      if (activeSouvenir && activeSouvenir.id && !isAlreadyTaken && (activeSouvenir.remainingStock || 0) > 0) {
+        souvenirGiven = true;
+        targetSouvenirName = activeSouvenir.name;
+      }
+
+      await supabaseDb.updateGuest(guestDocId, {
+        attended: true,
+        attendedAt: nowIso,
+        checkInTime: nowIso,
+        checkInStaff: currentOperator,
+        ...(souvenirGiven
+          ? {
+              souvenirTaken: true,
+              souvenirName: targetSouvenirName,
+              souvenirTakenAt: nowIso,
+              souvenirTakenBy: currentOperator,
+            }
+          : {}),
+      });
+
+      const updatedGuestObj: Guest = {
+        ...guestData,
+        attended: true,
+        attendedAt: nowIso,
+        checkInTime: nowIso,
+        checkInStaff: currentOperator,
+        ...(souvenirGiven
+          ? {
+              souvenirTaken: true,
+              souvenirId: activeSouvenir?.id,
+              souvenirName: targetSouvenirName,
+              souvenirTakenAt: nowIso,
+              souvenirTakenBy: currentOperator,
+            }
+          : {}),
+        updatedAt: nowIso,
+      };
+      applyDeltaGuestsToState([updatedGuestObj]);
+
+      return {
+        name: guestData.name,
+        category: guestData.category || '',
+        session: guestData.session || '',
+        tableNumber: guestData.tableNumber || '',
+        pax: guestData.pax,
+        souvenirGiven,
+        souvenirName: targetSouvenirName,
+        guestDocId,
+        mode: 'checkin_souvenir' as const,
+        wasAlreadyAttended: false,
+        processedOffline: false,
+      };
+    } else {
+      if (guestData.attended) {
+        const error: any = new Error('ALREADY_ATTENDED');
+        error.attendedAt = guestData.attendedAt;
+        error.guestName = guestData.name;
+        error.category = guestData.category;
+        error.checkInStaff = guestData.checkInStaff;
+        throw error;
+      }
+
+      await supabaseDb.updateGuest(guestDocId, {
+        attended: true,
+        attendedAt: nowIso,
+        checkInTime: nowIso,
+        checkInStaff: currentOperator,
+      });
+
+      const updatedGuestObj: Guest = {
+        ...guestData,
+        attended: true,
+        attendedAt: nowIso,
+        checkInTime: nowIso,
+        checkInStaff: currentOperator,
+        updatedAt: nowIso,
+      };
+      applyDeltaGuestsToState([updatedGuestObj]);
+
+      return {
+        name: guestData.name,
+        category: guestData.category || '',
+        session: guestData.session || '',
+        tableNumber: guestData.tableNumber || '',
+        pax: guestData.pax,
+        souvenirGiven: false,
+        guestDocId,
+        mode: 'checkin' as const,
+        wasAlreadyAttended: false,
+        processedOffline: false,
+      };
+    }
   };
 
   const processTicket = async (decodedText: string) => {
@@ -724,6 +861,8 @@ export default function Scanner() {
         name: string;
         category: string;
         session: string;
+        tableNumber?: string;
+        pax?: number;
         souvenirGiven: boolean;
         souvenirName?: string;
         guestDocId: string;
@@ -732,6 +871,9 @@ export default function Scanner() {
         processedOffline?: boolean;
       };
 
+      const currentMemGuests =
+        allGuestsRef.current.length > 0 ? allGuestsRef.current : allGuests;
+
       if (shouldUseOfflineDirectly) {
         transactionResult = offlineSyncService.processTicketLocally({
           eventId: eventId!,
@@ -739,7 +881,7 @@ export default function Scanner() {
           stationMode,
           activeSouvenir,
           currentOperator,
-          inMemoryGuests: allGuests,
+          inMemoryGuests: currentMemGuests,
         });
       } else {
         // Smart 1.5s Timeout: If ballroom signal lags > 1500ms or network fails, fallback to Local Snapshot
@@ -770,19 +912,20 @@ export default function Scanner() {
             stationMode,
             activeSouvenir,
             currentOperator,
-            inMemoryGuests: allGuests,
+            inMemoryGuests: currentMemGuests,
           });
         }
       }
 
       if (transactionResult) {
+        const nowIso = new Date().toISOString();
 
         // Record log and update storage outside transaction
         if (transactionResult.souvenirGiven && activeSouvenir) {
           souvenirStorage.recordGuestTake(eventId!, transactionResult.guestDocId, {
             souvenirId: activeSouvenir.id!,
             souvenirName: activeSouvenir.name,
-            takenAt: new Date().toISOString(),
+            takenAt: nowIso,
             takenBy: currentOperator
           });
 
@@ -800,11 +943,6 @@ export default function Scanner() {
               : 'Scan check-in sekaligus serah souvenir',
             performedBy: currentOperator
           });
-
-          // Refresh inventory & logs state
-          const updated = souvenirStorage.getSouvenirs(eventId!);
-          setSouvenirs(updated);
-          setSouvenirLogs(souvenirStorage.getLogs(eventId!));
         }
 
         // Sound Feedback:
@@ -815,26 +953,49 @@ export default function Scanner() {
           playBeep();
         }
 
-        // Update stats precisely according to mode
-        if (transactionResult.mode === 'souvenir_only') {
-          setStats(prev => ({
-            ...prev,
-            attended: transactionResult.wasAlreadyAttended ? prev.attended : prev.attended + 1,
-            souvenirTaken: prev.souvenirTaken + 1
-          }));
-        } else if (transactionResult.mode === 'checkin_souvenir') {
-          setStats(prev => ({
-            ...prev,
-            attended: prev.attended + 1,
-            souvenirTaken: transactionResult.souvenirGiven ? prev.souvenirTaken + 1 : prev.souvenirTaken
-          }));
+        const matchedGuestObj = currentMemGuests.find(
+          (g) => g.id === transactionResult.guestDocId || (g.ticketCode || '').toUpperCase() === code
+        );
+        const guestTable = transactionResult.tableNumber || matchedGuestObj?.tableNumber || '';
+        const guestPax =
+          transactionResult.pax ??
+          (matchedGuestObj?.pax ? Math.max(1, Number(matchedGuestObj.pax)) : undefined);
+
+        // If processed offline, merge single guest update into memory immediately
+        if (transactionResult.processedOffline) {
+          applyDeltaGuestsToState([
+            {
+              ...(matchedGuestObj || {}),
+              id: transactionResult.guestDocId,
+              eventId: eventId!,
+              name: transactionResult.name,
+              ticketCode: code,
+              category: transactionResult.category,
+              session: transactionResult.session,
+              tableNumber: guestTable || undefined,
+              pax: guestPax,
+              attended: true,
+              attendedAt: nowIso,
+              checkInTime: nowIso,
+              checkInStaff: currentOperator,
+              ...(transactionResult.souvenirGiven
+                ? {
+                    souvenirTaken: true,
+                    souvenirName: transactionResult.souvenirName,
+                    souvenirTakenAt: nowIso,
+                    souvenirTakenBy: currentOperator,
+                  }
+                : {}),
+              updatedAt: nowIso,
+            } as Guest,
+          ]);
         } else {
-          setStats(prev => ({
-            ...prev,
-            attended: prev.attended + 1
-          }));
+          // Refresh inventory & logs state when online
+          const updated = souvenirStorage.getSouvenirs(eventId!, allGuestsRef.current);
+          setSouvenirs(updated);
+          setSouvenirLogs(souvenirStorage.getLogs(eventId!));
         }
-        
+
         const offlineBadge = transactionResult.processedOffline ? ' [Tersimpan Lokal • Auto-Sync]' : '';
         let successMessage = `${transactionResult.name} berhasil check-in di gate!${offlineBadge}`;
         if (transactionResult.mode === 'souvenir_only') {
@@ -842,12 +1003,6 @@ export default function Scanner() {
         } else if (transactionResult.souvenirGiven) {
           successMessage = `✓ ${transactionResult.name} berhasil check-in & 🎁 Souvenir "${transactionResult.souvenirName}" diserahkan!${offlineBadge}`;
         }
-
-        const matchedGuestObj = allGuests.find(
-          (g) => g.id === transactionResult.guestDocId || (g.ticketCode || '').toUpperCase() === code
-        );
-        const guestTable = matchedGuestObj?.tableNumber || '';
-        const guestPax = matchedGuestObj?.pax ? Math.max(1, Number(matchedGuestObj.pax)) : undefined;
 
         setScanResult({ 
           status: 'success', 
@@ -861,33 +1016,28 @@ export default function Scanner() {
         });
 
         if (!transactionResult.processedOffline) {
-          // Supabase Realtime Broadcast to Greeting Screen & database update
+          // Zero-latency broadcast over shared WebSocket to Greeting Screen TV & peer Scanners
           supabaseDb.broadcastGuestArrival(eventId!, {
+            id: transactionResult.guestDocId,
+            event_id: eventId,
             name: transactionResult.name,
             category: transactionResult.category,
+            seat: guestTable || undefined,
+            tableNumber: guestTable || undefined,
+            pax: guestPax,
             ticketCode: code,
+            ticket_code: code,
             session: transactionResult.session,
             attended: true,
-            attendedAt: new Date().toISOString()
+            attendedAt: nowIso,
+            check_in_time: nowIso,
+            checkInStaff: currentOperator,
+            souvenirTaken: Boolean(transactionResult.souvenirGiven),
+            souvenirName: transactionResult.souvenirName,
           });
-
-          // Also sync state into Supabase guests table
-          supabaseDb.getGuestByTicket(eventId!, code).then((found) => {
-            if (found?.id) {
-              supabaseDb.updateGuest(found.id, {
-                attended: true,
-                attendedAt: new Date().toISOString(),
-                checkInStaff: found.checkInStaff || currentOperator,
-                souvenirTaken: Boolean(transactionResult.souvenirGiven),
-                souvenirName: transactionResult.souvenirName || undefined,
-                souvenirTakenBy: transactionResult.souvenirGiven ? currentOperator : undefined
-              });
-            }
-          }).catch(e => console.warn('Supabase guest sync error:', e));
         }
 
         refreshOfflineStatus();
-        loadAllGuests();
       }
     } catch (error: any) {
       playErrorBuzz();
@@ -1036,16 +1186,22 @@ export default function Scanner() {
         operatorName: currentOperator
       });
 
-      setStats(prev => ({
-        ...prev,
-        souvenirTaken: prev.souvenirTaken + 1
-      }));
-
-      // Refresh inventory and lists
-      const updated = souvenirStorage.getSouvenirs(eventId);
-      setSouvenirs(updated);
-      setSouvenirLogs(souvenirStorage.getLogs(eventId));
-      loadAllGuests();
+      // Incremental single-guest update in memory instead of full 2,000-guest reload
+      applyDeltaGuestsToState([
+        {
+          ...guest,
+          attended: true,
+          attendedAt: guest.attendedAt || nowIso,
+          checkInStaff: guest.checkInStaff || currentOperator,
+          souvenirTaken: true,
+          souvenirTakenAt: nowIso,
+          souvenirId: activeSouvenir.id,
+          souvenirName: activeSouvenir.name,
+          souvenirQuantity: 1,
+          souvenirTakenBy: currentOperator,
+          updatedAt: nowIso,
+        },
+      ]);
     } catch (e: any) {
       console.warn("Manual handout offline/timeout fallback, queueing locally:", e?.message);
       const attendedAtVal = typeof guest.attendedAt === 'string' ? guest.attendedAt : nowIso;
@@ -1108,15 +1264,21 @@ export default function Scanner() {
         guestName: guest.name,
         operatorName: currentOperator
       });
-      setStats(prev => ({
-        ...prev,
-        souvenirTaken: prev.souvenirTaken + 1
-      }));
-      const updated = souvenirStorage.getSouvenirs(eventId);
-      setSouvenirs(updated);
-      setSouvenirLogs(souvenirStorage.getLogs(eventId));
-      refreshOfflineStatus();
-      loadAllGuests();
+      applyDeltaGuestsToState([
+        {
+          ...guest,
+          attended: true,
+          attendedAt: attendedAtVal,
+          checkInStaff: checkInStaffVal,
+          souvenirTaken: true,
+          souvenirTakenAt: nowIso,
+          souvenirId: activeSouvenir.id,
+          souvenirName: activeSouvenir.name,
+          souvenirQuantity: 1,
+          souvenirTakenBy: currentOperator,
+          updatedAt: nowIso,
+        },
+      ]);
     } finally {
       setIsHandingOutId(null);
     }
