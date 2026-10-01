@@ -103,6 +103,7 @@ const DATE_FIELDS = new Set([
   'requestedAt',
   'resolvedAt',
   'lastAuditAt',
+  'lastSeenAt',
 ]);
 
 function hydrateDates(obj: any): any {
@@ -676,10 +677,13 @@ export async function getDoc(docRef: DocRef): Promise<DocSnapshot> {
   }
 
   if (collectionName === 'users') {
-    const [{ data: userRow }, { data: metaRow }] = await Promise.all([
+    const [{ data: userRow, error: userErr }, { data: metaRow, error: metaErr }] = await Promise.all([
       supabase.from('users').select('*').eq('id', id).maybeSingle(),
       supabase.from('settings').select('data').eq('id', `doc:users:${id}`).maybeSingle(),
     ]);
+    if (userErr && metaErr) {
+      throw userErr;
+    }
     if (!userRow && !metaRow) return new DocSnapshot(id, null, docRef);
     if (userRow) {
       return new DocSnapshot(id, rowToUserModel(userRow, metaRow?.data), docRef);
@@ -957,8 +961,17 @@ export async function setDoc(docRef: DocRef, data: any, options?: { merge?: bool
 
   if (collectionName === 'users') {
     const existingSnap = await getDoc(docRef);
-    const existingModel = existingSnap?.exists() ? existingSnap.data() : {};
+    const existingExists = Boolean(existingSnap?.exists());
+    // Safety guard: if this is a partial merge update without email/role and existing doc wasn't found, abort to prevent overwriting profile with empty fallbacks
+    if (merge && !existingExists && !data?.email) {
+      return;
+    }
+    const existingModel = existingExists ? existingSnap.data() : {};
     const preservedPassword = existingModel?._password;
+    const preservedEmail = existingModel?.email;
+    const preservedName = existingModel?.name;
+    const preservedRole = existingModel?.role;
+
     const updatedModel = applyFieldOperators(existingModel, data, merge);
     if (data?._password || data?.password) {
       updatedModel._password = data._password || data.password;
@@ -966,7 +979,13 @@ export async function setDoc(docRef: DocRef, data: any, options?: { merge?: bool
     } else if (preservedPassword && !updatedModel._password) {
       updatedModel._password = preservedPassword;
     }
-    const exactRole = updatedModel.role || 'client';
+    if (merge) {
+      if (!data?.email && preservedEmail) updatedModel.email = preservedEmail;
+      if (!data?.name && preservedName) updatedModel.name = preservedName;
+      if (!data?.role && preservedRole) updatedModel.role = preservedRole;
+    }
+
+    const exactRole = updatedModel.role || preservedRole || 'client';
     const fallbackRole = ['superadmin', 'partner', 'client'].includes(exactRole)
       ? exactRole
       : exactRole === 'owner'
@@ -986,33 +1005,36 @@ export async function setDoc(docRef: DocRef, data: any, options?: { merge?: bool
     );
     if (error) throw error;
 
-    // 2. Sync summary row to public.users table
-    const { error: userRowErr } = await supabase.from('users').upsert(
-      {
-        id,
-        email: updatedModel.email || `${id}@guestly.app`,
-        name: updatedModel.name || '',
-        role: exactRole,
-        partner_id: null,
-        client_id: updatedModel.clientId || null,
-        updated_at: nowIso,
-      },
-      { onConflict: 'id' }
-    );
-
-    if (userRowErr) {
-      await supabase.from('users').upsert(
+    // 2. Sync summary row to public.users table (only if we have a valid email)
+    const resolvedEmail = updatedModel.email || preservedEmail;
+    if (resolvedEmail) {
+      const { error: userRowErr } = await supabase.from('users').upsert(
         {
           id,
-          email: updatedModel.email || `${id}@guestly.app`,
-          name: updatedModel.name || '',
-          role: fallbackRole,
+          email: resolvedEmail,
+          name: updatedModel.name ?? preservedName ?? '',
+          role: exactRole,
           partner_id: null,
           client_id: updatedModel.clientId || null,
           updated_at: nowIso,
         },
         { onConflict: 'id' }
       );
+
+      if (userRowErr) {
+        await supabase.from('users').upsert(
+          {
+            id,
+            email: resolvedEmail,
+            name: updatedModel.name ?? preservedName ?? '',
+            role: fallbackRole,
+            partner_id: null,
+            client_id: updatedModel.clientId || null,
+            updated_at: nowIso,
+          },
+          { onConflict: 'id' }
+        );
+      }
     }
 
     notifyLocalListeners('users', id);
@@ -1240,7 +1262,9 @@ export function onSnapshot(target: any, onNext: (snap: any) => void, onError?: (
   const channelName = `compat-${collectionName}-${Math.random().toString(36).slice(2, 9)}`;
   const channel = supabase
     .channel(channelName)
-    .on('postgres_changes', { event: '*', schema: 'public', table: pgTable }, () => {
+    .on('postgres_changes', { event: '*', schema: 'public', table: pgTable }, (payload: any) => {
+      const changedId = String(payload?.new?.id || payload?.old?.id || '');
+      if (changedId.startsWith('doc:user_presence:')) return;
       if (active) fetchAndEmit();
     })
     .subscribe();

@@ -2,6 +2,30 @@ export type Role = 'superadmin' | 'owner' | 'admin' | 'partner' | 'client' | 're
 
 export type StaffType = 'checkin' | 'souvenir' | 'all' | 'greeting';
 
+export interface UserPresenceSession {
+  userId: string;
+  name: string;
+  email: string;
+  role: Role;
+  staffType?: StaffType;
+  partnerId?: string | null;
+  businessName?: string;
+  ip?: string;
+  location?: string;
+  city?: string;
+  region?: string;
+  country?: string;
+  isp?: string;
+  device?: string;
+  deviceType?: 'mobile' | 'tablet' | 'desktop' | 'tv';
+  os?: string;
+  browser?: string;
+  activePath?: string;
+  activePageLabel?: string;
+  onlineAt: string;
+  lastHeartbeat: number;
+}
+
 export interface User {
   id?: string;
   uid?: string;
@@ -38,6 +62,20 @@ export interface User {
   createdBy?: string;
   createdByName?: string;
   activeUntil?: any;
+  lastSeenAt?: any;
+  lastIp?: string;
+  lastLocation?: string;
+  lastCity?: string;
+  lastRegion?: string;
+  lastCountry?: string;
+  lastIsp?: string;
+  lastDevice?: string;
+  lastDeviceType?: 'mobile' | 'tablet' | 'desktop' | 'tv';
+  lastOs?: string;
+  lastBrowser?: string;
+  lastActivePath?: string;
+  lastActivePageLabel?: string;
+  isOnline?: boolean;
   createdAt: any;
   updatedAt: any;
 }

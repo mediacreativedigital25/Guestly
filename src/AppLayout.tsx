@@ -29,8 +29,15 @@ import {
   Clock,
   CheckCircle2,
   Monitor,
+  Smartphone,
+  Tablet,
+  Tv,
+  MapPin,
+  Globe,
+  Activity,
 } from 'lucide-react';
 import { cn, getRoleLabel, shouldHideServiceInfo, isGreetingScreenUser, canUserAccessEvent, getUserBusinessId } from './lib/utils';
+import { usePresence } from './PresenceContext';
 import { showConfirm } from './lib/alerts';
 import RouteBreadcrumbs from './components/RouteBreadcrumbs';
 import { auth, db } from './lib/firebase';
@@ -48,6 +55,7 @@ interface TopbarNotification {
 
 export default function AppLayout() {
   const { currentUser, appUser, loading, logout } = useAuth();
+  const { getScopedOnlineUsers } = usePresence();
   const { settings } = useSettings();
   const location = useLocation();
   const navigate = useNavigate();
@@ -61,6 +69,7 @@ export default function AppLayout() {
   // Topbar states
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
+  const [isOnlineDropdownOpen, setIsOnlineDropdownOpen] = useState(false);
   const [notifications, setNotifications] = useState<TopbarNotification[]>([]);
   const [readNotifIds, setReadNotifIds] = useState<string[]>([]);
   const [globalSearch, setGlobalSearch] = useState('');
@@ -68,8 +77,11 @@ export default function AppLayout() {
 
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const notifDropdownRef = useRef<HTMLDivElement>(null);
+  const onlineDropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  const scopedOnlineUsers = getScopedOnlineUsers(appUser);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -79,6 +91,9 @@ export default function AppLayout() {
       }
       if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
         setIsNotifDropdownOpen(false);
+      }
+      if (onlineDropdownRef.current && !onlineDropdownRef.current.contains(e.target as Node)) {
+        setIsOnlineDropdownOpen(false);
       }
       if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
         setIsSearchOpen(false);
@@ -954,8 +969,128 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
           </div>
         </div>
 
-        {/* Right: Notification Bell & Person Profile Dropdown */}
-        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+        {/* Right: Live Online Indicator, Notification Bell & Person Profile Dropdown */}
+        <div className="flex items-center gap-2 sm:gap-3.5 shrink-0">
+          {/* 0. Real-Time Online Users Indicator (Super Admin, Owner, Partner, Admin) */}
+          {['superadmin', 'owner', 'partner', 'admin'].includes(appUser.role) && (
+            <div ref={onlineDropdownRef} className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOnlineDropdownOpen((prev) => !prev);
+                  setIsNotifDropdownOpen(false);
+                  setIsProfileDropdownOpen(false);
+                  setIsSearchOpen(false);
+                }}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-bold border transition-all duration-200 cursor-pointer",
+                  isOnlineDropdownOpen
+                    ? "bg-emerald-100 text-emerald-900 border-emerald-300 ring-2 ring-emerald-500/15"
+                    : "bg-emerald-50/80 text-emerald-800 border-emerald-200 hover:bg-emerald-100/80"
+                )}
+                title="Monitor User & Tim Online Real-Time"
+              >
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                </span>
+                <span>{scopedOnlineUsers.length}</span>
+                <span className="hidden sm:inline">Online</span>
+              </button>
+
+              <div
+                className={cn(
+                  "absolute right-0 mt-1.5 w-80 sm:w-96 bg-white rounded-xl shadow-lg border border-gray-200 py-1.5 z-50 origin-top-right transition-all duration-200 ease-out",
+                  isOnlineDropdownOpen
+                    ? "opacity-100 scale-100 translate-y-0 pointer-events-auto visible"
+                    : "opacity-0 scale-95 -translate-y-1.5 pointer-events-none invisible"
+                )}
+              >
+                <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-xs font-bold text-gray-900">
+                      User Online Real-Time ({scopedOnlineUsers.length})
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsOnlineDropdownOpen(false);
+                      navigate('/auth/login/users');
+                    }}
+                    className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                  >
+                    Manajemen User &rarr;
+                  </button>
+                </div>
+
+                <div className="max-h-80 overflow-y-auto divide-y divide-gray-100">
+                  {scopedOnlineUsers.map((sess) => {
+                    const DeviceIcon =
+                      sess.deviceType === 'mobile'
+                        ? Smartphone
+                        : sess.deviceType === 'tablet'
+                        ? Tablet
+                        : sess.deviceType === 'tv'
+                        ? Tv
+                        : Monitor;
+                    return (
+                      <div
+                        key={sess.userId}
+                        onClick={() => {
+                          setIsOnlineDropdownOpen(false);
+                          navigate('/auth/login/users');
+                        }}
+                        className="px-4 py-2.5 hover:bg-gray-50 transition-colors cursor-pointer space-y-1"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs font-bold text-gray-900 truncate">
+                              {sess.name}
+                            </span>
+                            {sess.userId === appUser.id && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                Anda
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                            {getRoleLabel(sess.role, sess.staffType)}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-800">
+                          <Activity className="w-3 h-3 text-emerald-600 shrink-0" />
+                          <span className="truncate">{sess.activePageLabel || 'Panel Guestly'}</span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500">
+                          <span className="inline-flex items-center gap-1">
+                            <DeviceIcon className="w-3 h-3 text-gray-400 shrink-0" />
+                            <span>{sess.device || 'Browser'}</span>
+                          </span>
+                          {sess.location && sess.location !== '-' && (
+                            <span className="inline-flex items-center gap-0.5">
+                              <MapPin className="w-2.5 h-2.5 text-rose-500 shrink-0" />
+                              <span>{sess.location}</span>
+                            </span>
+                          )}
+                          {sess.ip && sess.ip !== '-' && (
+                            <span className="inline-flex items-center gap-0.5 font-mono text-[10px] text-indigo-700 bg-indigo-50 px-1 rounded">
+                              <Globe className="w-2.5 h-2.5 text-indigo-500" />
+                              {sess.ip}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* 1. Notification Bell & Popup (Smooth & Mutually Exclusive) */}
           <div ref={notifDropdownRef} className="relative">
             <button
@@ -963,6 +1098,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
               onClick={() => {
                 setIsNotifDropdownOpen((prev) => !prev);
                 setIsProfileDropdownOpen(false);
+                setIsOnlineDropdownOpen(false);
                 setIsSearchOpen(false);
               }}
               className={cn(
