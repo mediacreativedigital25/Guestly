@@ -12,7 +12,7 @@ interface GlobalSettings {
     orderPaid?: string;
     orderCancelled?: string;
   };
-  activePaymentMethod?: 'manual' | 'tripay';
+  activePaymentMethod?: 'manual' | 'qris' | 'tripay';
   paymentGateway?: {
     serverKey?: string;
     clientKey?: string;
@@ -21,6 +21,12 @@ interface GlobalSettings {
     bankName?: string;
     accountNumber?: string;
     accountName?: string;
+    instructions?: string;
+  };
+  qrisPayment?: {
+    merchantName?: string;
+    nmid?: string;
+    qrisImageUrl?: string;
     instructions?: string;
   };
   salespage?: {
@@ -73,6 +79,12 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const parsed = JSON.parse(raw) as GlobalSettings;
       if (parsed.logoUrl) parsed.logoUrl = resolveMediaUrl(parsed.logoUrl);
       if (parsed.faviconUrl) parsed.faviconUrl = resolveMediaUrl(parsed.faviconUrl);
+      if (parsed.qrisPayment?.qrisImageUrl) {
+        parsed.qrisPayment = {
+          ...parsed.qrisPayment,
+          qrisImageUrl: resolveMediaUrl(parsed.qrisPayment.qrisImageUrl),
+        };
+      }
       return parsed;
     } catch {
       return null;
@@ -98,7 +110,18 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     const resolveMediaFallbackIfNeeded = async (baseData: GlobalSettings): Promise<GlobalSettings> => {
-      if (baseData.logoUrl && baseData.faviconUrl) return baseData;
+      if (baseData.logoUrl && baseData.faviconUrl) {
+        const normalized = { ...baseData };
+        if (normalized.logoUrl) normalized.logoUrl = resolveMediaUrl(normalized.logoUrl);
+        if (normalized.faviconUrl) normalized.faviconUrl = resolveMediaUrl(normalized.faviconUrl);
+        if (normalized.qrisPayment?.qrisImageUrl) {
+          normalized.qrisPayment = {
+            ...normalized.qrisPayment,
+            qrisImageUrl: resolveMediaUrl(normalized.qrisPayment.qrisImageUrl),
+          };
+        }
+        return normalized;
+      }
       try {
         const mediaSnap = await getDocs(collection(db, 'media'));
         const items = mediaSnap.docs.map((d) => d.data() as any);
@@ -118,11 +141,23 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
         if (next.logoUrl) next.logoUrl = resolveMediaUrl(next.logoUrl);
         if (next.faviconUrl) next.faviconUrl = resolveMediaUrl(next.faviconUrl);
+        if (next.qrisPayment?.qrisImageUrl) {
+          next.qrisPayment = {
+            ...next.qrisPayment,
+            qrisImageUrl: resolveMediaUrl(next.qrisPayment.qrisImageUrl),
+          };
+        }
         return next;
       } catch {
         const fallback = { ...baseData };
         if (fallback.logoUrl) fallback.logoUrl = resolveMediaUrl(fallback.logoUrl);
         if (fallback.faviconUrl) fallback.faviconUrl = resolveMediaUrl(fallback.faviconUrl);
+        if (fallback.qrisPayment?.qrisImageUrl) {
+          fallback.qrisPayment = {
+            ...fallback.qrisPayment,
+            qrisImageUrl: resolveMediaUrl(fallback.qrisPayment.qrisImageUrl),
+          };
+        }
         return fallback;
       }
     };

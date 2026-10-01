@@ -223,6 +223,43 @@ export default function MyInvoices() {
                 <p className="text-sm text-gray-600">
                   Pembayaran menggunakan Payment Gateway sedang dalam pengaturan. Silakan gunakan metode manual untuk sementara atau hubungi admin.
                 </p>
+              ) : selectedInvoice.paymentMethod === 'qris' || settings?.activePaymentMethod === 'qris' ? (
+                <div className="bg-gray-50 border border-gray-200 rounded-md p-4 text-sm text-gray-700 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-semibold text-gray-900">
+                        {settings?.qrisPayment?.merchantName || 'Pembayaran via QRIS'}
+                      </p>
+                      {settings?.qrisPayment?.nmid && (
+                        <p className="text-xs font-mono text-gray-500">
+                          NMID: {settings.qrisPayment.nmid}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded">
+                      QRIS Semua E-Wallet &amp; Bank
+                    </span>
+                  </div>
+
+                  {settings?.qrisPayment?.qrisImageUrl ? (
+                    <div className="flex flex-col items-center justify-center bg-white border border-gray-200 rounded-lg p-4">
+                      <img
+                        src={settings.qrisPayment.qrisImageUrl}
+                        alt="Kode QRIS"
+                        className="max-w-[240px] w-full h-auto object-contain"
+                      />
+                    </div>
+                  ) : (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2.5">
+                      Gambar QRIS belum diunggah oleh Admin. Silakan hubungi Admin melalui tombol WhatsApp di bawah.
+                    </p>
+                  )}
+
+                  <p className="text-xs text-gray-500 whitespace-pre-line">
+                    {settings?.qrisPayment?.instructions ||
+                      'Silakan scan kode QRIS di atas menggunakan aplikasi M-Banking atau E-Wallet (GoPay, OVO, DANA, ShopeePay), lalu konfirmasi bukti pembayaran ke admin.'}
+                  </p>
+                </div>
               ) : (
                 <div className="bg-gray-50 border border-gray-200 rounded-md p-4 text-sm text-gray-700 space-y-2">
                   <p>Silakan transfer ke rekening berikut:</p>

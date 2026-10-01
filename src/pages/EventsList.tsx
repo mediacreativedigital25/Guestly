@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { collection, query, getDocs, where, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, deleteField, runTransaction, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { EventRecord, Client, User, EInviteTemplate, GreetingScreenTemplate, SeatingTable, Guest } from '../types';
+import { EventRecord, Client, User, EInviteTemplate, GreetingScreenTemplate, GreetingPhotoStyle, SeatingTable, Guest } from '../types';
 import { parseFirestoreDate, canUserAccessEvent, canUserCreateEvent, getUserBusinessId, getRoleLabel, isPartnerBusinessRegistered, resolveMediaUrl } from '../lib/utils';
 import { format } from 'date-fns';
 import { Link, useNavigate, useLocation, useParams } from 'react-router-dom';
@@ -76,8 +76,9 @@ export default function EventsList() {
   const [selectedGreetingTemplateId, setSelectedGreetingTemplateId] = useState<string>('default-blush-stage');
   const [selectedGreetingTemplateUrl, setSelectedGreetingTemplateUrl] = useState<string>('');
   const [greetingCouplePhotoUrl, setGreetingCouplePhotoUrl] = useState<string>('');
+  const [greetingPhotoStyle, setGreetingPhotoStyle] = useState<GreetingPhotoStyle>('curved_split');
   const [greetingUseThumbnailFallback, setGreetingUseThumbnailFallback] = useState<boolean>(true);
-  const [greetingAutoRemoveBg, setGreetingAutoRemoveBg] = useState<boolean>(true);
+  const [greetingAutoRemoveBg, setGreetingAutoRemoveBg] = useState<boolean>(false);
   const [greetingHeaderText, setGreetingHeaderText] = useState<string>('DI ACARA PERNIKAHAN');
   const [greetingGroomName, setGreetingGroomName] = useState<string>('');
   const [greetingBrideName, setGreetingBrideName] = useState<string>('');
@@ -163,8 +164,9 @@ export default function EventsList() {
     setSelectedGreetingTemplateId(defGreetTpl.id);
     setSelectedGreetingTemplateUrl(defGreetTpl.imageUrl || '');
     setGreetingCouplePhotoUrl('');
+    setGreetingPhotoStyle('curved_split');
     setGreetingUseThumbnailFallback(true);
-    setGreetingAutoRemoveBg(true);
+    setGreetingAutoRemoveBg(false);
     setGreetingHeaderText('DI ACARA PERNIKAHAN');
     setGreetingGroomName('');
     setGreetingBrideName('');
@@ -298,8 +300,11 @@ export default function EventsList() {
     setSelectedGreetingTemplateId(event.greetingTemplateId || defGreetTpl.id);
     setSelectedGreetingTemplateUrl(event.greetingTemplateUrl || '');
     setGreetingCouplePhotoUrl(event.greetingCouplePhotoUrl || '');
+    const initialPhotoStyle: GreetingPhotoStyle =
+      event.greetingPhotoStyle || 'curved_split';
+    setGreetingPhotoStyle(initialPhotoStyle);
     setGreetingUseThumbnailFallback(event.greetingUseThumbnailFallback !== false);
-    setGreetingAutoRemoveBg(event.greetingAutoRemoveBg !== false);
+    setGreetingAutoRemoveBg(initialPhotoStyle === 'cutout');
     setGreetingHeaderText(
       event.greetingHeaderText && event.greetingHeaderText !== 'WELCOME TO THE WEDDING OF'
         ? event.greetingHeaderText
@@ -622,8 +627,9 @@ export default function EventsList() {
       payload.greetingTemplateId = selectedGreetingTemplateId || 'default-blush-stage';
       payload.greetingTemplateUrl = selectedGreetingTemplateUrl || '';
       payload.greetingCouplePhotoUrl = greetingCouplePhotoUrl.trim();
+      payload.greetingPhotoStyle = greetingPhotoStyle;
       payload.greetingUseThumbnailFallback = greetingUseThumbnailFallback;
-      payload.greetingAutoRemoveBg = greetingAutoRemoveBg;
+      payload.greetingAutoRemoveBg = greetingPhotoStyle === 'cutout';
       payload.greetingHeaderText = greetingHeaderText.trim() || 'DI ACARA PERNIKAHAN';
       payload.greetingGroomName = masterGroom;
       payload.greetingBrideName = masterBride;
@@ -1712,15 +1718,105 @@ export default function EventsList() {
                 </div>
 
                 {/* Custom Background & Couple Photo Upload / Override per Event */}
+                {/* Photo Frame Style Selector (4 Options for Client / Vendor) */}
+                <div className="pt-3 border-t border-slate-200/80 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <span className="text-xs font-bold text-slate-800">
+                        Gaya Tampilan Foto Mempelai di Layar Sapa
+                      </span>
+                      <p className="text-[11px] text-slate-500">
+                        Pilih konsep bingkai foto di sisi kiri Layar Sapa (Opsi 1–3 tampil tajam &amp; utuh <strong>tanpa perlu Remove BG</strong>).
+                      </p>
+                    </div>
+                    <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-full">
+                      Live Preview Otomatis
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                    {(
+                      [
+                        {
+                          id: 'curved_split' as GreetingPhotoStyle,
+                          title: '1. Lengkung Penuh (E-Invite)',
+                          badge: 'Rekomendasi · Tanpa Remove BG',
+                          desc: 'Foto utuh di sisi kiri dengan potongan kurva lengkung & garis aksen serasi E-Invitation.',
+                        },
+                        {
+                          id: 'arch_frame' as GreetingPhotoStyle,
+                          title: '2. Bingkai Kubah Royal Arch',
+                          badge: 'Tanpa Remove BG',
+                          desc: 'Foto utuh di dalam bingkai jendela kubah mewah dengan list emas di atas latar bunga.',
+                        },
+                        {
+                          id: 'soft_vignette' as GreetingPhotoStyle,
+                          title: '3. Gradasi Halus (Soft Blend)',
+                          badge: 'Tanpa Remove BG',
+                          desc: 'Tepi foto memudar lembut menyatu ke latar panggung tanpa garis bingkai tegas.',
+                        },
+                        {
+                          id: 'cutout' as GreetingPhotoStyle,
+                          title: '4. Potong Latar (Remove BG)',
+                          badge: 'Auto Cutout / PNG',
+                          desc: 'Otomatis menghapus latar foto (cocok untuk foto studio latar polos atau file PNG).',
+                        },
+                      ] as const
+                    ).map((opt) => {
+                      const active = greetingPhotoStyle === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => {
+                            setGreetingPhotoStyle(opt.id);
+                            setGreetingAutoRemoveBg(opt.id === 'cutout');
+                          }}
+                          className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                            active
+                              ? 'bg-white border-indigo-600 ring-2 ring-indigo-500/20 shadow-xs'
+                              : 'bg-white/75 border-slate-200 hover:bg-white'
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-start justify-between gap-1.5">
+                              <span className="text-xs font-bold text-slate-900 leading-snug">
+                                {opt.title}
+                              </span>
+                              {active && (
+                                <span className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                                  <Check className="w-2.5 h-2.5" />
+                                </span>
+                              )}
+                            </div>
+                            <span
+                              className={`inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                opt.id === 'cutout'
+                                  ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                  : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                              }`}
+                            >
+                              {opt.badge}
+                            </span>
+                            <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
+                              {opt.desc}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <div className="pt-3 border-t border-slate-200/80 grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <div>
                         <span className="text-xs font-bold text-slate-800">
-                          Foto Mempelai Sisi Kiri (Opsional — Otomatis Remove BG)
+                          Foto Mempelai Sisi Kiri (Opsional)
                         </span>
                         <p className="text-[11px] text-slate-500">
-                          Jika dikosongkan, otomatis menggunakan <strong>Fallback Thumbnail Acara</strong> dengan fitur <strong>Auto Remove BG</strong> (atau foto bawaan jika Thumbnail belum diisi).
+                          Jika dikosongkan, otomatis menggunakan <strong>Fallback Thumbnail Acara</strong> sesuai gaya bingkai yang dipilih di atas.
                         </p>
                       </div>
                       {greetingCouplePhotoUrl && (
@@ -1755,21 +1851,12 @@ export default function EventsList() {
                           Gunakan Fallback Thumbnail Acara jika Foto Mempelai tidak ditambahkan
                         </span>
                       </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={greetingAutoRemoveBg}
-                          onChange={(e) => setGreetingAutoRemoveBg(e.target.checked)}
-                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                        />
-                        <span className="text-[11px] font-semibold text-slate-700">
-                          Otomatis Remove Background (Auto Remove BG) pada Foto Mempelai / Thumbnail
-                        </span>
-                      </label>
                       {!greetingCouplePhotoUrl && greetingUseThumbnailFallback && newEventThumbnail && (
                         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50 border border-emerald-200 text-[11px] font-medium text-emerald-800">
                           <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                          <span>Aktif menggunakan Thumbnail Acara + Auto Remove BG</span>
+                          <span>
+                            Aktif menggunakan Thumbnail Acara ({greetingPhotoStyle === 'curved_split' ? 'Gaya Lengkung E-Invite' : greetingPhotoStyle === 'arch_frame' ? 'Bingkai Kubah Royal Arch' : greetingPhotoStyle === 'soft_vignette' ? 'Gradasi Halus' : 'Auto Remove BG'})
+                          </span>
                         </div>
                       )}
                     </div>
@@ -1968,8 +2055,9 @@ export default function EventsList() {
                     greetingTemplateId: selectedGreetingTemplateId,
                     greetingTemplateUrl: selectedGreetingTemplateUrl || newEventFrame || undefined,
                     greetingCouplePhotoUrl: greetingCouplePhotoUrl || undefined,
+                    greetingPhotoStyle,
                     greetingUseThumbnailFallback,
-                    greetingAutoRemoveBg,
+                    greetingAutoRemoveBg: greetingPhotoStyle === 'cutout',
                     greetingHeaderText,
                     greetingWelcomeSubtext,
                     greetingTimeText: newEventTime

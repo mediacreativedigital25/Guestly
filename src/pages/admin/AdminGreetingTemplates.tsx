@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { GreetingScreenTemplate } from '../../types';
+import { GreetingScreenTemplate, GreetingPhotoStyle } from '../../types';
 import {
   greetingTemplateService,
   DEFAULT_GREETING_TEMPLATES,
@@ -64,6 +64,7 @@ export default function AdminGreetingTemplates() {
     name: string;
     imageUrl: string;
     couplePhotoUrl: string;
+    photoStyle: GreetingPhotoStyle;
     r2Key: string;
     primaryColor: string;
     accentColor: string;
@@ -76,6 +77,7 @@ export default function AdminGreetingTemplates() {
     name: '',
     imageUrl: DEFAULT_GREETING_COUPLE_BG_URL,
     couplePhotoUrl: '',
+    photoStyle: 'curved_split',
     r2Key: '',
     primaryColor: '#12392F',
     accentColor: '#C98583',
@@ -107,6 +109,7 @@ export default function AdminGreetingTemplates() {
         name: tpl.name,
         imageUrl: tpl.imageUrl || DEFAULT_GREETING_COUPLE_BG_URL,
         couplePhotoUrl: tpl.couplePhotoUrl || '',
+        photoStyle: tpl.photoStyle || 'curved_split',
         r2Key: tpl.r2Key || '',
         primaryColor: tpl.primaryColor || '#12392F',
         accentColor: tpl.accentColor || '#C98583',
@@ -122,6 +125,7 @@ export default function AdminGreetingTemplates() {
         name: '',
         imageUrl: DEFAULT_GREETING_COUPLE_BG_URL,
         couplePhotoUrl: '',
+        photoStyle: 'curved_split',
         r2Key: '',
         primaryColor: '#12392F',
         accentColor: '#C98583',
@@ -155,6 +159,7 @@ export default function AdminGreetingTemplates() {
                 name: formData.name.trim(),
                 imageUrl: formData.imageUrl.trim() || DEFAULT_GREETING_COUPLE_BG_URL,
                 couplePhotoUrl: formData.couplePhotoUrl.trim() || undefined,
+                photoStyle: formData.photoStyle,
                 r2Key: formData.r2Key || t.r2Key,
                 primaryColor: formData.primaryColor,
                 accentColor: formData.accentColor,
@@ -175,6 +180,7 @@ export default function AdminGreetingTemplates() {
           name: formData.name.trim(),
           imageUrl: formData.imageUrl.trim() || DEFAULT_GREETING_COUPLE_BG_URL,
           couplePhotoUrl: formData.couplePhotoUrl.trim() || undefined,
+          photoStyle: formData.photoStyle,
           r2Key: formData.r2Key || undefined,
           primaryColor: formData.primaryColor,
           accentColor: formData.accentColor,
@@ -536,12 +542,46 @@ export default function AdminGreetingTemplates() {
                     />
                   </div>
 
-                  {/* Optional Separate Couple Photo Upload */}
-                  <div className="pt-2 border-t border-gray-100">
+                  {/* Optional Separate Couple Photo Upload & Photo Style Selector */}
+                  <div className="pt-2 border-t border-gray-100 space-y-2.5">
+                    <div>
+                      <label className="text-xs font-semibold text-gray-700 block mb-1.5">
+                        Gaya Tampilan Foto Mempelai Default
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(
+                          [
+                            { id: 'curved_split' as GreetingPhotoStyle, label: '1. Lengkung E-Invite' },
+                            { id: 'arch_frame' as GreetingPhotoStyle, label: '2. Bingkai Kubah' },
+                            { id: 'soft_vignette' as GreetingPhotoStyle, label: '3. Gradasi Halus' },
+                            { id: 'cutout' as GreetingPhotoStyle, label: '4. Auto Remove BG' },
+                          ] as const
+                        ).map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() =>
+                              setFormData((prev) => ({ ...prev, photoStyle: opt.id }))
+                            }
+                            className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold text-left transition-all cursor-pointer flex items-center justify-between ${
+                              formData.photoStyle === opt.id
+                                ? 'bg-indigo-50 border-indigo-600 text-indigo-800'
+                                : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            <span className="truncate">{opt.label}</span>
+                            {formData.photoStyle === opt.id && (
+                              <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     <div className="flex items-center justify-between mb-1">
                       <label className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
                         <Users className="w-3.5 h-3.5 text-rose-600" />
-                        <span>Ganti Foto Mempelai Sisi Kiri (Opsional — Tanpa Bingkai)</span>
+                        <span>Ganti Foto Mempelai Sisi Kiri (Opsional)</span>
                       </label>
                       {formData.couplePhotoUrl && (
                         <button
@@ -556,7 +596,7 @@ export default function AdminGreetingTemplates() {
                       )}
                     </div>
                     <p className="text-[11px] text-gray-500 mb-1.5">
-                      Foto mempelai ditampilkan menyatu tanpa bingkai (frameless) di sisi kiri layar sapa.
+                      Foto mempelai ditampilkan sesuai gaya bingkai yang dipilih di atas.
                     </p>
                     <MediaUploader
                       category="Layar Sapa"

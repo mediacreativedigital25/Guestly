@@ -72,6 +72,8 @@ export interface SeatingTable {
   locationNote?: string;
 }
 
+export type GreetingPhotoStyle = 'curved_split' | 'arch_frame' | 'soft_vignette' | 'cutout';
+
 export interface EventRecord {
   souvenirTypes?: string[];
   seatingTables?: SeatingTable[];
@@ -127,6 +129,7 @@ export interface EventRecord {
   greetingTemplateId?: string;
   greetingTemplateUrl?: string;
   greetingCouplePhotoUrl?: string;
+  greetingPhotoStyle?: GreetingPhotoStyle;
   greetingUseThumbnailFallback?: boolean;
   greetingAutoRemoveBg?: boolean;
   greetingHeaderText?: string;
@@ -163,6 +166,7 @@ export interface GreetingScreenTemplate {
   name: string;
   imageUrl: string;
   couplePhotoUrl?: string;
+  photoStyle?: GreetingPhotoStyle;
   r2Key?: string;
   primaryColor?: string;
   accentColor?: string;

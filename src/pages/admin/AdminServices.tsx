@@ -318,189 +318,199 @@ export default function AdminServices() {
         )}
       </div>
 
-      <Modal isOpen={isCreating} onClose={() => !isSaving && setIsCreating(false)} title={editingServiceId ? "Edit Layanan" : "Tambah Layanan"}>
-         <form onSubmit={handleSave} className="space-y-6">
-            {/* Informasi Dasar */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-gray-900 border-b border-gray-100 pb-2">Informasi Dasar</h3>
-              
+      <Modal
+        isOpen={isCreating}
+        onClose={() => !isSaving && setIsCreating(false)}
+        title={editingServiceId ? "Edit Layanan" : "Tambah Layanan"}
+        maxWidth="max-w-5xl"
+      >
+         <form onSubmit={handleSave} className="space-y-5">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Kolom Kiri: Informasi Dasar */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-gray-900 border-b border-gray-100 pb-2">Informasi Dasar</h3>
+                
+                <div>
+                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Nama Layanan <span className="text-red-500">*</span></label>
+                   <input 
+                      type="text" 
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder-gray-400"
+                      required
+                      placeholder="Misal: Paket Undangan Digital Basic"
+                   />
+                </div>
+                
+                <div>
+                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Deskripsi Singkat</label>
+                   <textarea 
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder-gray-400 resize-none"
+                      rows={3}
+                      placeholder="Jelaskan fitur dan keunggulan layanan ini..."
+                   />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Tipe Layanan</label>
+                     <select 
+                        value={type}
+                        onChange={(e) => setType(e.target.value as 'package' | 'addon')}
+                        className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all bg-white"
+                     >
+                        <option value="package">Paket (Berdiri Sendiri)</option>
+                        <option value="addon">Add-on (Tambahan)</option>
+                     </select>
+                  </div>
+                  <div>
+                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Target Pengguna</label>
+                     <select 
+                        value={targetRole}
+                        onChange={(e) => setTargetRole(e.target.value as 'client' | 'partner' | 'all')}
+                        className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all bg-white"
+                     >
+                        <option value="all">Semua (Client & Partner)</option>
+                        <option value="client">Khusus Client (Publik)</option>
+                        <option value="partner">Khusus Partner (B2B)</option>
+                     </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Kolom Kanan: Harga & Status Layanan */}
+              <div className="space-y-4 flex flex-col justify-between">
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-gray-900 border-b border-gray-100 pb-2">Harga & Ketersediaan</h3>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-1.5">Harga Normal (opsional)</label>
+                       <div className="relative">
+                         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-medium">Rp</span>
+                         <input 
+                            type="number" 
+                            value={normalPrice}
+                            onChange={(e) => setNormalPrice(Number(e.target.value))}
+                            min="0"
+                            placeholder="0"
+                            className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                         />
+                       </div>
+                       <p className="text-[11px] text-gray-500 mt-1.5">Harga sebelum diskon (dicoret)</p>
+                    </div>
+                    <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-1.5">Harga Jual <span className="text-red-500">*</span></label>
+                       <div className="relative">
+                         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-900 text-sm font-medium">Rp</span>
+                         <input 
+                            type="number" 
+                            value={price}
+                            onChange={(e) => setPrice(Number(e.target.value))}
+                            min="0"
+                            placeholder="0"
+                            required
+                            className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2.5 text-sm font-medium text-indigo-700 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                         />
+                       </div>
+                       <p className="text-[11px] text-gray-500 mt-1.5">Harga aktual yang dibayar pengguna</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Status toggle */}
+                <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg bg-gray-50/60 shadow-2xs">
+                   <div>
+                     <h4 className="text-sm font-semibold text-gray-900">Status Layanan</h4>
+                     <p className="text-xs text-gray-500 mt-0.5">Layanan aktif dapat dibeli oleh pengguna baru.</p>
+                   </div>
+                   <button
+                     type="button"
+                     role="switch"
+                     aria-checked={isActive}
+                     onClick={() => setIsActive(!isActive)}
+                     className={`${
+                       isActive ? 'bg-indigo-600' : 'bg-gray-200'
+                     } relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2`}
+                   >
+                     <span
+                       aria-hidden="true"
+                       className={`${
+                         isActive ? 'translate-x-5' : 'translate-x-0'
+                       } pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
+                     />
+                   </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Baris Kuota & Masa Aktif (5 Kolom Sejajar di Layar Lebar) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 bg-gray-50 p-4 rounded-xl border border-gray-200/80 relative overflow-hidden">
+              <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500"></div>
               <div>
-                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Nama Layanan <span className="text-red-500">*</span></label>
+                 <label className="block text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wider">Masa Aktif</label>
+                 <div className="flex items-center gap-2">
+                   <input 
+                      type="number" 
+                      value={activePeriodDays}
+                      onChange={(e) => setActivePeriodDays(Number(e.target.value))}
+                      min="0"
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-center bg-white"
+                   />
+                   <span className="text-gray-500 text-sm font-medium">Hari</span>
+                 </div>
+                 <p className="text-[10px] text-gray-400 mt-1.5 leading-tight">Masa berlaku paket. Isi 0 untuk selamanya.</p>
+              </div>
+              <div>
+                 <label className="block text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wider">Kuota Acara</label>
                  <input 
-                    type="text" 
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder-gray-400"
-                    required
-                    placeholder="Misal: Paket Undangan Digital Basic"
+                    type="number" 
+                    value={eventQuota}
+                    onChange={(e) => setEventQuota(Number(e.target.value))}
+                    min="0"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-center bg-white"
                  />
+                 <p className="text-[10px] text-gray-400 mt-1.5 leading-tight">Max event yang bisa dibuat pengguna.</p>
               </div>
-              
               <div>
-                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Deskripsi Singkat</label>
-                 <textarea 
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder-gray-400 resize-none"
-                    rows={3}
-                    placeholder="Jelaskan fitur dan keunggulan layanan ini..."
+                 <label className="block text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wider">Kuota Klien</label>
+                 <input 
+                    type="number" 
+                    value={clientQuota}
+                    onChange={(e) => setClientQuota(Number(e.target.value))}
+                    min="0"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-center bg-white"
                  />
+                 <p className="text-[10px] text-gray-400 mt-1.5 leading-tight">Max klien yang bisa ditambah.</p>
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Tipe Layanan</label>
-                   <select 
-                      value={type}
-                      onChange={(e) => setType(e.target.value as 'package' | 'addon')}
-                      className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all bg-white"
-                   >
-                      <option value="package">Paket (Berdiri Sendiri)</option>
-                      <option value="addon">Add-on (Tambahan)</option>
-                   </select>
-                </div>
-                <div>
-                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Target Pengguna</label>
-                   <select 
-                      value={targetRole}
-                      onChange={(e) => setTargetRole(e.target.value as 'client' | 'partner' | 'all')}
-                      className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all bg-white"
-                   >
-                      <option value="all">Semua (Client & Partner)</option>
-                      <option value="client">Khusus Client (Publik)</option>
-                      <option value="partner">Khusus Partner (B2B)</option>
-                   </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Harga & Kuota */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-gray-900 border-b border-gray-100 pb-2">Harga & Ketersediaan</h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Harga Normal (opsional)</label>
-                   <div className="relative">
-                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-medium">Rp</span>
-                     <input 
-                        type="number" 
-                        value={normalPrice}
-                        onChange={(e) => setNormalPrice(Number(e.target.value))}
-                        min="0"
-                        placeholder="0"
-                        className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                     />
-                   </div>
-                   <p className="text-[11px] text-gray-500 mt-1.5">Harga sebelum diskon (dicoret)</p>
-                </div>
-                <div>
-                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Harga Jual <span className="text-red-500">*</span></label>
-                   <div className="relative">
-                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-900 text-sm font-medium">Rp</span>
-                     <input 
-                        type="number" 
-                        value={price}
-                        onChange={(e) => setPrice(Number(e.target.value))}
-                        min="0"
-                        placeholder="0"
-                        required
-                        className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2.5 text-sm font-medium text-indigo-700 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                     />
-                   </div>
-                   <p className="text-[11px] text-gray-500 mt-1.5">Harga aktual yang dibayar pengguna</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50 p-4 rounded-lg border border-gray-100 relative overflow-hidden">
-                <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500"></div>
-                <div>
-                   <label className="block text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wider">Masa Aktif</label>
-                   <div className="flex items-center gap-2">
-                     <input 
-                        type="number" 
-                        value={activePeriodDays}
-                        onChange={(e) => setActivePeriodDays(Number(e.target.value))}
-                        min="0"
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-center bg-white"
-                     />
-                     <span className="text-gray-500 text-sm font-medium">Hari</span>
-                   </div>
-                   <p className="text-[10px] text-gray-400 mt-1.5 leading-tight">Masa berlaku paket. Isi 0 untuk selamanya.</p>
-                </div>
-                <div>
-                   <label className="block text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wider">Kuota Acara</label>
-                   <input 
-                      type="number" 
-                      value={eventQuota}
-                      onChange={(e) => setEventQuota(Number(e.target.value))}
-                      min="0"
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-center bg-white"
-                   />
-                   <p className="text-[10px] text-gray-400 mt-1.5 leading-tight">Max event yang bisa dibuat pengguna.</p>
-                </div>
-                <div>
-                   <label className="block text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wider">Kuota Klien</label>
-                   <input 
-                      type="number" 
-                      value={clientQuota}
-                      onChange={(e) => setClientQuota(Number(e.target.value))}
-                      min="0"
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-center bg-white"
-                   />
-                   <p className="text-[10px] text-gray-400 mt-1.5 leading-tight">Max klien yang bisa ditambah.</p>
-                </div>
-                <div>
-                   <label className="block text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wider">Kuota Tamu</label>
-                   <input 
-                      type="number" 
-                      value={guestQuota}
-                      onChange={(e) => setGuestQuota(Number(e.target.value))}
-                      min="0"
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-center bg-white"
-                   />
-                   <p className="text-[10px] text-gray-400 mt-1.5 leading-tight">Total kontak/tamu yang bisa diundang.</p>
-                </div>
-                <div>
-                   <label className="block text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wider">Kuota WA Blast</label>
-                   <input 
-                      type="number" 
-                      value={waBlastQuota}
-                      onChange={(e) => setWaBlastQuota(Number(e.target.value))}
-                      min="0"
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-center bg-white"
-                   />
-                   <p className="text-[10px] text-gray-400 mt-1.5 leading-tight">Total kuota pengiriman WA Blast otomatis.</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Status toggle */}
-            <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg bg-white shadow-sm">
-               <div>
-                 <h4 className="text-sm font-semibold text-gray-900">Status Layanan</h4>
-                 <p className="text-xs text-gray-500 mt-0.5">Layanan aktif dapat dibeli oleh pengguna baru.</p>
-               </div>
-               <button
-                 type="button"
-                 role="switch"
-                 aria-checked={isActive}
-                 onClick={() => setIsActive(!isActive)}
-                 className={`${
-                   isActive ? 'bg-indigo-600' : 'bg-gray-200'
-                 } relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2`}
-               >
-                 <span
-                   aria-hidden="true"
-                   className={`${
-                     isActive ? 'translate-x-5' : 'translate-x-0'
-                   } pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
+              <div>
+                 <label className="block text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wider">Kuota Tamu</label>
+                 <input 
+                    type="number" 
+                    value={guestQuota}
+                    onChange={(e) => setGuestQuota(Number(e.target.value))}
+                    min="0"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-center bg-white"
                  />
-               </button>
+                 <p className="text-[10px] text-gray-400 mt-1.5 leading-tight">Total kontak/tamu yang bisa diundang.</p>
+              </div>
+              <div>
+                 <label className="block text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wider">Kuota WA Blast</label>
+                 <input 
+                    type="number" 
+                    value={waBlastQuota}
+                    onChange={(e) => setWaBlastQuota(Number(e.target.value))}
+                    min="0"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-center bg-white"
+                 />
+                 <p className="text-[10px] text-gray-400 mt-1.5 leading-tight">Total kuota pengiriman WA Blast otomatis.</p>
+              </div>
             </div>
 
             {/* Actions */}
-            <div className="flex items-center justify-end gap-3 pt-6 border-t border-gray-100 mt-8 !mb-2">
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100 !mb-1">
                <button 
                  type="button" 
                  onClick={() => {

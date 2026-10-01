@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UploadCloud, Link as LinkIcon, MessageSquare, CreditCard, Image as ImageIcon, Building, Eye, EyeOff, Send, CheckCircle2, AlertCircle } from 'lucide-react';
+import { UploadCloud, Link as LinkIcon, MessageSquare, CreditCard, Image as ImageIcon, Building, Eye, EyeOff, Send, CheckCircle2, AlertCircle, QrCode } from 'lucide-react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useSettings } from '../../SettingsContext';
@@ -23,13 +23,18 @@ export default function AdminSettings() {
   const [templateOrderCreated, setTemplateOrderCreated] = useState(settings?.fonnteTemplates?.orderCreated || '');
   const [templateOrderPaid, setTemplateOrderPaid] = useState(settings?.fonnteTemplates?.orderPaid || '');
   const [templateOrderCancelled, setTemplateOrderCancelled] = useState(settings?.fonnteTemplates?.orderCancelled || '');
-  const [activePaymentMethod, setActivePaymentMethod] = useState(settings?.activePaymentMethod || 'manual');
+  const [activePaymentMethod, setActivePaymentMethod] = useState<'manual' | 'qris' | 'tripay'>(settings?.activePaymentMethod || 'manual');
   const [clientKey, setClientKey] = useState(settings?.paymentGateway?.clientKey || '');
   
   const [bankName, setBankName] = useState(settings?.manualPayment?.bankName || '');
   const [accountNumber, setAccountNumber] = useState(settings?.manualPayment?.accountNumber || '');
   const [accountName, setAccountName] = useState(settings?.manualPayment?.accountName || '');
   const [instructions, setInstructions] = useState(settings?.manualPayment?.instructions || '');
+
+  const [qrisMerchantName, setQrisMerchantName] = useState(settings?.qrisPayment?.merchantName || '');
+  const [qrisNmid, setQrisNmid] = useState(settings?.qrisPayment?.nmid || '');
+  const [qrisImageUrl, setQrisImageUrl] = useState(settings?.qrisPayment?.qrisImageUrl || '');
+  const [qrisInstructions, setQrisInstructions] = useState(settings?.qrisPayment?.instructions || '');
 
   // Salespage settings
   const [salespageData, setSalespageData] = useState<any>({});
@@ -50,6 +55,10 @@ export default function AdminSettings() {
       setAccountNumber(settings.manualPayment?.accountNumber || '');
       setAccountName(settings.manualPayment?.accountName || '');
       setInstructions(settings.manualPayment?.instructions || '');
+      setQrisMerchantName(settings.qrisPayment?.merchantName || '');
+      setQrisNmid(settings.qrisPayment?.nmid || '');
+      setQrisImageUrl(settings.qrisPayment?.qrisImageUrl || '');
+      setQrisInstructions(settings.qrisPayment?.instructions || '');
       
       // Load salespage settings
       if (settings.salespage) {
@@ -134,7 +143,13 @@ export default function AdminSettings() {
           ...currentData, 
           activePaymentMethod,
           paymentGateway: { clientKey },
-          manualPayment: { bankName, accountNumber, accountName, instructions }
+          manualPayment: { bankName, accountNumber, accountName, instructions },
+          qrisPayment: {
+            merchantName: qrisMerchantName.trim(),
+            nmid: qrisNmid.trim(),
+            qrisImageUrl: qrisImageUrl.trim(),
+            instructions: qrisInstructions.trim(),
+          },
         }, { merge: true });
         showAlert('Berhasil', 'Metode Pembayaran berhasil disimpan!', 'success');
       } else if (tab === 'salespage') {
@@ -404,19 +419,26 @@ export default function AdminSettings() {
                 
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-5 mb-8">
                   <label className="block text-sm font-semibold text-gray-900 mb-3">Pilih Metode Pembayaran Utama</label>
-                  <div className="flex flex-col sm:flex-row gap-4">
-                    <label className={`flex-1 flex items-center p-4 border rounded-lg cursor-pointer transition-colors ${activePaymentMethod === 'manual' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 bg-white hover:border-indigo-300'}`}>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <label className={`flex items-center p-4 border rounded-lg cursor-pointer transition-colors ${activePaymentMethod === 'manual' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 bg-white hover:border-indigo-300'}`}>
                       <input type="radio" name="paymentMethod" value="manual" checked={activePaymentMethod === 'manual'} onChange={() => setActivePaymentMethod('manual')} className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500" />
                       <div className="ml-3">
                         <span className="block text-sm font-medium text-gray-900">Manual Transfer</span>
                         <span className="block text-xs text-gray-500 mt-0.5">Verifikasi manual via admin</span>
                       </div>
                     </label>
-                    <label className={`flex-1 flex items-center p-4 border rounded-lg cursor-pointer transition-colors ${activePaymentMethod === 'tripay' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 bg-white hover:border-indigo-300'}`}>
+                    <label className={`flex items-center p-4 border rounded-lg cursor-pointer transition-colors ${activePaymentMethod === 'qris' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 bg-white hover:border-indigo-300'}`}>
+                      <input type="radio" name="paymentMethod" value="qris" checked={activePaymentMethod === 'qris'} onChange={() => setActivePaymentMethod('qris')} className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500" />
+                      <div className="ml-3">
+                        <span className="block text-sm font-medium text-gray-900">QRIS</span>
+                        <span className="block text-xs text-gray-500 mt-0.5">Scan QRIS semua E-Wallet &amp; Bank</span>
+                      </div>
+                    </label>
+                    <label className={`flex items-center p-4 border rounded-lg cursor-pointer transition-colors ${activePaymentMethod === 'tripay' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 bg-white hover:border-indigo-300'}`}>
                       <input type="radio" name="paymentMethod" value="tripay" checked={activePaymentMethod === 'tripay'} onChange={() => setActivePaymentMethod('tripay')} className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500" />
                       <div className="ml-3">
                         <span className="block text-sm font-medium text-gray-900">Tripay (Payment Gateway)</span>
-                        <span className="block text-xs text-gray-500 mt-0.5">Pembayaran & verifikasi otomatis (Beta)</span>
+                        <span className="block text-xs text-gray-500 mt-0.5">Pembayaran &amp; verifikasi otomatis (Beta)</span>
                       </div>
                     </label>
                   </div>
@@ -446,6 +468,76 @@ export default function AdminSettings() {
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Instruksi Tambahan (Opsional)</label>
                         <textarea value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="Misal: Harap sertakan nomor invoice pada berita transfer..." rows={3} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* QRIS Payment Fields */}
+                  <div className={`p-5 border rounded-lg ${activePaymentMethod === 'qris' ? 'border-indigo-200 bg-white shadow-sm ring-1 ring-indigo-500' : 'border-gray-200 bg-gray-50/50'}`}>
+                    <h3 className="text-md font-semibold text-gray-900 flex items-center gap-2 mb-4">
+                      <QrCode className="w-5 h-5 text-indigo-500" /> Informasi Pembayaran QRIS
+                    </h3>
+                    <div className="space-y-4 max-w-3xl">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Nama Merchant QRIS</label>
+                          <input
+                            type="text"
+                            value={qrisMerchantName}
+                            onChange={e => setQrisMerchantName(e.target.value)}
+                            placeholder="Misal: GUESTLY DIGITAL INDONESIA"
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">NMID (Opsional)</label>
+                          <input
+                            type="text"
+                            value={qrisNmid}
+                            onChange={e => setQrisNmid(e.target.value)}
+                            placeholder="Misal: ID1020012345678"
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="block text-sm font-medium text-gray-700">
+                            Upload Gambar Kode QRIS
+                          </label>
+                          {qrisImageUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setQrisImageUrl('')}
+                              className="text-xs font-semibold text-rose-600 hover:text-rose-700 cursor-pointer"
+                            >
+                              Hapus Gambar QRIS
+                            </button>
+                          )}
+                        </div>
+                        <MediaUploader
+                          category="logo"
+                          maxSize={5 * 1024 * 1024}
+                          allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
+                          defaultValue={qrisImageUrl || undefined}
+                          onUploadSuccess={(data) => setQrisImageUrl(data.url)}
+                          onUploadError={(err) => showAlert('Gagal Upload', `Gagal mengunggah gambar QRIS: ${err}`, 'error')}
+                        />
+                        <p className="text-xs text-gray-500 mt-1.5">
+                          Unggah gambar kode QRIS resmi toko/perusahaan Anda (mendukung pembayaran via GoPay, OVO, DANA, ShopeePay, dan seluruh Mobile Banking).
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Instruksi Pembayaran QRIS (Opsional)</label>
+                        <textarea
+                          value={qrisInstructions}
+                          onChange={e => setQrisInstructions(e.target.value)}
+                          placeholder="Misal: Scan kode QRIS di atas melalui aplikasi M-Banking atau E-Wallet Anda, masukkan nominal sesuai tagihan invoice, lalu kirim bukti pembayaran."
+                          rows={3}
+                          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                        />
                       </div>
                     </div>
                   </div>
@@ -483,6 +575,10 @@ export default function AdminSettings() {
                       setAccountNumber(settings.manualPayment?.accountNumber || '');
                       setAccountName(settings.manualPayment?.accountName || '');
                       setInstructions(settings.manualPayment?.instructions || '');
+                      setQrisMerchantName(settings.qrisPayment?.merchantName || '');
+                      setQrisNmid(settings.qrisPayment?.nmid || '');
+                      setQrisImageUrl(settings.qrisPayment?.qrisImageUrl || '');
+                      setQrisInstructions(settings.qrisPayment?.instructions || '');
                     }
                     showCancelAlert('Perubahan pengaturan metode pembayaran telah dibatalkan.');
                   }}

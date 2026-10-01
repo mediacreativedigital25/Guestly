@@ -6,7 +6,7 @@ import { GuestlyService } from '../../types';
 import { useAuth } from '../../AuthContext';
 import { useSettings } from '../../SettingsContext';
 import { showAlert, showConfirm, showCancelAlert } from '../../lib/alerts';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, QrCode } from 'lucide-react';
 
 export default function ServiceCheckout() {
   const { serviceId } = useParams<{ serviceId: string }>();
@@ -26,9 +26,9 @@ export default function ServiceCheckout() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Change default payment method if active payment method is 'tripay'
+  // Set default payment method based on activePaymentMethod
   useEffect(() => {
-    if (settings?.activePaymentMethod === 'tripay') {
+    if (settings?.activePaymentMethod === 'tripay' || settings?.activePaymentMethod === 'qris') {
       setPaymentMethod('qris');
     } else {
       setPaymentMethod('transfer');
@@ -198,51 +198,123 @@ export default function ServiceCheckout() {
             <h2 className="text-lg font-bold text-gray-900 mb-4 pb-4 border-b border-gray-100">Metode Pembayaran</h2>
             
             <div className="space-y-3">
-              {(!settings?.activePaymentMethod || settings?.activePaymentMethod === 'manual') ? (
-                <label className={`flex flex-col p-4 border rounded-lg cursor-pointer transition-colors ${paymentMethod === 'transfer' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 hover:border-indigo-300'}`}>
-                  <div className="flex items-center">
-                    <input 
-                      type="radio" 
-                      name="paymentMethod" 
-                      value="transfer" 
-                      checked={paymentMethod === 'transfer'}
-                      onChange={(e) => setPaymentMethod(e.target.value)}
-                      className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
-                    />
-                    <div className="ml-3 flex-1 flex justify-between items-center">
-                      <span className="block text-sm font-medium text-gray-900">Transfer Bank Manual</span>
-                      <span className="text-xs font-semibold px-2 py-1 bg-gray-100 text-gray-600 rounded">Manual</span>
-                    </div>
-                  </div>
-                  {paymentMethod === 'transfer' && settings?.manualPayment && (
-                    <div className="ml-7 mt-3 p-3 bg-white border border-indigo-100 rounded text-sm text-gray-600">
-                      <p className="font-semibold text-gray-900 mb-1">Informasi Rekening:</p>
-                      <div className="space-y-1">
-                        <p><span className="text-gray-500">Bank:</span> {settings.manualPayment.bankName || '-'}</p>
-                        <div className="flex items-center gap-2">
-                          <p><span className="text-gray-500">No. Rekening:</span> <span className="font-mono font-medium">{settings.manualPayment.accountNumber || '-'}</span></p>
-                          <button 
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              handleCopy(settings?.manualPayment?.accountNumber || '');
-                            }}
-                            className="p-1 hover:bg-gray-100 rounded text-gray-500 transition-colors" 
-                            title="Copy Rekening"
-                          >
-                            {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-                          </button>
+              {settings?.activePaymentMethod !== 'tripay' ? (
+                <>
+                  {/* QRIS Option (Shown when activePaymentMethod is 'qris' or qrisPayment is configured) */}
+                  {(settings?.activePaymentMethod === 'qris' ||
+                    Boolean(settings?.qrisPayment?.qrisImageUrl || settings?.qrisPayment?.merchantName)) && (
+                    <label className={`flex flex-col p-4 border rounded-lg cursor-pointer transition-colors ${paymentMethod === 'qris' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 hover:border-indigo-300'}`}>
+                      <div className="flex items-center">
+                        <input
+                          type="radio"
+                          name="paymentMethod"
+                          value="qris"
+                          checked={paymentMethod === 'qris'}
+                          onChange={(e) => setPaymentMethod(e.target.value)}
+                          className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                        />
+                        <div className="ml-3 flex-1 flex justify-between items-center">
+                          <span className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
+                            <QrCode className="w-4 h-4 text-indigo-600" />
+                            <span>QRIS (Semua E-Wallet &amp; Mobile Banking)</span>
+                          </span>
+                          <span className="text-xs font-semibold px-2 py-1 bg-indigo-100 text-indigo-700 rounded">
+                            QRIS
+                          </span>
                         </div>
-                        <p><span className="text-gray-500">Atas Nama:</span> {settings.manualPayment.accountName || '-'}</p>
                       </div>
-                      {settings.manualPayment.instructions && (
-                        <div className="mt-2 text-xs bg-gray-50 p-2 rounded text-gray-500 whitespace-pre-line">
-                          {settings.manualPayment.instructions}
+                      {paymentMethod === 'qris' && (
+                        <div className="ml-7 mt-3 p-4 bg-white border border-indigo-100 rounded-lg text-sm text-gray-600 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
+                            <div>
+                              <p className="font-semibold text-gray-900">
+                                {settings?.qrisPayment?.merchantName || 'QRIS Official Merchant'}
+                              </p>
+                              {settings?.qrisPayment?.nmid && (
+                                <p className="text-xs font-mono text-gray-500 mt-0.5">
+                                  NMID: {settings.qrisPayment.nmid}
+                                </p>
+                              )}
+                            </div>
+                            <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                              GoPay • OVO • DANA • ShopeePay • M-Banking
+                            </span>
+                          </div>
+
+                          {settings?.qrisPayment?.qrisImageUrl ? (
+                            <div className="flex flex-col items-center justify-center py-2">
+                              <img
+                                src={settings.qrisPayment.qrisImageUrl}
+                                alt="Kode QRIS Pembayaran"
+                                className="max-w-[240px] w-full h-auto rounded-lg border border-gray-200 shadow-xs bg-white p-2 object-contain"
+                              />
+                            </div>
+                          ) : (
+                            <p className="text-xs text-gray-500 italic">
+                              Kode QRIS akan ditampilkan pada halaman detail pembayaran setelah pesanan dibuat.
+                            </p>
+                          )}
+
+                          {settings?.qrisPayment?.instructions && (
+                            <div className="text-xs bg-gray-50 p-2.5 rounded text-gray-600 whitespace-pre-line">
+                              {settings.qrisPayment.instructions}
+                            </div>
+                          )}
                         </div>
                       )}
-                    </div>
+                    </label>
                   )}
-                </label>
+
+                  {/* Manual Bank Transfer Option */}
+                  {(settings?.activePaymentMethod === 'manual' ||
+                    !settings?.activePaymentMethod ||
+                    Boolean(settings?.manualPayment?.accountNumber || settings?.manualPayment?.bankName)) && (
+                    <label className={`flex flex-col p-4 border rounded-lg cursor-pointer transition-colors ${paymentMethod === 'transfer' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 hover:border-indigo-300'}`}>
+                      <div className="flex items-center">
+                        <input 
+                          type="radio" 
+                          name="paymentMethod" 
+                          value="transfer" 
+                          checked={paymentMethod === 'transfer'}
+                          onChange={(e) => setPaymentMethod(e.target.value)}
+                          className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                        />
+                        <div className="ml-3 flex-1 flex justify-between items-center">
+                          <span className="block text-sm font-medium text-gray-900">Transfer Bank Manual</span>
+                          <span className="text-xs font-semibold px-2 py-1 bg-gray-100 text-gray-600 rounded">Manual</span>
+                        </div>
+                      </div>
+                      {paymentMethod === 'transfer' && settings?.manualPayment && (
+                        <div className="ml-7 mt-3 p-3 bg-white border border-indigo-100 rounded text-sm text-gray-600">
+                          <p className="font-semibold text-gray-900 mb-1">Informasi Rekening:</p>
+                          <div className="space-y-1">
+                            <p><span className="text-gray-500">Bank:</span> {settings.manualPayment.bankName || '-'}</p>
+                            <div className="flex items-center gap-2">
+                              <p><span className="text-gray-500">No. Rekening:</span> <span className="font-mono font-medium">{settings.manualPayment.accountNumber || '-'}</span></p>
+                              <button 
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  handleCopy(settings?.manualPayment?.accountNumber || '');
+                                }}
+                                className="p-1 hover:bg-gray-100 rounded text-gray-500 transition-colors" 
+                                title="Copy Rekening"
+                              >
+                                {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                              </button>
+                            </div>
+                            <p><span className="text-gray-500">Atas Nama:</span> {settings.manualPayment.accountName || '-'}</p>
+                          </div>
+                          {settings.manualPayment.instructions && (
+                            <div className="mt-2 text-xs bg-gray-50 p-2 rounded text-gray-500 whitespace-pre-line">
+                              {settings.manualPayment.instructions}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </label>
+                  )}
+                </>
               ) : (
                 <>
                   <label className={`flex items-center p-4 border rounded-lg cursor-pointer transition-colors ${paymentMethod === 'qris' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 hover:border-indigo-300'}`}>

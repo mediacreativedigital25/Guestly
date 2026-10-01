@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { EventRecord, Guest, GreetingScreenTemplate } from '../types';
+import { EventRecord, Guest, GreetingScreenTemplate, GreetingPhotoStyle } from '../types';
 import { getMediaFallbackUrls } from '../lib/utils';
 import { autoRemoveImageBackground } from '../lib/autoRemoveBg';
 import { formatIndonesianEventDate, splitCoupleNames } from './EInvitationCard';
@@ -21,6 +21,9 @@ import {
 } from '../services/greetingTemplateService';
 import { useSettings } from '../SettingsContext';
 import { useAuth } from '../AuthContext';
+
+const DEFAULT_SAMPLE_COUPLE_PHOTO_URL =
+  'https://images.unsplash.com/photo-1583939003579-730e3918a45a?auto=format&fit=crop&w=900&q=80';
 
 export interface GreetingScreenCanvasProps {
   event?: Partial<EventRecord> | null;
@@ -223,7 +226,15 @@ export const GreetingScreenCanvas: React.FC<GreetingScreenCanvasProps> = ({
       : template?.showFooterStrip !== false;
 
   const useThumbnailFallback = event?.greetingUseThumbnailFallback !== false;
-  const autoRemoveBgEnabled = event?.greetingAutoRemoveBg !== false;
+
+  // Resolve Photo Frame Style:
+  // 1. event.greetingPhotoStyle
+  // 2. template.photoStyle
+  // 3. Default to 'curved_split' (Lengkung Penuh seperti E-Invitation — Tanpa Remove BG)
+  const photoStyle: GreetingPhotoStyle =
+    event?.greetingPhotoStyle || template?.photoStyle || 'curved_split';
+
+  const autoRemoveBgEnabled = photoStyle === 'cutout';
 
   // Couple Photo Fallback Chain:
   // 1. Custom Layar Sapa Couple Photo (event.greetingCouplePhotoUrl)
@@ -232,14 +243,26 @@ export const GreetingScreenCanvas: React.FC<GreetingScreenCanvasProps> = ({
   const couplePhotoCandidates = getMediaFallbackUrls([
     event?.greetingCouplePhotoUrl,
     template?.couplePhotoUrl,
-    ...(useThumbnailFallback ? [event?.thumbnailUrl, event?.eInvitePhotoUrl] : []),
+    ...(useThumbnailFallback
+      ? [
+          event?.thumbnailUrl,
+          event?.eInvitePhotoUrl,
+          (event as any)?.coverImage,
+          (event as any)?.cover_image,
+        ]
+      : []),
   ]);
   const rawCouplePhotoUrl =
     couplePhotoIdx < couplePhotoCandidates.length
       ? couplePhotoCandidates[couplePhotoIdx]
       : '';
 
-  // Run Automatic Background Removal on the active Couple Photo / Thumbnail Fallback
+  // For framed / non-remove-BG styles ('curved_split', 'arch_frame', 'soft_vignette'),
+  // if no event photo is uploaded yet, fallback to sample couple photo so live preview shows the exact frame style
+  const effectiveFramedPhotoUrl =
+    rawCouplePhotoUrl || (photoStyle !== 'cutout' ? DEFAULT_SAMPLE_COUPLE_PHOTO_URL : '');
+
+  // Run Automatic Background Removal ONLY when photoStyle === 'cutout'
   useEffect(() => {
     if (!rawCouplePhotoUrl) {
       setProcessedCouplePhotoUrl('');
@@ -271,10 +294,14 @@ export const GreetingScreenCanvas: React.FC<GreetingScreenCanvasProps> = ({
   }, [rawCouplePhotoUrl, autoRemoveBgEnabled]);
 
   // Background candidates:
-  // When a custom Couple Photo or Event Thumbnail fallback is active, if the template was using
-  // the default background with the built-in couple, automatically switch to the clean stage background
-  // so the user's couple photo / thumbnail stands in front of the floral arch without overlapping another couple.
-  const defaultStageBgForCurrentMode = rawCouplePhotoUrl
+  // Whenever a Layer 2 Couple Photo is active (either framed styles or custom cutout photo),
+  // switch DEFAULT_GREETING_COUPLE_BG_URL to DEFAULT_GREETING_STAGE_CLEAN_BG_URL so there is no duplicate couple behind it.
+  const hasLayer2CouplePhoto =
+    photoStyle !== 'cutout'
+      ? Boolean(effectiveFramedPhotoUrl)
+      : Boolean(rawCouplePhotoUrl);
+
+  const defaultStageBgForCurrentMode = hasLayer2CouplePhoto
     ? DEFAULT_GREETING_STAGE_CLEAN_BG_URL
     : DEFAULT_GREETING_COUPLE_BG_URL;
 
@@ -283,7 +310,7 @@ export const GreetingScreenCanvas: React.FC<GreetingScreenCanvasProps> = ({
     event?.frameOverlayUrl,
     template?.imageUrl,
   ]).map((url) =>
-    rawCouplePhotoUrl && url === DEFAULT_GREETING_COUPLE_BG_URL
+    hasLayer2CouplePhoto && url === DEFAULT_GREETING_COUPLE_BG_URL
       ? DEFAULT_GREETING_STAGE_CLEAN_BG_URL
       : url
   );
@@ -294,7 +321,10 @@ export const GreetingScreenCanvas: React.FC<GreetingScreenCanvasProps> = ({
       ? bgCandidates[templateIdx]
       : defaultStageBgForCurrentMode;
 
-  const displayCouplePhotoUrl = processedCouplePhotoUrl || rawCouplePhotoUrl;
+  const displayCouplePhotoUrl =
+    photoStyle === 'cutout'
+      ? processedCouplePhotoUrl || rawCouplePhotoUrl
+      : effectiveFramedPhotoUrl;
 
   // Salutation above Guest Box ("BAPAK/IBU")
   const rawSalutation = (event?.greetingWelcomeSubtext || '').trim();
@@ -474,11 +504,165 @@ export const GreetingScreenCanvas: React.FC<GreetingScreenCanvasProps> = ({
         )}
 
         {/* ================================================================= */}
-        {/* LAYER 2: Couple Photo / Thumbnail Fallback (FRAMELESS + Auto Remove BG) */}
+        {/* LAYER 2: Couple Photo (4 Selectable Frame Styles)                  */}
         {/* ================================================================= */}
-        {displayCouplePhotoUrl && (
+        {displayCouplePhotoUrl && photoStyle === 'curved_split' && (
+          <>
+            {/* Opsi 1: Lengkung Penuh (Curved Split seperti Kartu E-Invitation — Tanpa Remove BG) */}
+            <div
+              data-greeting-photo-style="curved_split"
+              className={`absolute top-0 left-0 w-[442px] ${
+                showFooterStrip ? 'h-[577px]' : 'h-[675px]'
+              } z-[2] pointer-events-none overflow-hidden`}
+              style={{
+                clipPath: showFooterStrip
+                  ? "path('M 0,0 L 252,0 C 374,56 442,208 442,358 C 442,452 418,528 392,577 L 0,577 Z')"
+                  : "path('M 0,0 L 252,0 C 374,66 442,242 442,418 C 442,528 418,618 392,675 L 0,675 Z')",
+              }}
+            >
+              <img
+                src={displayCouplePhotoUrl}
+                alt={coupleDisplay}
+                referrerPolicy="no-referrer"
+                onError={() => setCouplePhotoIdx((prev) => prev + 1)}
+                className="w-full h-full object-cover object-top"
+              />
+              {/* Top-left delicate botanical leaf accent over photo corner (matching E-Invitation) */}
+              <svg
+                data-export-ignore="true"
+                className="absolute top-0 left-0 w-[165px] h-[205px] pointer-events-none"
+                viewBox="0 0 160 200"
+                fill="none"
+              >
+                <g stroke={accentColor} strokeWidth="1.5" opacity="0.78">
+                  <path d="M 8,165 C 28,115 62,65 115,22" />
+                  <path
+                    d="M 32,120 C 18,104 20,84 34,70 C 46,86 44,106 32,120 Z"
+                    fill="#FBEAE7"
+                    fillOpacity="0.55"
+                  />
+                  <path
+                    d="M 56,86 C 42,70 44,50 58,36 C 70,52 68,72 56,86 Z"
+                    fill="#FBEAE7"
+                    fillOpacity="0.55"
+                  />
+                  <path
+                    d="M 48,112 C 66,104 86,108 98,120 C 82,130 62,126 48,112 Z"
+                    fill="#FBEAE7"
+                    fillOpacity="0.55"
+                  />
+                  <path
+                    d="M 74,76 C 92,68 112,72 124,84 C 108,94 88,90 74,76 Z"
+                    fill="#FBEAE7"
+                    fillOpacity="0.55"
+                  />
+                </g>
+              </svg>
+            </div>
+
+            {/* Double Gold / Accent Curved Arch Border Line */}
+            <svg
+              className={`absolute top-0 left-0 w-[460px] ${
+                showFooterStrip ? 'h-[577px]' : 'h-[675px]'
+              } z-[2] pointer-events-none`}
+              viewBox={showFooterStrip ? '0 0 460 577' : '0 0 460 675'}
+              fill="none"
+            >
+              <path
+                d={
+                  showFooterStrip
+                    ? 'M 252,0 C 374,56 442,208 442,358 C 442,452 418,528 392,577'
+                    : 'M 252,0 C 374,66 442,242 442,418 C 442,528 418,618 392,675'
+                }
+                stroke={accentColor}
+                strokeWidth="3.5"
+                strokeOpacity="0.85"
+              />
+              <path
+                d={
+                  showFooterStrip
+                    ? 'M 243,0 C 365,56 433,208 433,358 C 433,452 409,528 383,577'
+                    : 'M 243,0 C 365,66 433,242 433,418 C 433,528 409,618 383,675'
+                }
+                stroke="#FFF8F4"
+                strokeWidth="1.5"
+                strokeOpacity="0.8"
+              />
+            </svg>
+          </>
+        )}
+
+        {displayCouplePhotoUrl && photoStyle === 'arch_frame' && (
+          /* Opsi 2: Bingkai Kubah Mewah (Royal Arch Window Frame — Tanpa Remove BG) */
           <div
-            className="absolute left-[18px] bottom-[98px] w-[425px] h-[525px] z-[2] pointer-events-none flex items-end justify-center overflow-hidden"
+            data-greeting-photo-style="arch_frame"
+            className={`absolute left-[38px] ${
+              showFooterStrip ? 'top-[28px] h-[520px]' : 'top-[48px] h-[565px]'
+            } w-[392px] z-[2] pointer-events-none flex items-center justify-center`}
+          >
+            {/* Outer Gold / Accent Luxury Arch Frame */}
+            <div
+              className="relative w-full h-full rounded-t-[200px] rounded-b-[28px] p-[7px] shadow-[0_20px_48px_rgba(48,26,20,0.24)]"
+              style={{
+                background: `linear-gradient(145deg, #FFFDF9 0%, ${accentColor} 50%, #9E743B 100%)`,
+              }}
+            >
+              <div className="relative w-full h-full rounded-t-[193px] rounded-b-[22px] overflow-hidden bg-[#F5EBE6]">
+                <img
+                  src={displayCouplePhotoUrl}
+                  alt={coupleDisplay}
+                  referrerPolicy="no-referrer"
+                  onError={() => setCouplePhotoIdx((prev) => prev + 1)}
+                  className="w-full h-full object-cover object-top"
+                />
+                {/* Inner Delicate Hairline Border */}
+                <div className="absolute inset-[9px] rounded-t-[184px] rounded-b-[15px] border border-white/75 pointer-events-none" />
+              </div>
+
+              {/* Bottom Center Ornamental Heart Emblem on Frame Rim */}
+              <div
+                className="absolute -bottom-[13px] left-1/2 -translate-x-1/2 px-3.5 py-1 rounded-full bg-[#FAF4EE] border shadow-xs flex items-center gap-1.5"
+                style={{ borderColor: accentColor }}
+              >
+                <span className="w-4 h-[1px]" style={{ backgroundColor: accentColor }} />
+                <Heart size={11} fill={accentColor} style={{ color: accentColor }} />
+                <span className="w-4 h-[1px]" style={{ backgroundColor: accentColor }} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {displayCouplePhotoUrl && photoStyle === 'soft_vignette' && (
+          /* Opsi 3: Gradasi Halus Menyatu (Soft Vignette Blend — Tanpa Remove BG) */
+          <div
+            data-greeting-photo-style="soft_vignette"
+            className={`absolute top-0 left-0 w-[456px] ${
+              showFooterStrip ? 'h-[577px]' : 'h-[675px]'
+            } z-[2] pointer-events-none overflow-hidden`}
+            style={{
+              WebkitMaskImage:
+                'radial-gradient(112% 96% at 22% 46%, #000 56%, rgba(0,0,0,0.82) 70%, rgba(0,0,0,0.34) 85%, transparent 100%)',
+              maskImage:
+                'radial-gradient(112% 96% at 22% 46%, #000 56%, rgba(0,0,0,0.82) 70%, rgba(0,0,0,0.34) 85%, transparent 100%)',
+            }}
+          >
+            <img
+              src={displayCouplePhotoUrl}
+              alt={coupleDisplay}
+              referrerPolicy="no-referrer"
+              onError={() => setCouplePhotoIdx((prev) => prev + 1)}
+              className="w-full h-full object-cover object-top"
+            />
+          </div>
+        )}
+
+        {displayCouplePhotoUrl && photoStyle === 'cutout' && (
+          /* Opsi 4: Potong Latar Otomatis (Cutout / Auto Remove BG) */
+          <div
+            data-greeting-photo-style="cutout"
+            className={`absolute left-[18px] ${
+              showFooterStrip ? 'bottom-[98px]' : 'bottom-0'
+            } w-[425px] h-[525px] z-[2] pointer-events-none flex items-end justify-center overflow-hidden`}
             style={{
               WebkitMaskImage:
                 'radial-gradient(ellipse 94% 96% at 50% 56%, #000 78%, rgba(0,0,0,0.68) 90%, transparent 100%)',
