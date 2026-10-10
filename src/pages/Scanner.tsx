@@ -33,7 +33,10 @@ import {
   WifiOff,
   CloudDownload,
   CloudUpload,
-  ShieldAlert
+  ShieldAlert,
+  Crown,
+  Star,
+  X
 } from 'lucide-react';
 import ScannerStressTestModal from '../components/ScannerStressTestModal';
 import { souvenirStorage } from '../services/souvenirStorage';
@@ -100,6 +103,33 @@ const playSouvenirChime = () => {
   }
 };
 
+const playVipChime = () => {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioContextClass) {
+      const audioCtx = new AudioContextClass();
+      // Royal celebratory arpeggio: C5 (523Hz), E5 (659Hz), G5 (784Hz), C6 (1046Hz)
+      const notes = [523.25, 659.25, 783.99, 1046.50];
+      notes.forEach((freq, idx) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.type = 'triangle';
+        const startTime = audioCtx.currentTime + idx * 0.08;
+        osc.frequency.setValueAtTime(freq, startTime);
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.35, startTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.35);
+        osc.start(startTime);
+        osc.stop(startTime + 0.35);
+      });
+    }
+  } catch (e) {
+    console.error("Audio output error", e);
+  }
+};
+
 const playErrorBuzz = () => {
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -143,6 +173,18 @@ export default function Scanner() {
     souvenirNotice?: string;
     operatorName?: string;
   } | null>(null);
+
+  // Dedicated VIP / VVIP Alert Modal State
+  const [vipModal, setVipModal] = useState<{
+    name: string;
+    category: string;
+    isVvip: boolean;
+    tableNumber?: string;
+    pax?: number;
+    ticketCode?: string;
+  } | null>(null);
+  const [vipCountdown, setVipCountdown] = useState<number>(5);
+
   const [scanMode, setScanMode] = useState<'camera' | 'tool'>('camera');
   const [manualInput, setManualInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -176,6 +218,36 @@ export default function Scanner() {
       else if (modeParam === 'checkin') setStationMode('checkin');
     }
   }, [isStaffSouvenirOnly, isStaffCheckinOnly, searchParams]);
+
+  // VIP & VVIP Modal Auto-Dismiss (5 seconds) and Keyboard Close
+  useEffect(() => {
+    if (!vipModal) return;
+    setVipCountdown(5);
+    const interval = setInterval(() => {
+      setVipCountdown((prev) => {
+        if (prev <= 1) {
+          setVipModal(null);
+          return 5;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === 'Enter') {
+        setVipModal(null);
+        if (inputRef.current) {
+          inputRef.current.focus();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [vipModal]);
 
   // Waiting Guests Search & Manual Handout
   const [waitingSearch, setWaitingSearch] = useState('');
@@ -636,6 +708,17 @@ export default function Scanner() {
     };
 
     if (stationMode === 'souvenir_only') {
+      // 1. Mandatory Pre-check: Guest MUST have checked in at gate first
+      if (!guestData.attended) {
+        const notCheckedInErr: any = new Error('NOT_CHECKED_IN');
+        notCheckedInErr.guestName = guestData.name;
+        notCheckedInErr.category = guestData.category;
+        notCheckedInErr.ticketCode = code;
+        notCheckedInErr.tableNumber = guestData.tableNumber;
+        notCheckedInErr.pax = guestData.pax;
+        throw notCheckedInErr;
+      }
+
       const isAlreadyTaken = guestData.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
       if (isAlreadyTaken) {
         const localTaken = souvenirStorage.getGuestTakenInfo(eventId!, guestDocId);
@@ -895,11 +978,13 @@ export default function Scanner() {
           ]);
         } catch (onlineErr: any) {
           const businessErrors = [
+            'NOT_CHECKED_IN',
             'ALREADY_ATTENDED',
             'ALREADY_TAKEN_SOUVENIR',
             'OUT_OF_STOCK',
             'NO_SOUVENIR_CONFIGURED',
             'TICKET_NOT_FOUND',
+            'TICKET_NOT_FOUND_LOCALLY',
             'GUEST_NOT_FOUND',
           ];
           if (businessErrors.includes(onlineErr?.message)) {
@@ -1015,6 +1100,29 @@ export default function Scanner() {
           operatorName: currentOperator
         });
 
+        // Trigger VIP / VVIP alert popup
+        const guestCat = transactionResult.category || '';
+        const isVvip = /vvip/i.test(guestCat);
+        const isVip = /vip/i.test(guestCat);
+        if (isVvip || isVip) {
+          playVipChime();
+          setVipModal({
+            name: transactionResult.name,
+            category: guestCat,
+            isVvip,
+            tableNumber: guestTable || undefined,
+            pax: guestPax,
+            ticketCode: code
+          });
+          try {
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+              navigator.vibrate([150, 100, 200]);
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+
         if (!transactionResult.processedOffline) {
           // Zero-latency broadcast over shared WebSocket to Greeting Screen TV & peer Scanners
           supabaseDb.broadcastGuestArrival(eventId!, {
@@ -1041,10 +1149,36 @@ export default function Scanner() {
       }
     } catch (error: any) {
       playErrorBuzz();
-      if (error?.message === 'TICKET_NOT_FOUND' || error?.message === 'TICKET_NOT_FOUND_LOCALLY') {
+      try {
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate([200, 100, 200]);
+        }
+      } catch (e) {}
+
+      if (error?.message === 'NOT_CHECKED_IN') {
+        const guestNameInfo = error.guestName ? `"${error.guestName}" ` : '';
+        const catInfo = error.category ? `[${error.category}] ` : '';
         setScanResult({
           status: 'error',
-          message: `Tiket tidak valid atau tidak terdaftar di acara ini. (Kode: ${code})`
+          message: `⛔ DITOLAK: Tamu ${guestNameInfo}${catInfo}BELUM check-in di gate depan/resepsionis! Tamu tidak boleh mengambil souvenir di loket ini dan WAJIB kembali ke meja check-in depan terlebih dahulu.`,
+          guestName: error.guestName,
+          category: error.category,
+          tableNumber: error.tableNumber,
+          pax: error.pax
+        });
+      } else if (error?.message === 'TICKET_NOT_FOUND' || error?.message === 'TICKET_NOT_FOUND_LOCALLY') {
+        setScanResult({
+          status: 'error',
+          message: stationMode === 'souvenir_only'
+            ? `⛔ DITOLAK: Tiket (Kode: ${code}) tidak ditemukan dalam daftar undangan acara ini! Tamu tidak terdaftar dan tidak boleh mengambil souvenir. Arahkan tamu ke Meja Registrasi Utama di depan.`
+            : `Tiket tidak valid atau tidak terdaftar di acara ini. (Kode: ${code})`
+        });
+      } else if (error?.message === 'GUEST_NOT_FOUND') {
+        setScanResult({ 
+          status: 'error', 
+          message: stationMode === 'souvenir_only'
+            ? `⛔ DITOLAK: Data tamu tidak ditemukan dalam database acara! Tamu tidak boleh mengambil souvenir dan harus melapor ke Meja Registrasi Utama di depan.`
+            : `Data tiket tidak ditemukan di database acara.` 
         });
       } else if (error?.message === 'ALREADY_TAKEN_SOUVENIR') {
         const takenDate = parseFirestoreDate(error.souvenirTakenAt);
@@ -1104,6 +1238,19 @@ export default function Scanner() {
   // 1-Click Handout for Waiting Guests at Souvenir Desk
   const handleManualHandout = async (guest: Guest) => {
     if (!guest.id || !eventId || !activeSouvenir || !activeSouvenir.id) return;
+    
+    // Safeguard: Guest must have checked in at gate first
+    if (!guest.attended) {
+      playErrorBuzz();
+      setScanResult({
+        status: 'error',
+        message: `⛔ DITOLAK: Tamu "${guest.name}" BELUM check-in di gate depan! Tamu tidak boleh mengambil souvenir dan harus kembali ke meja check-in awal.`,
+        guestName: guest.name,
+        category: guest.category
+      });
+      return;
+    }
+
     if ((activeSouvenir.remainingStock || 0) <= 0) {
       playErrorBuzz();
       setScanResult({
@@ -1122,23 +1269,20 @@ export default function Scanner() {
         throw new Error('FORCE_LOCAL_QUEUE');
       }
 
-      const guestDocRef = doc(db, 'events', eventId, 'guests', guest.id);
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('HANDOUT_TIMEOUT')), 1500)
       );
 
       await Promise.race([
-        updateDoc(guestDocRef, {
+        supabaseDb.updateGuest(guest.id, {
           souvenirTaken: true,
-          souvenirTakenAt: serverTimestamp(),
-          souvenirId: activeSouvenir.id,
+          souvenirTakenAt: nowIso,
           souvenirName: activeSouvenir.name,
-          souvenirQuantity: 1,
           souvenirTakenBy: currentOperator,
           attended: true,
-          attendedAt: guest.attendedAt || serverTimestamp(),
+          attendedAt: typeof guest.attendedAt === 'string' ? guest.attendedAt : nowIso,
+          checkInTime: typeof guest.attendedAt === 'string' ? guest.attendedAt : nowIso,
           checkInStaff: guest.checkInStaff || currentOperator,
-          updatedAt: serverTimestamp()
         }),
         timeoutPromise
       ]);
@@ -1185,6 +1329,27 @@ export default function Scanner() {
         souvenirNotice: `Souvenir: ${activeSouvenir.name}`,
         operatorName: currentOperator
       });
+
+      // Trigger VIP alert popup if applicable
+      const guestCat = guest.category || '';
+      const isVvip = /vvip/i.test(guestCat);
+      const isVip = /vip/i.test(guestCat);
+      if (isVvip || isVip) {
+        playVipChime();
+        setVipModal({
+          name: guest.name,
+          category: guestCat,
+          isVvip,
+          tableNumber: guest.tableNumber || undefined,
+          pax: guest.pax,
+          ticketCode: guest.ticketCode
+        });
+        try {
+          if (typeof navigator !== 'undefined' && navigator.vibrate) {
+            navigator.vibrate([150, 100, 200]);
+          }
+        } catch (e) {}
+      }
 
       // Incremental single-guest update in memory instead of full 2,000-guest reload
       applyDeltaGuestsToState([
@@ -1264,6 +1429,22 @@ export default function Scanner() {
         guestName: guest.name,
         operatorName: currentOperator
       });
+
+      const guestCatOffline = guest.category || '';
+      const isVvipOffline = /vvip/i.test(guestCatOffline);
+      const isVipOffline = /vip/i.test(guestCatOffline);
+      if (isVvipOffline || isVipOffline) {
+        playVipChime();
+        setVipModal({
+          name: guest.name,
+          category: guestCatOffline,
+          isVvip: isVvipOffline,
+          tableNumber: guest.tableNumber || undefined,
+          pax: guest.pax,
+          ticketCode: guest.ticketCode
+        });
+      }
+
       applyDeltaGuestsToState([
         {
           ...guest,
@@ -1831,7 +2012,7 @@ export default function Scanner() {
               <h4 className="text-base font-bold">
                 {scanResult.status === 'success' 
                   ? (stationMode === 'souvenir_only' ? '✓ Souvenir Berhasil Diserahkan' : '✓ Check-in Berhasil') 
-                  : '✕ Verifikasi Gagal'}
+                  : (stationMode === 'souvenir_only' ? '✕ Penyerahan Souvenir Ditolak' : '✕ Verifikasi Gagal')}
               </h4>
               <div className="flex flex-wrap items-center gap-1.5">
                 {scanResult.category && (
@@ -1963,7 +2144,7 @@ export default function Scanner() {
                     <p className="text-[10px] text-slate-400">Semua tamu yang hadir sudah menerima souvenir atau belum ada yang hadir di gate.</p>
                   </div>
                 ) : (
-                  waitingGuests.slice(0, 15).map(guest => {
+                  waitingGuests.slice(0, 50).map(guest => {
                     const attendedDate = guest.attendedAt ? parseFirestoreDate(guest.attendedAt) : null;
                     const timeStr = attendedDate ? attendedDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-';
 
@@ -2216,6 +2397,137 @@ export default function Scanner() {
           </div>
         </div>
       </div>
+
+      {/* Dedicated High-Priority Alert Popup for VIP & VVIP Guests - Styled with Guestly Signature Theme */}
+      {vipModal && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#5B4B63]/45 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => {
+            setVipModal(null);
+            inputRef.current?.focus();
+          }}
+        >
+          <div 
+            className={`relative w-full max-w-md rounded-2xl sm:rounded-3xl p-6 sm:p-7 text-center border transition-all duration-200 transform scale-100 shadow-[0_20px_50px_-12px_rgba(91,75,99,0.22),0_4px_16px_-4px_rgba(201,143,157,0.15)] bg-white ${
+              vipModal.isVvip 
+                ? 'border-[#F3C68F] ring-4 ring-[#FDE68A]/35 bg-gradient-to-b from-[#FFFDF9] via-white to-white' 
+                : 'border-[#D8C7F3] ring-4 ring-[#D8C7F3]/35 bg-gradient-to-b from-[#FAF8FB] via-white to-white'
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Guestly Brand Header & Close Button */}
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-[#f2eef5]">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#f5eff5] border border-[#D8C7F3]/70 text-[#C98F9D] text-[11px] font-bold tracking-wider uppercase">
+                <Sparkles className="w-3.5 h-3.5 text-[#C98F9D]" />
+                <span>Guestly • Priority Access</span>
+              </div>
+              <button
+                onClick={() => {
+                  setVipModal(null);
+                  inputRef.current?.focus();
+                }}
+                className="p-1.5 rounded-full text-[#74638a] hover:text-[#5B4B63] hover:bg-[#f5eff5] transition-colors cursor-pointer"
+                title="Tutup (Esc)"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Glowing Icon Header */}
+            <div className="flex justify-center mb-3">
+              <div className={`w-18 h-18 sm:w-20 sm:h-20 rounded-full flex items-center justify-center relative shadow-lg ${
+                vipModal.isVvip 
+                  ? 'bg-gradient-to-tr from-[#C98F9D] via-[#E5A87D] to-[#F5D061] text-white shadow-[#E5A87D]/35 ring-4 ring-[#FDE68A]/40' 
+                  : 'bg-gradient-to-tr from-[#C98F9D] via-[#E7B8C4] to-[#D8C7F3] text-white shadow-[#C98F9D]/35 ring-4 ring-[#D8C7F3]/50'
+              }`}>
+                {vipModal.isVvip ? (
+                  <Crown className="w-9 h-9 sm:w-10 sm:h-10 animate-pulse text-white drop-shadow-md" />
+                ) : (
+                  <Star className="w-9 h-9 sm:w-10 sm:h-10 animate-pulse text-white drop-shadow-md" />
+                )}
+                <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#C98F9D] opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-[#C98F9D]"></span>
+                </span>
+              </div>
+            </div>
+
+            {/* VIP / VVIP Badge */}
+            <div className="mb-2">
+              <span className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider shadow-2xs ${
+                vipModal.isVvip 
+                  ? 'bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]' 
+                  : 'bg-[#f5eff5] text-[#C98F9D] border border-[#D8C7F3]'
+              }`}>
+                {vipModal.isVvip ? '👑 TAMU KEHORMATAN VVIP' : '⭐ TAMU KEHORMATAN VIP'}
+              </span>
+            </div>
+
+            {/* Guest Name */}
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-[#5B4B63] tracking-tight mt-2 mb-1 break-words">
+              {vipModal.name}
+            </h2>
+
+            {/* Specific Category if detailed */}
+            {vipModal.category && (
+              <p className="text-xs font-medium text-[#74638a] mb-3">
+                Kategori: <span className="font-bold text-[#5B4B63] bg-[#f5eff5] px-2 py-0.5 rounded-md border border-[#e6dfec]">{vipModal.category}</span>
+              </p>
+            )}
+
+            {/* Table & Pax Badges */}
+            <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
+              {vipModal.tableNumber && (
+                <div className="px-3 py-1.5 rounded-xl bg-[#FFF9F2] border border-[#FDE68A] text-[#92400E] font-bold text-xs sm:text-sm flex items-center gap-1.5 shadow-2xs">
+                  <span>🪑</span>
+                  <span>Meja: <span className="font-extrabold text-[#78350F]">{vipModal.tableNumber}</span></span>
+                </div>
+              )}
+              {vipModal.pax && (
+                <div className="px-3 py-1.5 rounded-xl bg-[#FAF8FB] border border-[#e6dfec] text-[#5B4B63] font-semibold text-xs sm:text-sm flex items-center gap-1.5 shadow-2xs">
+                  <Users className="w-3.5 h-3.5 text-[#C98F9D]" />
+                  <span>{vipModal.pax} Tamu</span>
+                </div>
+              )}
+              {vipModal.ticketCode && (
+                <div className="px-2.5 py-1.5 rounded-xl bg-[#f2eef5] border border-[#e6dfec] text-[#74638a] font-mono text-[11px] shadow-2xs">
+                  {vipModal.ticketCode}
+                </div>
+              )}
+            </div>
+
+            {/* Field Crew Brief Guidance */}
+            <div className="p-3 rounded-xl bg-[#FAF8FB] border border-[#e6dfec] text-left mb-5">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-5 h-5 rounded-full bg-[#f5eff5] text-[#C98F9D] flex items-center justify-center shrink-0">
+                  <Sparkles className="w-3 h-3" />
+                </span>
+                <p className="text-xs font-bold text-[#5B4B63]">Instruksi Khusus Petugas Front Gate & Usher</p>
+              </div>
+              <p className="text-[12px] text-[#74638a] leading-relaxed pl-7">
+                Sambut tamu dengan hormat & ramah. Berikan pendampingan langsung menuju meja atau area kehormatan.
+              </p>
+            </div>
+
+            {/* Acknowledge Button styled with Guestly Rose Gold */}
+            <button
+              onClick={() => {
+                setVipModal(null);
+                inputRef.current?.focus();
+              }}
+              className="w-full py-3 px-5 rounded-xl font-bold text-sm text-white bg-[#C98F9D] hover:bg-[#b07080] border border-[#C98F9D] shadow-md shadow-[#C98F9D]/35 transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 active:scale-[0.98]"
+            >
+              <span>Mengerti & Lanjutkan Scan</span>
+              <span className="text-xs font-medium bg-white/25 px-2 py-0.5 rounded-full font-mono text-white">
+                ({vipCountdown}s)
+              </span>
+            </button>
+            <p className="text-[11px] text-[#74638a] mt-2 font-medium">
+              Auto-close {vipCountdown} dtk • Tekan <kbd className="px-1.5 py-0.5 rounded bg-[#f2eef5] border border-[#e6dfec] font-mono text-[10px] text-[#5B4B63]">Enter</kbd> atau <kbd className="px-1.5 py-0.5 rounded bg-[#f2eef5] border border-[#e6dfec] font-mono text-[10px] text-[#5B4B63]">Esc</kbd> untuk lanjut
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* In-App Stress Test Tool Modal */}
       {eventId && (

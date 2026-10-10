@@ -359,6 +359,17 @@ export const offlineSyncService = {
     const nowIso = new Date().toISOString();
 
     if (stationMode === 'souvenir_only') {
+      // 1. Mandatory Check: Guest MUST have checked in at gate first
+      if (!guest.attended) {
+        const error: any = new Error('NOT_CHECKED_IN');
+        error.guestName = guest.name;
+        error.category = guest.category;
+        error.ticketCode = normalizedCode;
+        error.tableNumber = guest.tableNumber;
+        error.pax = guest.pax;
+        throw error;
+      }
+
       const isAlreadyTaken = guest.souvenirTaken || souvenirStorage.isGuestTaken(eventId, guestDocId);
       if (isAlreadyTaken) {
         const localTaken = souvenirStorage.getGuestTakenInfo(eventId, guestDocId);
