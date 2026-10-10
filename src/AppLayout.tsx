@@ -104,8 +104,17 @@ export default function AppLayout() {
   }, []);
 
   // Auto-sync active sidebar dropdown with current route (saling bergantian aktif)
+  // serta otomatis memperkecil (collapse) sidebar saat masuk ke halaman Scanner agar area scan leluasa
   useEffect(() => {
     const p = location.pathname;
+    const isScanPage = p.includes('/scan');
+
+    if (isScanPage) {
+      setIsSidebarCollapsed(true);
+    } else {
+      setIsSidebarCollapsed(false);
+    }
+
     if (p.startsWith('/auth/login/services') || p.startsWith('/auth/login/invoices')) {
       setIsServiceInfoMenuOpen(true);
       setIsUserMenuOpen(false);
@@ -1657,7 +1666,14 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
 
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">
+          <main
+            className={cn(
+              "flex-1 overflow-y-auto",
+              location.pathname.includes('/scan')
+                ? "p-2 sm:p-4 md:p-5"
+                : "p-4 sm:p-6 md:p-8"
+            )}
+          >
             <div className="w-full">
               {(shouldHideServiceInfo(appUser) &&
                 (location.pathname.startsWith('/auth/login/services') ||
