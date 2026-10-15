@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { EventRecord, Guest, User } from '../types';
+import { encodeCheckInStaff, decodeCheckInStaff } from './checkInUtils';
 
 const activeBroadcastChannels = new Map<string, ReturnType<typeof supabase.channel>>();
 const subscribedChannels = new Set<string>();
@@ -103,6 +104,22 @@ export const supabaseDb = {
     return data ? rowToGuest(data) : null;
   },
 
+  async getGuestById(guestId: string): Promise<Guest | null> {
+    if (!guestId) return null;
+    const { data, error } = await supabase
+      .from('guests')
+      .select('*')
+      .eq('id', guestId)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.warn(`Error fetching guest by id ${guestId}:`, error);
+      return null;
+    }
+    return data ? rowToGuest(data) : null;
+  },
+
   async getEventWishes(eventId: string, maxCount = 50): Promise<Guest[]> {
     const { data, error } = await supabase
       .from('guests')
@@ -201,7 +218,9 @@ export const supabaseDb = {
     if (updates.attended !== undefined) rowUpdates.attended = updates.attended;
     if (updates.checkInTime !== undefined) rowUpdates.check_in_time = updates.checkInTime ? new Date(updates.checkInTime as any).toISOString() : null;
     if (updates.attendedAt !== undefined) rowUpdates.check_in_time = updates.attendedAt ? new Date(updates.attendedAt as any).toISOString() : null;
-    if (updates.checkInStaff !== undefined) rowUpdates.check_in_staff = updates.checkInStaff || null;
+    if (updates.checkInStaff !== undefined || updates.checkInMethod !== undefined) {
+      rowUpdates.check_in_staff = encodeCheckInStaff(updates.checkInStaff, updates.checkInMethod);
+    }
     if (updates.souvenirTaken !== undefined) rowUpdates.souvenir_taken = updates.souvenirTaken;
     if (updates.souvenirName !== undefined) rowUpdates.souvenir_type = updates.souvenirName;
     if (updates.souvenirTakenAt !== undefined) rowUpdates.souvenir_time = updates.souvenirTakenAt ? new Date(updates.souvenirTakenAt as any).toISOString() : null;
@@ -487,7 +506,8 @@ function rowToGuest(row: any): Guest {
     attended: Boolean(row.attended),
     attendedAt: row.check_in_time,
     checkInTime: row.check_in_time,
-    checkInStaff: row.check_in_staff || undefined,
+    checkInStaff: decodeCheckInStaff(row.check_in_staff).staff || undefined,
+    checkInMethod: decodeCheckInStaff(row.check_in_staff).method || (row.attended ? 'scan' : undefined),
     souvenirTaken: Boolean(row.souvenir_taken),
     souvenirName: row.souvenir_type,
     souvenirTakenAt: row.souvenir_time,
@@ -524,7 +544,7 @@ function guestToRow(guest: any): any {
     rsvp_status: guest.rsvpStatus || 'pending',
     attended: Boolean(guest.attended),
     check_in_time: guest.checkInTime || guest.attendedAt ? new Date(guest.checkInTime || guest.attendedAt).toISOString() : null,
-    check_in_staff: guest.checkInStaff || null,
+    check_in_staff: encodeCheckInStaff(guest.checkInStaff, guest.checkInMethod),
     souvenir_taken: Boolean(guest.souvenirTaken),
     souvenir_type: guest.souvenirName || null,
     souvenir_time: guest.souvenirTakenAt ? new Date(guest.souvenirTakenAt).toISOString() : null,

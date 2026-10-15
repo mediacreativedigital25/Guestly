@@ -214,6 +214,7 @@ export interface Guest {
   timestamp?: any;
   checkInTime?: any;
   checkInStaff?: string;
+  checkInMethod?: 'scan' | 'manual';
   hasResponded?: boolean;
   souvenirTaken?: boolean;
   souvenirClaimed?: boolean;

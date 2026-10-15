@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UploadCloud, Link as LinkIcon, MessageSquare, CreditCard, Image as ImageIcon, Building, Eye, EyeOff, Send, CheckCircle2, AlertCircle, QrCode } from 'lucide-react';
+import { UploadCloud, Link as LinkIcon, MessageSquare, CreditCard, Image as ImageIcon, Building, Eye, EyeOff, Send, CheckCircle2, AlertCircle, QrCode, Sparkles, Loader2 } from 'lucide-react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useSettings } from '../../SettingsContext';
@@ -7,6 +7,7 @@ import { showAlert, showConfirm, showCancelAlert } from '../../lib/alerts';
 import AdminSalespageSettings from './AdminSalespageSettings';
 import { MediaUploader } from '../../components/media/MediaUploader';
 import { sendFonnteMessage } from '../../lib/fonnte';
+import { scanQrisFromImageFile } from '../../utils/qrisParser';
 
 export default function AdminSettings() {
   const [activeTab, setActiveTab] = useState('branding');
@@ -35,6 +36,57 @@ export default function AdminSettings() {
   const [qrisNmid, setQrisNmid] = useState(settings?.qrisPayment?.nmid || '');
   const [qrisImageUrl, setQrisImageUrl] = useState(settings?.qrisPayment?.qrisImageUrl || '');
   const [qrisInstructions, setQrisInstructions] = useState(settings?.qrisPayment?.instructions || '');
+  const [isScanningQris, setIsScanningQris] = useState(false);
+  const [qrisScanFeedback, setQrisScanFeedback] = useState<{
+    type: 'success' | 'info' | 'error';
+    message: string;
+    details?: string;
+  } | null>(null);
+  const [isQrisAutoDetected, setIsQrisAutoDetected] = useState(false);
+
+  const handleQrisUpload = async (data: { url: string; key: string; sizeBytes: number; file?: File }) => {
+    setQrisImageUrl(data.url);
+
+    if (data.file) {
+      setIsScanningQris(true);
+      setQrisScanFeedback(null);
+      try {
+        const scanRes = await scanQrisFromImageFile(data.file);
+        if (scanRes.success && scanRes.data && (scanRes.data.merchantName || scanRes.data.nmid)) {
+          if (scanRes.data.merchantName) {
+            setQrisMerchantName(scanRes.data.merchantName);
+          }
+          if (scanRes.data.nmid) {
+            setQrisNmid(scanRes.data.nmid);
+          }
+          setIsQrisAutoDetected(true);
+
+          const detailsArr = [];
+          if (scanRes.data.merchantName) detailsArr.push(`Merchant: ${scanRes.data.merchantName}`);
+          if (scanRes.data.nmid) detailsArr.push(`NMID: ${scanRes.data.nmid}`);
+          if (scanRes.data.merchantCity) detailsArr.push(`Kota: ${scanRes.data.merchantCity}`);
+
+          setQrisScanFeedback({
+            type: 'success',
+            message: 'QRIS berhasil dipindai! Nama Merchant dan NMID terisi otomatis.',
+            details: detailsArr.join(' • ')
+          });
+        } else {
+          setQrisScanFeedback({
+            type: 'info',
+            message: 'Gambar QRIS berhasil diunggah. QR tidak dapat dideteksi otomatis (pastikan gambar QRIS jelas). Anda tetap dapat mengisi Nama Merchant dan NMID manual di bawah.'
+          });
+        }
+      } catch (err: any) {
+        setQrisScanFeedback({
+          type: 'info',
+          message: 'Gambar berhasil diunggah. Anda dapat melengkapi informasi Nama Merchant & NMID manual.'
+        });
+      } finally {
+        setIsScanningQris(false);
+      }
+    }
+  };
 
   // Salespage settings
   const [salespageData, setSalespageData] = useState<any>({});
@@ -474,42 +526,33 @@ export default function AdminSettings() {
 
                   {/* QRIS Payment Fields */}
                   <div className={`p-5 border rounded-lg ${activePaymentMethod === 'qris' ? 'border-indigo-200 bg-white shadow-sm ring-1 ring-indigo-500' : 'border-gray-200 bg-gray-50/50'}`}>
-                    <h3 className="text-md font-semibold text-gray-900 flex items-center gap-2 mb-4">
-                      <QrCode className="w-5 h-5 text-indigo-500" /> Informasi Pembayaran QRIS
-                    </h3>
-                    <div className="space-y-4 max-w-3xl">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Nama Merchant QRIS</label>
-                          <input
-                            type="text"
-                            value={qrisMerchantName}
-                            onChange={e => setQrisMerchantName(e.target.value)}
-                            placeholder="Misal: GUESTLY DIGITAL INDONESIA"
-                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">NMID (Opsional)</label>
-                          <input
-                            type="text"
-                            value={qrisNmid}
-                            onChange={e => setQrisNmid(e.target.value)}
-                            placeholder="Misal: ID1020012345678"
-                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white font-mono"
-                          />
-                        </div>
-                      </div>
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <h3 className="text-md font-semibold text-gray-900 flex items-center gap-2">
+                        <QrCode className="w-5 h-5 text-indigo-500" /> Informasi Pembayaran QRIS
+                      </h3>
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" /> Auto-Deteksi Merchant & NMID
+                      </span>
+                    </div>
 
-                      <div>
+                    <div className="space-y-4 max-w-3xl">
+                      {/* Upload QRIS Section */}
+                      <div className="p-4 bg-gray-50/80 border border-gray-200 rounded-lg">
                         <div className="flex items-center justify-between mb-1.5">
-                          <label className="block text-sm font-medium text-gray-700">
+                          <label className="block text-sm font-semibold text-gray-800 flex items-center gap-2">
                             Upload Gambar Kode QRIS
+                            <span className="text-[11px] font-normal text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                              Otomatis Isi Data
+                            </span>
                           </label>
                           {qrisImageUrl && (
                             <button
                               type="button"
-                              onClick={() => setQrisImageUrl('')}
+                              onClick={() => {
+                                setQrisImageUrl('');
+                                setQrisScanFeedback(null);
+                                setIsQrisAutoDetected(false);
+                              }}
                               className="text-xs font-semibold text-rose-600 hover:text-rose-700 cursor-pointer"
                             >
                               Hapus Gambar QRIS
@@ -521,12 +564,90 @@ export default function AdminSettings() {
                           maxSize={5 * 1024 * 1024}
                           allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
                           defaultValue={qrisImageUrl || undefined}
-                          onUploadSuccess={(data) => setQrisImageUrl(data.url)}
+                          onUploadSuccess={handleQrisUpload}
                           onUploadError={(err) => showAlert('Gagal Upload', `Gagal mengunggah gambar QRIS: ${err}`, 'error')}
                         />
-                        <p className="text-xs text-gray-500 mt-1.5">
-                          Unggah gambar kode QRIS resmi toko/perusahaan Anda (mendukung pembayaran via GoPay, OVO, DANA, ShopeePay, dan seluruh Mobile Banking).
+
+                        {isScanningQris && (
+                          <div className="mt-3 flex items-center gap-2.5 p-3 bg-indigo-50 border border-indigo-200 rounded-lg text-xs font-medium text-indigo-900 animate-pulse">
+                            <Loader2 className="w-4 h-4 animate-spin text-indigo-600 shrink-0" />
+                            <span>Sedang menganalisis kode QRIS dan membaca Nama Merchant & NMID secara otomatis...</span>
+                          </div>
+                        )}
+
+                        {qrisScanFeedback && (
+                          <div className={`mt-3 p-3 rounded-lg text-xs border ${
+                            qrisScanFeedback.type === 'success'
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                              : 'bg-amber-50 border-amber-200 text-amber-900'
+                          }`}>
+                            <div className="flex items-start gap-2">
+                              {qrisScanFeedback.type === 'success' ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                              ) : (
+                                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                              )}
+                              <div className="flex-1">
+                                <p className="font-semibold">{qrisScanFeedback.message}</p>
+                                {qrisScanFeedback.details && (
+                                  <p className="mt-1 text-emerald-800 font-mono text-[11px] bg-emerald-100/70 px-2 py-0.5 rounded inline-block">
+                                    {qrisScanFeedback.details}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <p className="text-xs text-gray-500 mt-2">
+                          Unggah file gambar QRIS resmi (PNG, JPG, WebP). Sistem akan otomatis membaca barcode EMVCo QRIS dan mengisi Nama Merchant serta NMID.
                         </p>
+                      </div>
+
+                      {/* Merchant Name & NMID Fields */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-sm font-medium text-gray-700">Nama Merchant QRIS</label>
+                            {isQrisAutoDetected && qrisMerchantName && (
+                              <span className="text-[11px] font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
+                                <Sparkles className="w-3 h-3 text-emerald-500" /> Otomatis
+                              </span>
+                            )}
+                          </div>
+                          <input
+                            type="text"
+                            value={qrisMerchantName}
+                            onChange={e => {
+                              setQrisMerchantName(e.target.value);
+                              setIsQrisAutoDetected(false);
+                            }}
+                            placeholder="Misal: GUESTLY DIGITAL INDONESIA"
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                          />
+                          <p className="text-[11px] text-gray-400 mt-1">Nama usaha/toko yang terdaftar pada QRIS.</p>
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-sm font-medium text-gray-700">NMID (Opsional)</label>
+                            {isQrisAutoDetected && qrisNmid && (
+                              <span className="text-[11px] font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
+                                <Sparkles className="w-3 h-3 text-emerald-500" /> Otomatis
+                              </span>
+                            )}
+                          </div>
+                          <input
+                            type="text"
+                            value={qrisNmid}
+                            onChange={e => {
+                              setQrisNmid(e.target.value);
+                              setIsQrisAutoDetected(false);
+                            }}
+                            placeholder="Misal: ID1020012345678"
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white font-mono"
+                          />
+                          <p className="text-[11px] text-gray-400 mt-1">National Merchant ID terdaftar di Bank Indonesia.</p>
+                        </div>
                       </div>
 
                       <div>
@@ -534,7 +655,7 @@ export default function AdminSettings() {
                         <textarea
                           value={qrisInstructions}
                           onChange={e => setQrisInstructions(e.target.value)}
-                          placeholder="Misal: Scan kode QRIS di atas melalui aplikasi M-Banking atau E-Wallet Anda, masukkan nominal sesuai tagihan invoice, lalu kirim bukti pembayaran."
+                          placeholder="Misal: Scan kode QRIS di atas melalui aplikasi M-Banking atau E-Wallet (BCA, Mandiri, BRI, DANA, GoPay, OVO, ShopeePay), masukkan nominal sesuai tagihan invoice, lalu kirim bukti pembayaran."
                           rows={3}
                           className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white"
                         />

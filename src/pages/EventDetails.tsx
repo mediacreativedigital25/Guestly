@@ -1,5 +1,5 @@
 import { useParams, Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { QrCode, Printer, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code, MessageCircle, RefreshCcw, Users, Loader2, Gift, ArrowUpDown, AlertCircle, ArrowLeft, Image as ImageIcon } from 'lucide-react';
+import { QrCode, Printer, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code, MessageCircle, RefreshCcw, Users, Loader2, Gift, ArrowUpDown, AlertCircle, ArrowLeft, Image as ImageIcon, Calendar, MapPin, Clock, ChevronDown, ChevronUp, MoreHorizontal, X, Check, ChevronRight } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'react-qr-code';
 import { collection, query, getDocs, addDoc, serverTimestamp, doc, getDoc, deleteDoc, updateDoc, deleteField, onSnapshot, writeBatch } from 'firebase/firestore';
@@ -110,11 +110,18 @@ export default function EventDetails() {
   const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
   const [isGeneratingSample, setIsGeneratingSample] = useState(false);
   const [sampleProgress, setSampleProgress] = useState<{ current: number; total: number } | null>(null);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [selectedImportFile, setSelectedImportFile] = useState<File | null>(null);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const modalFileInputRef = useRef<HTMLInputElement>(null);
 
   // Thumbnail / Foto Mempelai quick-setting modal states
   const [isThumbnailModalOpen, setIsThumbnailModalOpen] = useState(false);
   const [thumbnailInput, setThumbnailInput] = useState('');
   const [isSavingThumbnail, setIsSavingThumbnail] = useState(false);
+  const [isOptionsDropdownOpen, setIsOptionsDropdownOpen] = useState(false);
+  const [isConfigExpanded, setIsConfigExpanded] = useState(false);
   const [eInviteTemplates, setEInviteTemplates] = useState<EInviteTemplate[]>(DEFAULT_EINVITE_TEMPLATES);
 
   useEffect(() => {
@@ -674,14 +681,16 @@ export default function EventDetails() {
       if (newStatus) {
         updateData.attendedAt = serverTimestamp();
         updateData.checkInStaff = currentOperator;
+        updateData.checkInMethod = 'manual';
       } else {
         updateData.attendedAt = deleteField();
         updateData.checkInStaff = deleteField();
+        updateData.checkInMethod = deleteField();
       }
       
       await updateDoc(doc(db, 'events', eventId!, 'guests', guestId), updateData);
       
-      setGuests(guests.map(g => g.id === guestId ? { ...g, attended: newStatus, checkInStaff: newStatus ? currentOperator : undefined } : g));
+      setGuests(guests.map(g => g.id === guestId ? { ...g, attended: newStatus, checkInStaff: newStatus ? currentOperator : undefined, checkInMethod: newStatus ? 'manual' : undefined } : g));
       showAlert('Berhasil', `Status kehadiran berhasil ${newStatus ? 'dikonfirmasi' : 'dibatalkan'}!`, 'success');
     } catch (error) {
       showAlert('Gagal', "Gagal memperbarui status kehadiran", 'error');
@@ -1059,8 +1068,9 @@ export default function EventDetails() {
         "Jumlah Pax (Orang)": effectivePax,
         "Status RSVP (Pra Check-In)": guest.rsvpStatus === 'attending' ? 'Hadir' : guest.rsvpStatus === 'declined' ? 'Tidak Hadir' : 'Pending',
         "Status Check-In": guest.attended ? 'Hadir' : 'Belum Hadir',
+        "Metode Check-In": guest.attended ? (guest.checkInMethod === 'manual' ? 'Manual' : 'Scan QR') : '-',
         "Waktu Kehadiran": guest.attendedAt && parseFirestoreDate(guest.attendedAt) ? parseFirestoreDate(guest.attendedAt)!.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '-',
-        "Petugas Scan Kehadiran": guest.checkInStaff || '-',
+        "Petugas Check-In Kehadiran": guest.checkInStaff || '-',
         "Status Souvenir": guest.souvenirTaken ? (guest.souvenirName || 'Sudah Diambil') : 'Belum',
         "Petugas Souvenir": guest.souvenirTakenBy || '-'
       };
@@ -1090,11 +1100,10 @@ export default function EventDetails() {
   };
 
   const handleImportClick = () => {
-    fileInputRef.current?.click();
+    setIsImportModalOpen(true);
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const processFile = async (file: File) => {
     if (!file) return;
 
     const reader = new FileReader();
@@ -1211,6 +1220,8 @@ export default function EventDetails() {
           msg += `\n\nInfo: ${duplicateNames.length} nama duplikat diabaikan:\n${duplicatesList}`;
         }
         showAlert('Sukses Impor', msg, 'success');
+        setIsImportModalOpen(false);
+        setSelectedImportFile(null);
 
       } catch (error) {
         console.error('Error importing Excel:', error);
@@ -1222,10 +1233,22 @@ export default function EventDetails() {
     };
     reader.readAsBinaryString(file);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    if (modalFileInputRef.current) modalFileInputRef.current.value = "";
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processFile(file);
+    }
   };
 
   const handleGenerateSampleGuests = async (count = 1000) => {
     if (!eventId) return;
+    if (appUser?.role !== 'superadmin') {
+      showAlert('Akses Dibatasi', 'Hanya Super Admin yang diizinkan membuat data tamu contoh.', 'warning');
+      return;
+    }
 
     const confirmed = await showConfirm(
       `Apakah Anda yakin ingin membuat ${count.toLocaleString('id-ID')} data tamu contoh untuk acara ini?\n\nData akan langsung disimpan ke database dengan kode QR/tiket unik untuk uji coba scan dan kapasitas.`
@@ -1618,216 +1641,316 @@ export default function EventDetails() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Detail Acara</h1>
-          {isStaff && (
-            <p className="text-xs text-gray-500 mt-0.5">
-              Mode Petugas: <span className="font-semibold text-indigo-600">{currentOperator}</span>
-            </p>
-          )}
-        </div>
-        <div className="grid grid-cols-2 sm:flex sm:flex-row gap-2 w-full sm:w-auto">
-          {!isStaff && (
-            <>
-              <button
-                 onClick={() => setIsEmbedModalOpen(true)}
-                 className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 sm:px-4 py-2 border border-gray-300 bg-white text-gray-700 rounded-md hover:bg-gray-50 font-medium text-sm sm:text-base"
-               >
-                 <Code className="w-4 sm:w-5 h-4 sm:h-5 hidden sm:block" />
-                 <span className="hidden sm:inline">Embed</span>
-                 <span className="sm:hidden">Embed</span>
-               </button>
-              {guests.length > 0 && (
-                <Link
-                  to={`/rsvp/${eventId}/${guests[0].ticketCode}`}
-                  className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 font-medium text-sm sm:text-base"
-                  title="Lihat tampilan Kartu E-Invitation + Form RSVP & Ucapan Tamu"
-                >
-                  <QrCode className="w-4 sm:w-5 h-4 sm:h-5 hidden sm:block" />
-                  <span className="hidden sm:inline">Lihat E-Invitation &amp; RSVP</span>
-                  <span className="sm:hidden">E-Invite</span>
-                </Link>
-              )}
-              <Link
-                 to={`/public/rsvp/${eventId}`}
-                 className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-pink-500 text-white rounded-md hover:bg-pink-600 font-medium text-sm sm:text-base"
-               >
-                 <FileText className="w-4 sm:w-5 h-4 sm:h-5 hidden sm:block" />
-                 <span className="hidden sm:inline">Form RSVP</span>
-                 <span className="sm:hidden">RSVP</span>
-               </Link>
-            </>
-          )}
-          {!isStaffSouvenirOnly && (
-            <Link
-              to={`/events/${eventId}/greeting`}
-              target="_blank"
-              className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-indigo-500 text-white rounded-md hover:bg-indigo-600 font-medium text-sm sm:text-base"
-            >
-              <Monitor className="w-4 sm:w-5 h-4 sm:h-5 hidden sm:block" />
-              <span className="hidden sm:inline">Layar Sapa</span>
-              <span className="sm:hidden">Layar</span>
-            </Link>
-          )}
-          <Link
-            to={isStaffSouvenirOnly ? `/auth/login/events/${eventId}/scan?mode=souvenir` : isStaffCheckinOnly ? `/auth/login/events/${eventId}/scan?mode=checkin` : `/auth/login/events/${eventId}/scan`}
-            className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium text-sm sm:text-base"
-          >
-            <ScanLine className="w-4 sm:w-5 h-4 sm:h-5" />
-            <span className="hidden sm:inline">{isStaffSouvenirOnly ? 'Scanner Souvenir' : isStaffCheckinOnly ? 'Scanner Kehadiran' : 'Scanner'}</span>
-            <span className="sm:hidden">Scan</span>
-          </Link>
-        </div>
-      </div>
+      {/* Streamlined Modern Event Hero Card */}
+      <div className="bg-white rounded-xl shadow-2xs border border-slate-200">
+        <div className="p-4 sm:p-5">
+          <div className="flex flex-col lg:flex-row items-start justify-between gap-4">
+            {/* Left Column: Photo + Event Main Info */}
+            <div className="flex items-start gap-3.5 sm:gap-4 min-w-0 flex-1">
+              {/* Event Photo / Thumbnail with quick change overlay */}
+              <div className="relative group shrink-0">
+                {event?.thumbnailUrl ? (
+                  <img
+                    src={resolveMediaUrl(event.thumbnailUrl)}
+                    alt={event.title}
+                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border border-slate-200 bg-slate-50 shadow-xs"
+                  />
+                ) : (
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-500 shadow-xs">
+                    <ImageIcon className="w-7 h-7 sm:w-8 sm:h-8" />
+                  </div>
+                )}
+                {!isStaff && (
+                  <button
+                    type="button"
+                    onClick={openThumbnailModal}
+                    className="absolute inset-0 bg-black/40 hover:bg-black/60 text-white rounded-xl flex flex-col items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-[10px] font-semibold"
+                    title="Ubah Foto Mempelai / Thumbnail"
+                  >
+                    <ImageIcon className="w-3.5 h-3.5" />
+                    <span>Ubah</span>
+                  </button>
+                )}
+              </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        <div className="px-6 py-5 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
-           <h2 className="text-lg font-medium text-gray-900">Informasi Acara</h2>
-           {event && (
-             <div className="flex items-center gap-3">
-               <span className={`inline-flex px-3 py-1 rounded-full text-xs font-semibold capitalize ${
-                 event.status === 'published' ? 'bg-green-100 text-green-800' : 
-                 event.status === 'completed' ? 'bg-gray-100 text-gray-800' : 
-                 'bg-yellow-100 text-yellow-800'
-               }`}>
-                 {event.status}
-               </span>
-               {appUser?.role !== 'client' && !isStaff && (
-                 <select 
-                    value={event.status}
-                    onChange={(e) => handleStatusChange(e.target.value)}
-                    className="block text-sm border-gray-300 rounded-md py-1 pl-3 pr-8 focus:ring-indigo-500 focus:border-indigo-500"
-                 >
-                    <option value="draft">Draft</option>
-                    <option value="published">Published</option>
-                    <option value="completed">Completed</option>
-                 </select>
-               )}
-             </div>
-           )}
-        </div>
-        <div className="p-6">
-          {loading && !event ? (
-            <p className="text-gray-500 text-sm">Memuat detail acara...</p>
-          ) : event ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-8">
-               <div>
-                  <h3 className="text-sm font-medium text-gray-500">Nama Acara</h3>
-                  <p className="mt-1 text-base text-gray-900">{event.title}</p>
-               </div>
-               <div>
-                  <h3 className="text-sm font-medium text-gray-500">Waktu Pelaksanaan</h3>
-                  <p className="mt-1 text-base text-gray-900">
-                    {parseFirestoreDate(event.date) ? format(parseFirestoreDate(event.date)!, 'dd MMMM yyyy') : '-'} {event.time && `• ${event.time}`}
-                  </p>
-               </div>
-               <div>
-                  <h3 className="text-sm font-medium text-gray-500">Masa Aktif</h3>
-                  <p className="mt-1 text-base text-gray-900">
-                    {parseFirestoreDate(event.activeUntil) ? format(parseFirestoreDate(event.activeUntil)!, 'dd MMMM yyyy') : '-'}
-                  </p>
-               </div>
-               <div>
-                  <h3 className="text-sm font-medium text-gray-500">Lokasi</h3>
-                  <p className="mt-1 text-base text-gray-900">{event.location || '-'}</p>
-               </div>
-               <div>
-                  <h3 className="text-sm font-medium text-gray-500">Kategori Tamu Disediakan</h3>
-                  <div className="mt-1 flex flex-wrap gap-2">
-                    {event.guestCategories && event.guestCategories.length > 0 ? (
-                      event.guestCategories.map(cat => (
-                        <span key={cat} className="inline-flex px-2 py-1 bg-indigo-50 text-indigo-700 text-xs font-medium rounded-md">{cat}</span>
-                      ))
-                    ) : (
-                      <span className="text-gray-900">-</span>
-                    )}
-                  </div>
-               </div>
-               <div>
-                  <h3 className="text-sm font-medium text-gray-500">Sesi Acara Disediakan</h3>
-                  <div className="mt-1 flex flex-wrap gap-2">
-                    {event.sessions && event.sessions.length > 0 ? (
-                      event.sessions.map(ses => (
-                        <span key={ses} className="inline-flex px-2 py-1 bg-green-50 text-green-700 text-xs font-medium rounded-md">{ses}</span>
-                      ))
-                    ) : (
-                      <span className="text-gray-900">-</span>
-                    )}
-                  </div>
-               </div>
-               <div className="md:col-span-2">
-                  <h3 className="text-sm font-medium text-gray-500">Tipe Undangan Disediakan</h3>
-                  <div className="mt-1 flex flex-wrap gap-2">
-                    {availableInvitationTypes.map(invType => (
-                      <span key={invType} className="inline-flex px-2 py-1 bg-amber-50 text-amber-700 border border-amber-200 text-xs font-medium rounded-md">{invType}</span>
-                    ))}
-                  </div>
-               </div>
-               <div className="md:col-span-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                    <h3 className="text-sm font-medium text-gray-500">Thumbnail WA / Foto Mempelai</h3>
-                    {!isStaff && (
-                      <button
-                        type="button"
-                        onClick={openThumbnailModal}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors"
+              {/* Title & Core Details */}
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-lg sm:text-xl font-bold text-slate-900 truncate" title={event?.title}>
+                    {event?.title || 'Detail Acara'}
+                  </h1>
+
+                  {/* Status Badge & Dropdown */}
+                  {event && (
+                    <div className="inline-flex items-center gap-1.5">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${
+                          event.status === 'published'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : event.status === 'completed'
+                            ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                            : 'bg-amber-50 text-amber-700 border border-amber-200'
+                        }`}
                       >
-                        <ImageIcon className="w-3.5 h-3.5" />
-                        <span>{event.thumbnailUrl ? 'Ubah Thumbnail' : 'Atur Foto Mempelai'}</span>
-                      </button>
-                    )}
-                  </div>
-                  {event.thumbnailUrl ? (
-                    <div className="flex items-center gap-4 p-3 rounded-lg border border-slate-200 bg-slate-50/70 max-w-xl">
-                      <img
-                        src={resolveMediaUrl(event.thumbnailUrl)}
-                        alt="Thumbnail Acara / Foto Mempelai"
-                        className="w-16 h-16 rounded-lg object-cover border border-slate-200 bg-white shrink-0 shadow-xs"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                          <CheckCircle className="w-3.5 h-3.5" /> Thumbnail Kustom Aktif
-                        </p>
-                        <p className="text-xs text-slate-500 mt-0.5 truncate" title={event.thumbnailUrl}>
-                          {event.thumbnailUrl}
-                        </p>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          Ditampilkan pada preview link WhatsApp & halaman undangan tiket tamu.
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between gap-3 p-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/50 max-w-xl">
-                      <div className="text-xs text-slate-500">
-                        Belum ada foto mempelai / thumbnail kustom. Saat ini menggunakan logo default sistem.
-                      </div>
-                      {!isStaff && (
-                        <button
-                          type="button"
-                          onClick={openThumbnailModal}
-                          className="shrink-0 text-xs font-semibold text-indigo-600 hover:text-indigo-800 underline"
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            event.status === 'published'
+                              ? 'bg-emerald-500'
+                              : event.status === 'completed'
+                              ? 'bg-slate-400'
+                              : 'bg-amber-500'
+                          }`}
+                        />
+                        {event.status}
+                      </span>
+
+                      {appUser?.role !== 'client' && !isStaff && (
+                        <select
+                          value={event.status}
+                          onChange={(e) => handleStatusChange(e.target.value)}
+                          className="text-xs border border-slate-200 rounded-md py-0.5 px-2 bg-slate-50 text-slate-700 focus:ring-indigo-500 focus:border-indigo-500 cursor-pointer"
                         >
-                          Upload Foto
-                        </button>
+                          <option value="draft">Draft</option>
+                          <option value="published">Published</option>
+                          <option value="completed">Completed</option>
+                        </select>
                       )}
                     </div>
                   )}
-               </div>
-               {event.frameOverlayUrl && (
-                 <div className="md:col-span-2">
-                    <h3 className="text-sm font-medium text-gray-500 mb-2">Frame / Overlay Sapa Tamu</h3>
-                    <div className="w-48 h-24 bg-gray-100 border border-gray-200 rounded-md overflow-hidden relative group">
-                       <img src={event.frameOverlayUrl} alt="Frame" className="object-cover w-full h-full opacity-70 group-hover:opacity-100 transition-opacity" />
-                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                         <span className="text-xs bg-black/50 text-white px-2 py-1 rounded">Pratinjau</span>
-                       </div>
+
+                  {isStaff && (
+                    <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                      Petugas: <strong className="text-indigo-600">{currentOperator}</strong>
+                    </span>
+                  )}
+                </div>
+
+                {/* Sub-row with Event Date, Time, and Location */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 mt-1.5">
+                  <div className="flex items-center gap-1 text-slate-700">
+                    <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span>
+                      {event?.date && parseFirestoreDate(event.date)
+                        ? format(parseFirestoreDate(event.date)!, 'dd MMMM yyyy')
+                        : '-'}
+                    </span>
+                    {event?.time && (
+                      <span className="text-slate-500 font-medium"> • {event.time}</span>
+                    )}
+                  </div>
+
+                  {event?.location && (
+                    <>
+                      <span className="text-slate-300 hidden sm:inline">•</span>
+                      <div className="flex items-center gap-1 text-slate-700 truncate max-w-xs sm:max-w-md">
+                        <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                        <span className="truncate">{event.location}</span>
+                      </div>
+                    </>
+                  )}
+
+                  {event?.activeUntil && parseFirestoreDate(event.activeUntil) && (
+                    <>
+                      <span className="text-slate-300 hidden md:inline">•</span>
+                      <div className="flex items-center gap-1 text-slate-500 text-[11px]">
+                        <Clock className="w-3 h-3 text-slate-400 shrink-0" />
+                        <span>
+                          Aktif s/d{' '}
+                          {format(parseFirestoreDate(event.activeUntil)!, 'dd MMM yyyy')}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Quick Chips: Kategori & Sesi Acara (Compact inline summary) */}
+                <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                  {event?.guestCategories && event.guestCategories.length > 0 && (
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <span className="text-[11px] text-slate-400 font-medium">Kategori:</span>
+                      {event.guestCategories.map((cat) => (
+                        <span
+                          key={cat}
+                          className="px-2 py-0.5 bg-indigo-50/80 text-indigo-700 border border-indigo-100 text-[11px] font-medium rounded-md"
+                        >
+                          {cat}
+                        </span>
+                      ))}
                     </div>
-                 </div>
-               )}
+                  )}
+
+                  {event?.sessions && event.sessions.length > 0 && (
+                    <div className="flex items-center gap-1 flex-wrap ml-0 sm:ml-2">
+                      <span className="text-[11px] text-slate-400 font-medium">Sesi:</span>
+                      {event.sessions.map((ses) => (
+                        <span
+                          key={ses}
+                          className="px-2 py-0.5 bg-emerald-50/80 text-emerald-700 border border-emerald-100 text-[11px] font-medium rounded-md"
+                        >
+                          {ses}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Toggle More Config (Tipe Undangan, Frame Overlay, dll.) */}
+                  <button
+                    type="button"
+                    onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded transition-colors cursor-pointer ml-1"
+                    title={isConfigExpanded ? 'Sembunyikan detail konfigurasi' : 'Lihat tipe undangan & frame'}
+                  >
+                    <span>{isConfigExpanded ? 'Tutup Konfigurasi' : 'Konfigurasi Lengkap'}</span>
+                    {isConfigExpanded ? (
+                      <ChevronUp className="w-3 h-3" />
+                    ) : (
+                      <ChevronDown className="w-3 h-3" />
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
-          ) : (
-            <p className="text-red-500 text-sm">Acara tidak ditemukan.</p>
+
+            {/* Right Column: Main Actions Bar */}
+            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-start lg:justify-end shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100">
+              {/* Primary Action Button: Buka Scanner */}
+              <Link
+                to={
+                  isStaffSouvenirOnly
+                    ? `/auth/login/events/${eventId}/scan?mode=souvenir`
+                    : isStaffCheckinOnly
+                    ? `/auth/login/events/${eventId}/scan?mode=checkin`
+                    : `/auth/login/events/${eventId}/scan`
+                }
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs sm:text-sm shadow-xs transition-colors"
+                title="Buka sistem scanner QR tiket & POS penukaran souvenir"
+              >
+                <ScanLine className="w-4 h-4" />
+                <span>
+                  {isStaffSouvenirOnly
+                    ? 'Scanner Souvenir'
+                    : isStaffCheckinOnly
+                    ? 'Scanner Kehadiran'
+                    : 'Buka Scanner'}
+                </span>
+              </Link>
+
+              {/* E-Invitation & RSVP View */}
+              {!isStaff && guests.length > 0 && (
+                <Link
+                  to={`/rsvp/${eventId}/${guests[0].ticketCode}`}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold text-xs sm:text-sm transition-colors shadow-2xs"
+                  title="Lihat tampilan Kartu E-Invitation + Form RSVP & Ucapan Tamu"
+                >
+                  <QrCode className="w-4 h-4" />
+                  <span>E-Invitation</span>
+                </Link>
+              )}
+
+              {/* Layar Sapa TV */}
+              {!isStaffSouvenirOnly && (
+                <Link
+                  to={`/events/${eventId}/greeting`}
+                  target="_blank"
+                  className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-medium text-xs sm:text-sm transition-colors shadow-2xs"
+                  title="Buka Layar Sapa Tamu untuk TV/Monitor"
+                >
+                  <Monitor className="w-4 h-4 text-indigo-600" />
+                  <span>Layar Sapa</span>
+                </Link>
+              )}
+
+              {/* Options Dropdown Menu for Secondary Actions */}
+              {!isStaff && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsOptionsDropdownOpen(!isOptionsDropdownOpen)}
+                    className="h-8.5 sm:h-9 flex items-center gap-1 px-2.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                    title="Opsi & Alat Acara Lainnya"
+                  >
+                    <MoreHorizontal className="w-4 h-4 text-slate-600" />
+                    <span className="hidden sm:inline">Lainnya</span>
+                    <ChevronDown className="w-3 h-3 text-slate-400" />
+                  </button>
+
+                  {isOptionsDropdownOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-20"
+                        onClick={() => setIsOptionsDropdownOpen(false)}
+                      />
+                      <div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50 text-xs animate-in fade-in zoom-in-95 duration-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEmbedModalOpen(true);
+                            setIsOptionsDropdownOpen(false);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-slate-700 hover:bg-slate-50 hover:text-indigo-600 cursor-pointer"
+                        >
+                          <Code className="w-4 h-4 text-slate-500" />
+                          <span>Embed Kode Widget</span>
+                        </button>
+
+                        <Link
+                          to={`/public/rsvp/${eventId}`}
+                          onClick={() => setIsOptionsDropdownOpen(false)}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-slate-700 hover:bg-slate-50 hover:text-indigo-600"
+                        >
+                          <FileText className="w-4 h-4 text-pink-500" />
+                          <span>Form RSVP Publik</span>
+                        </Link>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            openThumbnailModal();
+                            setIsOptionsDropdownOpen(false);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-slate-700 hover:bg-slate-50 hover:text-indigo-600 cursor-pointer border-t border-slate-100"
+                        >
+                          <ImageIcon className="w-4 h-4 text-indigo-500" />
+                          <span>Atur Foto Mempelai</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Expanded Config Details (Collapsible Drawer) */}
+          {isConfigExpanded && (
+            <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs animate-in fade-in duration-150">
+              <div>
+                <h4 className="font-semibold text-slate-700 mb-1.5">Tipe Undangan Disediakan</h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {availableInvitationTypes.map((invType) => (
+                    <span
+                      key={invType}
+                      className="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 font-medium rounded-md text-[11px]"
+                    >
+                      {invType}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {event?.frameOverlayUrl && (
+                <div>
+                  <h4 className="font-semibold text-slate-700 mb-1.5">Frame / Overlay Layar Sapa</h4>
+                  <div className="w-36 h-20 bg-slate-100 border border-slate-200 rounded-md overflow-hidden relative group">
+                    <img
+                      src={event.frameOverlayUrl}
+                      alt="Frame"
+                      className="object-cover w-full h-full opacity-70 group-hover:opacity-100 transition-opacity"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -2076,82 +2199,64 @@ export default function EventDetails() {
                     className="hidden"
                   />
 
-                  {/* Group 1: Document Import & Export Segmented Control */}
-                  <div className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50/60 p-0.5">
-                    {!isStaff && (
-                      <>
-                        <button
-                          onClick={handleDownloadTemplate}
-                          className="h-8 px-2 text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-white rounded-md flex items-center gap-1 transition-all whitespace-nowrap"
-                          title="Download Template Excel"
-                        >
-                          <DownloadIcon className="w-3.5 h-3.5 text-slate-500" />
-                          <span>Template</span>
-                        </button>
-                        <div className="w-px h-4 bg-slate-200/80" />
-                        <button
-                          onClick={handleImportClick}
-                          disabled={isImporting || isGeneratingSample}
-                          className="h-8 px-2 text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-white rounded-md flex items-center gap-1 transition-all whitespace-nowrap disabled:opacity-50"
-                          title="Import Excel (Mendukung > 1.000 Tamu Cepat)"
-                        >
-                          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>Import</span>
-                        </button>
-                        <div className="w-px h-4 bg-slate-200/80" />
-                      </>
-                    )}
-                    <button
-                      onClick={handleExportPDF}
-                      className="h-8 px-2 text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-white rounded-md flex items-center gap-1 transition-all whitespace-nowrap"
-                      title="Export PDF Semua Tamu Sesuai Filter"
-                    >
-                      <FileText className="w-3.5 h-3.5 text-rose-500" />
-                      <span>PDF</span>
-                    </button>
-                    <div className="w-px h-4 bg-slate-200/80" />
-                    <button
-                      onClick={handleExportExcel}
-                      className="h-8 px-2 text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-white rounded-md flex items-center gap-1 transition-all whitespace-nowrap"
-                      title="Export Excel Semua Tamu Sesuai Filter"
-                    >
-                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Excel</span>
-                    </button>
-                  </div>
-
-                  {/* Group 2: Data Utilities (Sample Data, Refresh, Reset) */}
+                  {/* Group 1: Streamlined Import & Export */}
                   <div className="inline-flex items-center gap-1.5">
                     {!isStaff && (
                       <button
-                        onClick={() => handleGenerateSampleGuests(1000)}
-                        disabled={isGeneratingSample || isImporting}
-                        className="h-8.5 px-2.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 flex items-center gap-1.5 disabled:opacity-50"
-                        title="Buat 1.000 data tamu contoh untuk uji coba kapasitas dan scanner"
+                        onClick={() => setIsImportModalOpen(true)}
+                        disabled={isImporting || isGeneratingSample}
+                        className="h-8.5 px-3 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap shadow-2xs cursor-pointer disabled:opacity-50"
+                        title="Import data tamu dari Excel & unduh template"
                       >
-                        {isGeneratingSample ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
-                        ) : (
-                          <Users className="w-3.5 h-3.5 text-indigo-600" />
-                        )}
-                        <span>+1.000 Contoh</span>
+                        <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Import</span>
                       </button>
                     )}
 
                     <button
+                      onClick={() => setIsExportModalOpen(true)}
+                      className="h-8.5 px-3 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap shadow-2xs cursor-pointer"
+                      title="Ekspor data tamu ke Excel atau PDF"
+                    >
+                      <Download className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Export</span>
+                      <ChevronDown className="w-3 h-3 text-slate-400" />
+                    </button>
+                  </div>
+
+                  {/* Group 2: Data Utilities (Refresh, Super Admin Seeding & Reset) */}
+                  <div className="inline-flex items-center gap-1.5">
+                    <button
                       onClick={() => fetchGuests(true)}
                       disabled={isRefreshingGuests}
-                      className="h-8.5 w-8.5 justify-center text-xs font-medium flex items-center rounded-lg transition-colors text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-50"
+                      className="h-8.5 w-8.5 justify-center text-xs font-medium flex items-center rounded-lg transition-colors text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 shadow-2xs cursor-pointer disabled:opacity-50"
                       title="Refresh Seluruh Data Tamu"
                     >
                       <RefreshCcw className={`w-3.5 h-3.5 ${isRefreshingGuests ? 'animate-spin text-indigo-600' : ''}`} />
                     </button>
 
+                    {/* Khusus Super Admin: Tombol Uji Seeding 1.000 Contoh */}
+                    {appUser?.role === 'superadmin' && (
+                      <button
+                        onClick={() => handleGenerateSampleGuests(1000)}
+                        disabled={isGeneratingSample || isImporting}
+                        className="h-8.5 px-2.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 hover:border-amber-300 flex items-center gap-1.5 disabled:opacity-50 shadow-2xs cursor-pointer"
+                        title="[Khusus Super Admin] Buat 1.000 data tamu contoh untuk uji coba performa dan scanner"
+                      >
+                        {isGeneratingSample ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
+                        ) : (
+                          <Users className="w-3.5 h-3.5 text-amber-700" />
+                        )}
+                        <span>+1.000 Contoh</span>
+                      </button>
+                    )}
+
                     {(appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'partner') && guests.length > 0 && (
                       <button
                         onClick={handleClearAllGuests}
                         disabled={isGeneratingSample || isImporting}
-                        className="h-8.5 w-8.5 justify-center text-xs font-medium flex items-center rounded-lg text-rose-600 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 transition-colors disabled:opacity-50"
+                        className="h-8.5 w-8.5 justify-center text-xs font-medium flex items-center rounded-lg text-rose-600 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
                         title="Kosongkan Semua Tamu (Reset Acara)"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -2603,11 +2708,24 @@ export default function EventDetails() {
                             </span>
                           </td>
                           <td className="px-4 py-3.5 whitespace-nowrap text-xs">
-                            <div className="flex flex-col items-start gap-0.5">
-                              <span className={`inline-flex items-center gap-1.5 font-semibold ${guest.attended ? 'text-emerald-700' : 'text-slate-500'}`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${guest.attended ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                                {guest.attended ? 'Sudah Scan' : 'Belum Hadir'}
-                              </span>
+                            <div className="flex flex-col items-start gap-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className={`inline-flex items-center gap-1.5 font-semibold ${guest.attended ? 'text-emerald-700' : 'text-slate-500'}`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${guest.attended ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                                  {guest.attended ? 'Hadir' : 'Belum Hadir'}
+                                </span>
+                                {guest.attended && (
+                                  guest.checkInMethod === 'manual' ? (
+                                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded">
+                                      Manual
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-sky-800 bg-sky-50 border border-sky-200 px-1.5 py-0.2 rounded">
+                                      Scan QR
+                                    </span>
+                                  )
+                                )}
+                              </div>
                               {guest.attended && guest.checkInStaff && (
                                 <span className="text-[11px] text-slate-500 pl-3">
                                   Oleh: <span className="font-medium text-indigo-700">{guest.checkInStaff}</span>
@@ -3862,6 +3980,339 @@ export default function EventDetails() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal Import Data Tamu */}
+      <Modal
+        isOpen={isImportModalOpen}
+        onClose={() => {
+          if (!isImporting) {
+            setIsImportModalOpen(false);
+            setSelectedImportFile(null);
+          }
+        }}
+        title="Import Data Tamu"
+        maxWidth="max-w-2xl"
+      >
+        <div className="space-y-6">
+          <p className="text-sm text-slate-600">
+            Unggah file spreadsheet Microsoft Excel (<code className="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded text-slate-800">.xlsx</code> / <code className="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded text-slate-800">.xls</code>) untuk memasukkan ratusan atau ribuan data tamu secara instan.
+          </p>
+
+          {/* Bagian 1: Download Template */}
+          <div className="bg-slate-50 border border-slate-200/90 rounded-xl p-4.5 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  Langkah 1: Unduh Format Template
+                </h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Pastikan susunan kolom sesuai dengan template resmi agar data terbaca sempurna.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleDownloadTemplate}
+                className="inline-flex items-center justify-center gap-2 px-3.5 py-2 text-xs font-semibold text-emerald-700 bg-white border border-emerald-300 hover:bg-emerald-50 rounded-lg shadow-2xs transition-colors shrink-0 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Unduh Template Tamu (.xlsx)
+              </button>
+            </div>
+
+            <div className="bg-white rounded-lg p-3 border border-slate-200 text-xs text-slate-600">
+              <span className="font-semibold text-slate-700">Kolom yang didukung:</span>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">Nama Tamu * (Wajib)</span>
+                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700">Pangkat / Jabatan</span>
+                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700">Alamat</span>
+                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700">No. Hp</span>
+                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700">Kategori</span>
+                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700">Tipe Undangan</span>
+                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700">Sesi</span>
+                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700">Jumlah Pax</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Bagian 2: Unggah File */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+              <Upload className="w-4 h-4 text-indigo-600" />
+              Langkah 2: Pilih File yang Telah Diisi
+            </h4>
+
+            <input
+              type="file"
+              ref={modalFileInputRef}
+              accept=".xlsx, .xls"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) setSelectedImportFile(file);
+              }}
+            />
+
+            {!selectedImportFile ? (
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDraggingFile(true);
+                }}
+                onDragLeave={() => setIsDraggingFile(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDraggingFile(false);
+                  const file = e.dataTransfer.files?.[0];
+                  if (file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
+                    setSelectedImportFile(file);
+                  } else {
+                    showAlert('File Tidak Sesuai', 'Hanya file Excel (.xlsx atau .xls) yang didukung.', 'warning');
+                  }
+                }}
+                onClick={() => modalFileInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors flex flex-col items-center justify-center gap-2 ${
+                  isDraggingFile
+                    ? 'border-indigo-500 bg-indigo-50/50'
+                    : 'border-slate-300 hover:border-indigo-400 hover:bg-slate-50/70'
+                }`}
+              >
+                <div className="w-12 h-12 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600">
+                  <Upload className="w-6 h-6" />
+                </div>
+                <div className="text-sm font-semibold text-slate-700">
+                  Klik untuk memilih file atau seret file ke sini
+                </div>
+                <p className="text-xs text-slate-400">
+                  Mendukung Microsoft Excel (.xlsx, .xls)
+                </p>
+              </div>
+            ) : (
+              <div className="bg-emerald-50/60 border border-emerald-200 rounded-xl p-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 overflow-hidden">
+                  <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
+                    <FileSpreadsheet className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-800 truncate">
+                      {selectedImportFile.name}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {(selectedImportFile.size / 1024).toFixed(1)} KB • Siap diimpor
+                    </p>
+                  </div>
+                </div>
+
+                {!isImporting && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedImportFile(null);
+                      if (modalFileInputRef.current) modalFileInputRef.current.value = '';
+                    }}
+                    className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-white transition-colors"
+                    title="Hapus file terpilih"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Progress Indicator */}
+          {isImporting && (
+            <div className="space-y-2 bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+              <div className="flex items-center justify-between text-xs font-semibold text-indigo-900">
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                  Mengimpor data tamu ke database...
+                </span>
+                <span>
+                  {importProgress?.total
+                    ? `${importProgress.current} / ${importProgress.total} (${Math.round(
+                        (importProgress.current / importProgress.total) * 100
+                      )}%)`
+                    : 'Memproses...'}
+                </span>
+              </div>
+              <div className="w-full h-2 bg-indigo-200/60 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-indigo-600 transition-all duration-200 rounded-full"
+                  style={{
+                    width: importProgress?.total
+                      ? `${Math.round((importProgress.current / importProgress.total) * 100)}%`
+                      : '20%'
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Info Duplikat */}
+          <div className="text-xs text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-200/80 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+            <span>
+              Sistem akan otomatis memeriksa nama yang sudah terdaftar. Jika ada nama yang sama persis, data tersebut akan dilewati untuk mencegah data ganda.
+            </span>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              disabled={isImporting}
+              onClick={() => {
+                setIsImportModalOpen(false);
+                setSelectedImportFile(null);
+              }}
+              className="px-4 py-2 text-xs sm:text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              Batal
+            </button>
+            <button
+              type="button"
+              disabled={!selectedImportFile || isImporting}
+              onClick={() => {
+                if (selectedImportFile) processFile(selectedImportFile);
+              }}
+              className="px-5 py-2 text-xs sm:text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-2xs transition-colors flex items-center gap-2 cursor-pointer"
+            >
+              {isImporting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Mengimpor...</span>
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4" />
+                  <span>Mulai Import Tamu</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal Export Data Tamu */}
+      <Modal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        title="Ekspor Data Tamu"
+        maxWidth="max-w-xl"
+      >
+        <div className="space-y-5">
+          {/* Ringkasan Data */}
+          <div className="p-3.5 bg-indigo-50/60 border border-indigo-100 rounded-xl text-xs text-indigo-900 flex items-center justify-between gap-3">
+            <div>
+              <p className="font-semibold text-indigo-950">
+                {event?.title || 'Acara'}
+              </p>
+              <p className="text-indigo-700 mt-0.5">
+                Total tamu yang akan diekspor: <span className="font-bold">{filteredGuests.length.toLocaleString('id-ID')}</span> tamu
+                {filteredGuests.length !== guests.length && (
+                  <span className="text-indigo-600 font-normal"> (dari {guests.length.toLocaleString('id-ID')} total, sesuai filter aktif)</span>
+                )}
+              </p>
+            </div>
+            <div className="px-2.5 py-1 rounded-md bg-white border border-indigo-200 font-mono font-semibold text-indigo-700 shrink-0 text-xs">
+              {filteredGuests.length} Tamu
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-500">
+            Pilih format dokumen ekspor yang Anda butuhkan di bawah ini:
+          </p>
+
+          <div className="space-y-3">
+            {/* Opsi 1: Excel */}
+            <div className="border border-slate-200 hover:border-emerald-300 rounded-xl p-4 transition-all hover:bg-emerald-50/20 group">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                    <FileSpreadsheet className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-bold text-slate-900 group-hover:text-emerald-950">
+                        Microsoft Excel (.xlsx)
+                      </h4>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                        Format Lengkap
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      Berisi data lengkap: Nama, Pangkat/Jabatan, Kode Tiket QR, Nomor HP, Alamat, Kategori, Sesi, Pax, RSVP, Kehadiran, Metode Check-In (Scan/Manual), Waktu Hadir, Petugas, dan Souvenir.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3.5 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleExportExcel();
+                    setIsExportModalOpen(false);
+                  }}
+                  className="w-full py-2.5 px-4 text-xs sm:text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg flex items-center justify-center gap-2 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  Download File Excel (.xlsx)
+                </button>
+              </div>
+            </div>
+
+            {/* Opsi 2: PDF */}
+            <div className="border border-slate-200 hover:border-rose-300 rounded-xl p-4 transition-all hover:bg-rose-50/20 group">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-bold text-slate-900 group-hover:text-rose-950">
+                        Dokumen PDF (.pdf)
+                      </h4>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">
+                        Siap Cetak
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      Format tabel rapi siap cetak dan arsip (Nomor Urut, Nama, Alamat, No. HP, Kategori, Tipe Undangan, Sesi, Pax, RSVP, Status Check-In, dan Waktu Kehadiran).
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3.5 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleExportPDF();
+                    setIsExportModalOpen(false);
+                  }}
+                  className="w-full py-2.5 px-4 text-xs sm:text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg flex items-center justify-center gap-2 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  Download Dokumen PDF (.pdf)
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setIsExportModalOpen(false)}
+              className="px-4 py-2 text-xs sm:text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+            >
+              Tutup
+            </button>
           </div>
         </div>
       </Modal>

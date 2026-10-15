@@ -6,7 +6,7 @@ import { GuestlyService } from '../../types';
 import { useAuth } from '../../AuthContext';
 import { useSettings } from '../../SettingsContext';
 import { showAlert, showConfirm, showCancelAlert } from '../../lib/alerts';
-import { Copy, Check, QrCode } from 'lucide-react';
+import { Copy, Check, QrCode, ArrowLeft, ShieldCheck, Zap, Sparkles, Clock, Calendar, Users, Send, CheckCircle2, Lock, CreditCard, Building2, HelpCircle, AlertCircle, Info, ChevronRight, MessageSquare, BadgeCheck } from 'lucide-react';
 
 export default function ServiceCheckout() {
   const { serviceId } = useParams<{ serviceId: string }>();
@@ -145,65 +145,246 @@ export default function ServiceCheckout() {
   };
 
   if (loading) {
-    return <div className="text-center py-12 text-gray-500">Memuat rincian layanan...</div>;
+    return (
+      <div className="max-w-4xl mx-auto py-20 text-center space-y-3">
+        <div className="w-10 h-10 border-3 border-[#8C3A50] border-t-transparent rounded-full animate-spin mx-auto" />
+        <p className="text-sm font-medium text-slate-500">Memuat rincian paket layanan...</p>
+      </div>
+    );
   }
 
   if (!service) {
     return null; // Handled by redirect in useEffect
   }
 
+  const normalPrice = service.normalPrice && service.normalPrice > service.price ? service.normalPrice : null;
+  const discountAmount = normalPrice ? normalPrice - service.price : 0;
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-2 space-y-6">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-4 pb-4 border-b border-gray-100">Rincian Layanan</h2>
-            
-            <div className="flex flex-col gap-1">
-              <h3 className="text-xl font-bold text-gray-900">{service.name}</h3>
-              <p className="text-gray-500 text-sm whitespace-pre-line mt-2">{service.description}</p>
+    <div className="w-full space-y-5 pb-12">
+      {/* Top Header Bar (Harmonized with Breadcrumbs) */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200/80">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[#96475D]">
+              Guestly Checkout
+            </span>
+            <span className="text-slate-300">·</span>
+            <span className="text-xs text-slate-500">Konfirmasi Pemesanan &amp; Pembayaran</span>
+          </div>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight mt-0.5">
+            Checkout Layanan
+          </h1>
+        </div>
+
+        <div className="flex items-center gap-2 self-start sm:self-auto bg-emerald-50 text-emerald-800 border border-emerald-200/80 px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-2xs">
+          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>Enkripsi SSL 256-Bit Aman</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 items-start">
+        {/* Kolom Kiri: Rincian Layanan & Metode Pembayaran */}
+        <div className="lg:col-span-7 xl:col-span-8 space-y-5">
+          {/* Kartu 1: Rincian Paket Layanan & Akun Terintegrasi */}
+          <div className="bg-white rounded-2xl shadow-xs border border-slate-200/90 overflow-hidden">
+            <div className="p-5 sm:p-6 border-b border-slate-100 bg-gradient-to-r from-slate-50/70 to-white">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-rose-50 text-[#8C3A50] border border-rose-200/70">
+                  <Sparkles className="w-3 h-3 text-[#8C3A50]" />
+                  Paket Layanan Acara
+                </span>
+                {service.activePeriodDays ? (
+                  <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-full">
+                    Masa Aktif {service.activePeriodDays} Hari
+                  </span>
+                ) : (
+                  <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full">
+                    Akses Permanen
+                  </span>
+                )}
+              </div>
+
+              <h2 className="text-2xl font-bold text-slate-900 tracking-tight">
+                {service.name}
+              </h2>
+              {service.description && (
+                <p className="text-slate-600 text-sm leading-relaxed mt-2 whitespace-pre-line">
+                  {service.description}
+                </p>
+              )}
             </div>
-            
-            <div className="mt-6 space-y-3 pt-6 border-t border-gray-100">
-              <h4 className="text-sm font-semibold text-gray-700">Yang Anda dapatkan:</h4>
-              <ul className="space-y-2 text-sm text-gray-600">
-                 {service.activePeriodDays ? (
-                   <li className="flex items-center gap-2">
-                     <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                     Masa aktif {service.activePeriodDays} hari
-                   </li>
-                 ) : (
-                   <li className="flex items-center gap-2">
-                     <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                     Masa aktif selamanya
-                   </li>
-                 )}
-                 {service.eventQuota ? (
-                   <li className="flex items-center gap-2">
-                     <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                     Termasuk kuota {service.eventQuota} acara
-                   </li>
-                 ) : null}
-                 {service.guestQuota ? (
-                   <li className="flex items-center gap-2">
-                     <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                     Kapasitas blast {service.guestQuota} tamu undangan
-                   </li>
-                 ) : null}
-              </ul>
+
+            {/* Grid Spesifikasi Layanan (Spec Cards) */}
+            <div className="p-5 sm:p-6 space-y-5">
+              <div>
+                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2.5">
+                  Spesifikasi Kuota &amp; Fasilitas
+                </h3>
+                <div className={`grid grid-cols-1 sm:grid-cols-2 ${service.waBlastQuota ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-3`}>
+                  {/* Spesifikasi 1: Masa Aktif */}
+                  <div className="p-3.5 rounded-xl border border-slate-200/80 bg-slate-50/60 hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0">
+                        <Clock className="w-4 h-4" />
+                      </div>
+                      <span className="text-xs font-medium text-slate-600">Masa Aktif</span>
+                    </div>
+                    <div className="text-base font-bold text-slate-900">
+                      {service.activePeriodDays ? `${service.activePeriodDays} Hari` : 'Selamanya'}
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Akses sistem &amp; kelola acara
+                    </p>
+                  </div>
+
+                  {/* Spesifikasi 2: Kuota Acara */}
+                  <div className="p-3.5 rounded-xl border border-slate-200/80 bg-slate-50/60 hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
+                        <Calendar className="w-4 h-4" />
+                      </div>
+                      <span className="text-xs font-medium text-slate-600">Kuota Acara</span>
+                    </div>
+                    <div className="text-base font-bold text-slate-900">
+                      {service.eventQuota ? `${service.eventQuota} Acara` : 'Unlimited'}
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Buku tamu &amp; QR check-in
+                    </p>
+                  </div>
+
+                  {/* Spesifikasi 3: Kuota Tamu (Buku Tamu Digital) */}
+                  <div className="p-3.5 rounded-xl border border-slate-200/80 bg-slate-50/60 hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
+                        <Users className="w-4 h-4" />
+                      </div>
+                      <span className="text-xs font-medium text-slate-600">Kuota Tamu</span>
+                    </div>
+                    <div className="text-base font-bold text-slate-900">
+                      {service.guestQuota ? `${service.guestQuota.toLocaleString('id-ID')} Tamu` : 'Standar'}
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Kapasitas buku tamu per acara
+                    </p>
+                  </div>
+
+                  {/* Spesifikasi 4: Kuota WA Blast (Pesan Broadcast) */}
+                  {service.waBlastQuota ? (
+                    <div className="p-3.5 rounded-xl border border-purple-200/80 bg-purple-50/40 hover:bg-purple-50/70 transition-colors">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <div className="w-7 h-7 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
+                          <Send className="w-4 h-4" />
+                        </div>
+                        <span className="text-xs font-medium text-purple-900">Kuota Blast</span>
+                      </div>
+                      <div className="text-base font-bold text-purple-950">
+                        {service.waBlastQuota.toLocaleString('id-ID')} Pesan
+                      </div>
+                      <p className="text-[11px] text-purple-700/80 mt-0.5">
+                        Kredit broadcast WhatsApp
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              {/* Fitur yang Termasuk */}
+              <div className="pt-4 border-t border-slate-100">
+                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2.5">
+                  Fitur Unggulan Yang Anda Dapatkan
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs text-slate-700">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Scan Tiket QR Cepat &amp; Realtime Gate</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Buku Tamu Digital &amp; Card E-Invitation</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Dukungan Mode Scanner Offline Aman</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Ekspor Lengkap ke Microsoft Excel &amp; PDF</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Manajemen Suvenir &amp; Riwayat Petugas</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Sinkronisasi Multi-Device Tanpa Batas</span>
+                  </div>
+                  {service.waBlastQuota ? (
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0" />
+                      <span className="font-semibold text-purple-900">
+                        Kredit WA Blast {service.waBlastQuota.toLocaleString('id-ID')} Pesan Otomatis
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              {/* Akun Lisensi Terintegrasi (Menyatu dalam kartu paket) */}
+              <div className="pt-4 border-t border-slate-100 -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 p-4 sm:p-5 bg-slate-50/70 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-[#8C3A50]/10 text-[#8C3A50] font-bold flex items-center justify-center shrink-0 text-sm">
+                    {(appUser?.name || currentUser?.displayName || 'U').charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                        Akun Tujuan Lisensi
+                      </span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-700">
+                        {appUser?.role?.toUpperCase() || 'USER'}
+                      </span>
+                    </div>
+                    <p className="text-xs font-bold text-slate-900 mt-0.5">
+                      {appUser?.name || currentUser?.displayName || 'Pengguna Guestly'}{' '}
+                      <span className="font-normal text-slate-500">
+                        ({currentUser?.email || '-'} {appUser?.phone ? `• ${appUser.phone}` : ''})
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/70 self-start sm:self-auto shrink-0">
+                  <BadgeCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Otomatis Diaktifkan ke Akun Ini</span>
+                </div>
+              </div>
             </div>
           </div>
-          
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-4 pb-4 border-b border-gray-100">Metode Pembayaran</h2>
-            
+
+          {/* Kartu 2: Pilihan Metode Pembayaran */}
+          <div className="bg-white rounded-2xl shadow-xs border border-slate-200/90 p-5 sm:p-6 space-y-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Pilih Metode Pembayaran</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Pilih jalur pembayaran resmi yang paling mudah untuk Anda selesaikan.
+              </p>
+            </div>
+
             <div className="space-y-3">
               {settings?.activePaymentMethod !== 'tripay' ? (
                 <>
-                  {/* QRIS Option (Shown when activePaymentMethod is 'qris' or qrisPayment is configured) */}
+                  {/* Opsi QRIS */}
                   {(settings?.activePaymentMethod === 'qris' ||
                     Boolean(settings?.qrisPayment?.qrisImageUrl || settings?.qrisPayment?.merchantName)) && (
-                    <label className={`flex flex-col p-4 border rounded-lg cursor-pointer transition-colors ${paymentMethod === 'qris' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 hover:border-indigo-300'}`}>
+                    <label
+                      className={`flex flex-col p-4 border rounded-xl cursor-pointer transition-all ${
+                        paymentMethod === 'qris'
+                          ? 'border-[#8C3A50] bg-rose-50/20 ring-1 ring-[#8C3A50]/20'
+                          : 'border-slate-200 hover:border-slate-300 bg-white'
+                      }`}
+                    >
                       <div className="flex items-center">
                         <input
                           type="radio"
@@ -211,32 +392,33 @@ export default function ServiceCheckout() {
                           value="qris"
                           checked={paymentMethod === 'qris'}
                           onChange={(e) => setPaymentMethod(e.target.value)}
-                          className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                          className="h-4 w-4 text-[#8C3A50] border-slate-300 focus:ring-[#8C3A50]"
                         />
-                        <div className="ml-3 flex-1 flex justify-between items-center">
-                          <span className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
-                            <QrCode className="w-4 h-4 text-indigo-600" />
+                        <div className="ml-3 flex-1 flex flex-wrap justify-between items-center gap-2">
+                          <span className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                            <QrCode className="w-4 h-4 text-[#8C3A50]" />
                             <span>QRIS (Semua E-Wallet &amp; Mobile Banking)</span>
                           </span>
-                          <span className="text-xs font-semibold px-2 py-1 bg-indigo-100 text-indigo-700 rounded">
-                            QRIS
+                          <span className="text-xs font-semibold px-2 py-0.5 bg-rose-100 text-[#8C3A50] rounded-md">
+                            Instan
                           </span>
                         </div>
                       </div>
+
                       {paymentMethod === 'qris' && (
-                        <div className="ml-7 mt-3 p-4 bg-white border border-indigo-100 rounded-lg text-sm text-gray-600 space-y-3">
-                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
+                        <div className="ml-7 mt-3 p-4 bg-white border border-rose-100 rounded-xl text-sm text-slate-600 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
                             <div>
-                              <p className="font-semibold text-gray-900">
+                              <p className="font-semibold text-slate-900">
                                 {settings?.qrisPayment?.merchantName || 'QRIS Official Merchant'}
                               </p>
                               {settings?.qrisPayment?.nmid && (
-                                <p className="text-xs font-mono text-gray-500 mt-0.5">
+                                <p className="text-xs font-mono text-slate-500 mt-0.5">
                                   NMID: {settings.qrisPayment.nmid}
                                 </p>
                               )}
                             </div>
-                            <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                            <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
                               GoPay • OVO • DANA • ShopeePay • M-Banking
                             </span>
                           </div>
@@ -246,17 +428,17 @@ export default function ServiceCheckout() {
                               <img
                                 src={settings.qrisPayment.qrisImageUrl}
                                 alt="Kode QRIS Pembayaran"
-                                className="max-w-[240px] w-full h-auto rounded-lg border border-gray-200 shadow-xs bg-white p-2 object-contain"
+                                className="max-w-[240px] w-full h-auto rounded-xl border border-slate-200 shadow-xs bg-white p-2.5 object-contain"
                               />
                             </div>
                           ) : (
-                            <p className="text-xs text-gray-500 italic">
-                              Kode QRIS akan ditampilkan pada halaman detail pembayaran setelah pesanan dibuat.
+                            <p className="text-xs text-slate-500 italic">
+                              Kode QRIS akan langsung ditampilkan pada halaman detail faktur setelah pesanan dibuat.
                             </p>
                           )}
 
                           {settings?.qrisPayment?.instructions && (
-                            <div className="text-xs bg-gray-50 p-2.5 rounded text-gray-600 whitespace-pre-line">
+                            <div className="text-xs bg-slate-50 p-3 rounded-lg text-slate-600 whitespace-pre-line border border-slate-100">
                               {settings.qrisPayment.instructions}
                             </div>
                           )}
@@ -265,48 +447,89 @@ export default function ServiceCheckout() {
                     </label>
                   )}
 
-                  {/* Manual Bank Transfer Option */}
+                  {/* Opsi Transfer Bank Manual */}
                   {(settings?.activePaymentMethod === 'manual' ||
                     !settings?.activePaymentMethod ||
                     Boolean(settings?.manualPayment?.accountNumber || settings?.manualPayment?.bankName)) && (
-                    <label className={`flex flex-col p-4 border rounded-lg cursor-pointer transition-colors ${paymentMethod === 'transfer' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 hover:border-indigo-300'}`}>
+                    <label
+                      className={`flex flex-col p-4 border rounded-xl cursor-pointer transition-all ${
+                        paymentMethod === 'transfer'
+                          ? 'border-[#8C3A50] bg-rose-50/20 ring-1 ring-[#8C3A50]/20'
+                          : 'border-slate-200 hover:border-slate-300 bg-white'
+                      }`}
+                    >
                       <div className="flex items-center">
-                        <input 
-                          type="radio" 
-                          name="paymentMethod" 
-                          value="transfer" 
+                        <input
+                          type="radio"
+                          name="paymentMethod"
+                          value="transfer"
                           checked={paymentMethod === 'transfer'}
                           onChange={(e) => setPaymentMethod(e.target.value)}
-                          className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                          className="h-4 w-4 text-[#8C3A50] border-slate-300 focus:ring-[#8C3A50]"
                         />
-                        <div className="ml-3 flex-1 flex justify-between items-center">
-                          <span className="block text-sm font-medium text-gray-900">Transfer Bank Manual</span>
-                          <span className="text-xs font-semibold px-2 py-1 bg-gray-100 text-gray-600 rounded">Manual</span>
+                        <div className="ml-3 flex-1 flex flex-wrap justify-between items-center gap-2">
+                          <span className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                            <Building2 className="w-4 h-4 text-[#8C3A50]" />
+                            <span>Transfer Bank Manual</span>
+                          </span>
+                          <span className="text-xs font-semibold px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md">
+                            Verifikasi Cepat
+                          </span>
                         </div>
                       </div>
+
                       {paymentMethod === 'transfer' && settings?.manualPayment && (
-                        <div className="ml-7 mt-3 p-3 bg-white border border-indigo-100 rounded text-sm text-gray-600">
-                          <p className="font-semibold text-gray-900 mb-1">Informasi Rekening:</p>
-                          <div className="space-y-1">
-                            <p><span className="text-gray-500">Bank:</span> {settings.manualPayment.bankName || '-'}</p>
-                            <div className="flex items-center gap-2">
-                              <p><span className="text-gray-500">No. Rekening:</span> <span className="font-mono font-medium">{settings.manualPayment.accountNumber || '-'}</span></p>
-                              <button 
+                        <div className="ml-7 mt-3 p-4 bg-white border border-rose-100 rounded-xl text-sm text-slate-600 space-y-3">
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                              Informasi Rekening Resmi
+                            </span>
+                            <span className="text-xs font-semibold text-slate-700">
+                              {settings.manualPayment.bankName || 'Bank Transfer'}
+                            </span>
+                          </div>
+
+                          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <span className="text-[11px] text-slate-500 block">Nomor Rekening:</span>
+                                <span className="text-base font-mono font-bold text-slate-900 tracking-wider">
+                                  {settings.manualPayment.accountNumber || '-'}
+                                </span>
+                              </div>
+                              <button
                                 type="button"
                                 onClick={(e) => {
                                   e.preventDefault();
                                   handleCopy(settings?.manualPayment?.accountNumber || '');
                                 }}
-                                className="p-1 hover:bg-gray-100 rounded text-gray-500 transition-colors" 
-                                title="Copy Rekening"
+                                className="px-3 py-1.5 bg-white border border-slate-200 hover:border-[#8C3A50] hover:text-[#8C3A50] rounded-lg text-xs font-semibold text-slate-700 transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                                title="Salin Nomor Rekening"
                               >
-                                {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                                {copied ? (
+                                  <>
+                                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span className="text-emerald-700">Tersalin!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3.5 h-3.5" />
+                                    <span>Salin Rekening</span>
+                                  </>
+                                )}
                               </button>
                             </div>
-                            <p><span className="text-gray-500">Atas Nama:</span> {settings.manualPayment.accountName || '-'}</p>
+
+                            <div className="text-xs text-slate-600 pt-1 border-t border-slate-200/60">
+                              <span className="text-slate-400">Atas Nama: </span>
+                              <span className="font-semibold text-slate-800">
+                                {settings.manualPayment.accountName || '-'}
+                              </span>
+                            </div>
                           </div>
+
                           {settings.manualPayment.instructions && (
-                            <div className="mt-2 text-xs bg-gray-50 p-2 rounded text-gray-500 whitespace-pre-line">
+                            <div className="text-xs bg-slate-50 p-3 rounded-lg text-slate-600 whitespace-pre-line border border-slate-100">
                               {settings.manualPayment.instructions}
                             </div>
                           )}
@@ -317,48 +540,72 @@ export default function ServiceCheckout() {
                 </>
               ) : (
                 <>
-                  <label className={`flex items-center p-4 border rounded-lg cursor-pointer transition-colors ${paymentMethod === 'qris' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 hover:border-indigo-300'}`}>
-                    <input 
-                      type="radio" 
-                      name="paymentMethod" 
-                      value="qris" 
+                  <label
+                    className={`flex items-center p-4 border rounded-xl cursor-pointer transition-all ${
+                      paymentMethod === 'qris'
+                        ? 'border-[#8C3A50] bg-rose-50/20 ring-1 ring-[#8C3A50]/20'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value="qris"
                       checked={paymentMethod === 'qris'}
                       onChange={(e) => setPaymentMethod(e.target.value)}
-                      className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                      className="h-4 w-4 text-[#8C3A50] border-slate-300 focus:ring-[#8C3A50]"
                     />
                     <div className="ml-3 flex-1 flex justify-between items-center">
-                      <span className="block text-sm font-medium text-gray-900">QRIS (OVO, GoPay, DANA)</span>
-                      <span className="text-xs font-semibold px-2 py-1 bg-gray-100 text-gray-600 rounded">Otomatis via Tripay</span>
+                      <span className="text-sm font-bold text-slate-900">QRIS (OVO, GoPay, DANA)</span>
+                      <span className="text-xs font-semibold px-2 py-0.5 bg-slate-100 text-slate-600 rounded">
+                        Otomatis via Tripay
+                      </span>
                     </div>
                   </label>
-                  
-                  <label className={`flex items-center p-4 border rounded-lg cursor-pointer transition-colors ${paymentMethod === 'virtual_account' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 hover:border-indigo-300'}`}>
-                    <input 
-                      type="radio" 
-                      name="paymentMethod" 
-                      value="virtual_account" 
+
+                  <label
+                    className={`flex items-center p-4 border rounded-xl cursor-pointer transition-all ${
+                      paymentMethod === 'virtual_account'
+                        ? 'border-[#8C3A50] bg-rose-50/20 ring-1 ring-[#8C3A50]/20'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value="virtual_account"
                       checked={paymentMethod === 'virtual_account'}
                       onChange={(e) => setPaymentMethod(e.target.value)}
-                      className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                      className="h-4 w-4 text-[#8C3A50] border-slate-300 focus:ring-[#8C3A50]"
                     />
                     <div className="ml-3 flex-1 flex justify-between items-center">
-                      <span className="block text-sm font-medium text-gray-900">Virtual Account</span>
-                      <span className="text-xs font-semibold px-2 py-1 bg-gray-100 text-gray-600 rounded">Otomatis via Tripay</span>
+                      <span className="text-sm font-bold text-slate-900">Virtual Account</span>
+                      <span className="text-xs font-semibold px-2 py-0.5 bg-slate-100 text-slate-600 rounded">
+                        Otomatis via Tripay
+                      </span>
                     </div>
                   </label>
-    
-                  <label className={`flex items-center p-4 border rounded-lg cursor-pointer transition-colors ${paymentMethod === 'credit_card' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 hover:border-indigo-300'}`}>
-                    <input 
-                      type="radio" 
-                      name="paymentMethod" 
-                      value="credit_card" 
+
+                  <label
+                    className={`flex items-center p-4 border rounded-xl cursor-pointer transition-all ${
+                      paymentMethod === 'credit_card'
+                        ? 'border-[#8C3A50] bg-rose-50/20 ring-1 ring-[#8C3A50]/20'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value="credit_card"
                       checked={paymentMethod === 'credit_card'}
                       onChange={(e) => setPaymentMethod(e.target.value)}
-                      className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                      className="h-4 w-4 text-[#8C3A50] border-slate-300 focus:ring-[#8C3A50]"
                     />
                     <div className="ml-3 flex-1 flex justify-between items-center">
-                      <span className="block text-sm font-medium text-gray-900">Kartu Kredit / Debit</span>
-                      <span className="text-xs font-semibold px-2 py-1 bg-gray-100 text-gray-600 rounded">Visa/Mastercard</span>
+                      <span className="text-sm font-bold text-slate-900">Kartu Kredit / Debit</span>
+                      <span className="text-xs font-semibold px-2 py-0.5 bg-slate-100 text-slate-600 rounded">
+                        Visa / Mastercard
+                      </span>
                     </div>
                   </label>
                 </>
@@ -366,55 +613,85 @@ export default function ServiceCheckout() {
             </div>
           </div>
         </div>
-        
-        <div className="md:col-span-1">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 sticky top-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-4 pb-4 border-b border-gray-100">Ringkasan Pesanan</h2>
-            
-            <div className="space-y-3 mb-6">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Subtotal</span>
-                <span className="font-medium text-gray-900">
-                  Rp {service.normalPrice && service.normalPrice > service.price ? service.normalPrice.toLocaleString('id-ID') : service.price.toLocaleString('id-ID')}
+
+        {/* Kolom Kanan: Ringkasan Pesanan & Tombol Checkout (Sticky Sidebar) */}
+        <div className="lg:col-span-5 xl:col-span-4 space-y-4">
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-6 sticky top-6 space-y-5">
+            <div className="border-b border-slate-100 pb-3">
+              <h2 className="text-base font-bold text-slate-900">Ringkasan Pembayaran</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Rincian biaya transaksi paket layanan</p>
+            </div>
+
+            {/* Rincian Harga */}
+            <div className="space-y-3 text-sm">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500">Harga Paket</span>
+                <span className="font-semibold text-slate-900">
+                  Rp {(normalPrice || service.price).toLocaleString('id-ID')}
                 </span>
               </div>
-              
-              {service.normalPrice && service.normalPrice > service.price && (
-                <div className="flex justify-between text-sm text-green-600">
-                  <span>Diskon Layanan</span>
-                  <span>- Rp {(service.normalPrice - service.price).toLocaleString('id-ID')}</span>
+
+              {normalPrice && discountAmount > 0 && (
+                <div className="flex justify-between items-center text-emerald-600">
+                  <div className="flex items-center gap-1.5">
+                    <span>Diskon Promo</span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-50 border border-emerald-200 rounded">
+                      Hemat
+                    </span>
+                  </div>
+                  <span className="font-bold">- Rp {discountAmount.toLocaleString('id-ID')}</span>
                 </div>
               )}
-              
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Biaya Layanan</span>
-                <span className="font-medium text-gray-900">Rp 0</span>
+
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500">Biaya Layanan</span>
+                <span className="font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded text-xs">
+                  Rp 0 (Gratis)
+                </span>
               </div>
             </div>
-            
-            <div className="pt-4 border-t border-dashed border-gray-200 mb-6 flex justify-between items-end">
-              <span className="text-base font-semibold text-gray-900">Total Harga</span>
-              <span className="text-2xl font-black text-indigo-700">Rp {service.price.toLocaleString('id-ID')}</span>
+
+            {/* Total Harga Box */}
+            <div className="pt-4 border-t border-dashed border-slate-200">
+              <div className="flex justify-between items-baseline">
+                <div>
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
+                    Total Pembayaran
+                  </span>
+                  <span className="text-[11px] text-slate-400">Termasuk seluruh fitur</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+                    Rp {service.price.toLocaleString('id-ID')}
+                  </span>
+                </div>
+              </div>
             </div>
-            
-            <div className="space-y-2.5">
+
+            {/* Tombol Aksi (Dirampingkan & Elegan) */}
+            <div className="space-y-2 pt-1">
               <button
+                type="button"
                 onClick={handleOrder}
                 disabled={ordering}
-                className="w-full bg-indigo-600 text-white font-semibold py-3.5 rounded-lg hover:bg-indigo-700 transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm"
+                className="w-full bg-[#8C3A50] hover:bg-[#772F42] active:bg-[#682436] text-white font-medium py-2.5 px-4 rounded-xl shadow-xs hover:shadow-sm transition-all flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer text-xs sm:text-sm tracking-wide"
               >
                 {ordering ? (
                   <>
-                    <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <svg className="animate-spin h-3.5 w-3.5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    Memproses...
+                    <span>Memproses Pesanan...</span>
                   </>
                 ) : (
-                  "Pesan Sekarang"
+                  <>
+                    <Lock className="w-3.5 h-3.5 text-rose-200" />
+                    <span>Konfirmasi Pesanan</span>
+                  </>
                 )}
               </button>
+
               <button
                 type="button"
                 disabled={ordering}
@@ -422,14 +699,31 @@ export default function ServiceCheckout() {
                   navigate('/auth/login/services/catalog');
                   showCancelAlert('Pemesanan layanan telah dibatalkan.');
                 }}
-                className="w-full bg-white border border-gray-300 text-gray-700 font-semibold py-2.5 rounded-lg hover:bg-gray-50 transition text-sm disabled:opacity-70"
+                className="w-full bg-transparent hover:bg-slate-100/70 border border-slate-200/90 text-slate-600 hover:text-slate-800 font-medium py-2 px-4 rounded-xl transition-colors text-xs disabled:opacity-60 cursor-pointer"
               >
                 Batal
               </button>
             </div>
-            <p className="text-xs text-gray-400 text-center mt-4">
-              Dengan melanjutkan, Anda menyetujui Syarat dan Ketentuan layanan kami.
+
+            <p className="text-[11px] text-slate-400 text-center leading-relaxed">
+              Dengan melanjutkan pemesanan, Anda menyetujui Syarat &amp; Ketentuan serta Kebijakan Privasi layanan Guestly.
             </p>
+
+            {/* Trust Badges */}
+            <div className="pt-4 border-t border-slate-100 space-y-2 text-xs text-slate-500">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Transaksi Terenkripsi &amp; Terlindungi</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-amber-500 shrink-0" />
+                <span>Aktivasi Cepat Setelah Verifikasi</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-indigo-500 shrink-0" />
+                <span>Bantuan Pelanggan Langsung via WhatsApp</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

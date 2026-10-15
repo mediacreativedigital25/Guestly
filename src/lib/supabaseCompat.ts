@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { encodeCheckInStaff, decodeCheckInStaff } from './checkInUtils';
 
 export class Timestamp {
   seconds: number;
@@ -461,7 +462,8 @@ function rowToGuestModel(row: any): any {
     attended: Boolean(row.attended),
     attendedAt: row.check_in_time || null,
     checkInTime: row.check_in_time || null,
-    checkInStaff: row.check_in_staff || null,
+    checkInStaff: decodeCheckInStaff(row.check_in_staff).staff || null,
+    checkInMethod: decodeCheckInStaff(row.check_in_staff).method || (row.attended ? 'scan' : undefined),
     souvenirTaken: Boolean(row.souvenir_taken),
     souvenirClaimed: Boolean(row.souvenir_taken),
     souvenirName: row.souvenir_type || null,
@@ -494,6 +496,9 @@ function guestModelToRow(id: string, eventId: string, data: any, existingRow?: a
   const rsvp = s.rsvpStatus ?? s.status ?? existingRow?.rsvp_status ?? 'pending';
   const validStatus = ['pending', 'attending', 'declined'].includes(rsvp) ? rsvp : 'pending';
 
+  const rawStaffInput = s.checkInStaff !== undefined ? s.checkInStaff : existingRow?.check_in_staff ?? null;
+  const rawMethodInput = s.checkInMethod !== undefined ? s.checkInMethod : undefined;
+
   return {
     id,
     event_id: eventId || s.eventId || existingRow?.event_id,
@@ -510,7 +515,7 @@ function guestModelToRow(id: string, eventId: string, data: any, existingRow?: a
     rsvp_status: rsvp,
     attended: s.attended !== undefined ? Boolean(s.attended) : Boolean(existingRow?.attended),
     check_in_time: checkInRaw ? new Date(checkInRaw).toISOString() : null,
-    check_in_staff: s.checkInStaff !== undefined ? s.checkInStaff : existingRow?.check_in_staff ?? null,
+    check_in_staff: encodeCheckInStaff(rawStaffInput, rawMethodInput),
     souvenir_taken:
       s.souvenirTaken !== undefined
         ? Boolean(s.souvenirTaken)

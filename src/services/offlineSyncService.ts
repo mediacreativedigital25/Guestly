@@ -27,6 +27,7 @@ export interface OfflineSyncItem {
   attended: boolean;
   attendedAt: string;
   checkInStaff: string;
+  checkInMethod?: 'scan' | 'manual';
   souvenirGiven: boolean;
   souvenirId?: string;
   souvenirName?: string;
@@ -334,8 +335,9 @@ export const offlineSyncService = {
     activeSouvenir?: SouvenirItem;
     currentOperator: string;
     inMemoryGuests: Guest[];
+    checkInMethod?: 'scan' | 'manual';
   }): OfflineProcessResult {
-    const { eventId, ticketCode, stationMode, activeSouvenir, currentOperator, inMemoryGuests } = params;
+    const { eventId, ticketCode, stationMode, activeSouvenir, currentOperator, inMemoryGuests, checkInMethod = 'scan' } = params;
     const normalizedCode = ticketCode.trim().toUpperCase();
 
     // Combine snapshot and in-memory guests
@@ -347,7 +349,9 @@ export const offlineSyncService = {
     );
 
     const guest = mergedList.find(
-      (g) => (g.ticketCode || '').trim().toUpperCase() === normalizedCode
+      (g) =>
+        (g.ticketCode || '').trim().toUpperCase() === normalizedCode ||
+        (g.id && g.id.trim().toUpperCase() === normalizedCode)
     );
 
     if (!guest || !guest.id) {
@@ -464,6 +468,7 @@ export const offlineSyncService = {
         attendedAt: nowIso,
         checkInTime: nowIso,
         checkInStaff: currentOperator,
+        checkInMethod,
         ...(souvenirGiven
           ? {
               souvenirTaken: true,
@@ -488,6 +493,7 @@ export const offlineSyncService = {
         attended: true,
         attendedAt: nowIso,
         checkInStaff: currentOperator,
+        checkInMethod,
         souvenirGiven,
         souvenirId: souvenirGiven ? targetSouvenirId : undefined,
         souvenirName: souvenirGiven ? targetSouvenirName : undefined,
@@ -522,6 +528,7 @@ export const offlineSyncService = {
         attendedAt: nowIso,
         checkInTime: nowIso,
         checkInStaff: currentOperator,
+        checkInMethod,
         updatedAt: nowIso,
       });
 
@@ -536,6 +543,7 @@ export const offlineSyncService = {
         attended: true,
         attendedAt: nowIso,
         checkInStaff: currentOperator,
+        checkInMethod,
         souvenirGiven: false,
       });
 
@@ -586,6 +594,7 @@ export const offlineSyncService = {
             attendedAt: item.attendedAt,
             checkInTime: item.attendedAt,
             checkInStaff: item.checkInStaff,
+            checkInMethod: item.checkInMethod || 'scan',
             ...(item.souvenirGiven
               ? {
                   souvenirTaken: true,

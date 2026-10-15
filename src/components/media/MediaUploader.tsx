@@ -11,7 +11,8 @@ interface MediaUploaderProps {
   allowedMimeTypes?: string[];
   defaultValue?: string;
   disabled?: boolean;
-  onUploadSuccess?: (data: { url: string; key: string; sizeBytes: number }) => void;
+  onFileSelect?: (file: File) => void;
+  onUploadSuccess?: (data: { url: string; key: string; sizeBytes: number; file?: File }) => void;
   onUploadError?: (error: string) => void;
 }
 
@@ -21,6 +22,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   allowedMimeTypes,
   defaultValue,
   disabled,
+  onFileSelect,
   onUploadSuccess,
   onUploadError
 }) => {
@@ -57,7 +59,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       setProgress(100);
       
       setPreviewUrl(result.url);
-      onUploadSuccess?.(result);
+      onUploadSuccess?.({ ...result, file: selectedFile });
       
       setTimeout(() => {
         setIsUploading(false);
@@ -106,8 +108,9 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       }
     }
 
+    onFileSelect?.(selectedFile);
     uploadFile(selectedFile);
-  }, [maxSize, allowedMimeTypes, uploadFile, onUploadError]);
+  }, [maxSize, allowedMimeTypes, uploadFile, onFileSelect, onUploadError]);
 
   const handleCancel = useCallback(() => {
     if (abortControllerRef.current) {
