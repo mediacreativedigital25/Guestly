@@ -18,13 +18,16 @@ import {
   Filter,
   UserCheck,
   Monitor,
-  Radio
+  Radio,
+  LogOut,
+  Laptop
 } from 'lucide-react';
 import { useAuth } from '../AuthContext';
-import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { useNavigate, useLocation, useParams, Link } from 'react-router-dom';
 import { Modal } from '../components/Modal';
 import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 import { getRoleLabel, canUserAccessEvent, getUserBusinessId, shouldHideServiceInfo, isPartnerBusinessRegistered, isGreetingScreenUser } from '../lib/utils';
+import { isSessionExpired, formatRelativeActivity } from '../lib/deviceUtils';
 
 export default function UsersList() {
   const [users, setUsers] = useState<User[]>([]);
@@ -280,6 +283,30 @@ export default function UsersList() {
         console.error('Error deleting user:', err);
         showAlert('Gagal', 'Gagal menghapus pengguna.', 'error');
       }
+    }
+  };
+
+  const handleResetUserSession = async (targetUser: User) => {
+    if (!targetUser.id) return;
+    const confirmed = await showConfirm(
+      `Putus sesi perangkat untuk "${targetUser.name || targetUser.email}"?`,
+      'Perangkat yang sedang login akan otomatis dikeluarkan seketika.'
+    );
+    if (!confirmed) return;
+
+    try {
+      await updateDoc(doc(db, 'users', targetUser.id), {
+        activeDeviceId: null,
+        activeDeviceName: null,
+        sessionRevoked: true,
+        sessionRevokedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setUsers(prev => prev.map(u => u.id === targetUser.id ? { ...u, activeDeviceId: null, activeDeviceName: null } : u));
+      showAlert('Berhasil', `Sesi perangkat untuk ${targetUser.name || targetUser.email} berhasil direset.`, 'success');
+    } catch (err: any) {
+      console.error(err);
+      showAlert('Gagal', err.message || 'Gagal mereset sesi perangkat.', 'error');
     }
   };
 
@@ -877,13 +904,23 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
               `Kelola dan tugaskan akun Staff Lapangan (Scan Kehadiran & Souvenir) untuk acara di bisnis ${currentUserBizName || 'Anda'}.`}
           </p>
         </div>
-        <button
-          onClick={handleOpenAddModal}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium shadow-sm shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          {appUser?.role === 'admin' ? 'Tambah Petugas Staff' : 'Tambah User / Petugas'}
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/auth/login/sessions"
+            className="flex items-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg font-medium text-sm border border-indigo-200 transition-colors shrink-0"
+            title="Buka Pemantau Sesi Aktif Realtime"
+          >
+            <Radio className="w-4 h-4 text-emerald-600 animate-pulse" />
+            <span>Sesi Aktif</span>
+          </Link>
+          <button
+            onClick={handleOpenAddModal}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium shadow-sm shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            {appUser?.role === 'admin' ? 'Tambah Petugas Staff' : 'Tambah User / Petugas'}
+          </button>
+        </div>
       </div>
 
       {/* Hierarchy Info Banner */}
@@ -1800,6 +1837,12 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                                 Dibuat oleh: <span className="font-medium text-gray-600">{user.createdByName}</span>
                               </div>
                             )}
+                            {user.activeDeviceId && (
+                              <div className="mt-1 flex items-center gap-1 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded w-fit">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                <span className="font-semibold truncate max-w-[150px]">{user.activeDeviceName || 'Perangkat Aktif'}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -1915,6 +1958,15 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                       <td className="px-5 py-4 whitespace-nowrap text-sm font-medium">
                         {canModify ? (
                           <div className="flex items-center gap-2">
+                            {user.activeDeviceId && (
+                              <button
+                                onClick={() => handleResetUserSession(user)}
+                                className="text-amber-700 hover:text-amber-900 flex items-center gap-1 bg-amber-50 px-2.5 py-1.5 rounded-md hover:bg-amber-100 transition-colors text-xs font-semibold cursor-pointer"
+                                title={`Putus sesi login di: ${user.activeDeviceName || 'Perangkat Aktif'}`}
+                              >
+                                <LogOut className="w-3.5 h-3.5 text-amber-600" /> Reset Device
+                              </button>
+                            )}
                             <button
                               onClick={() => handleOpenEdit(user)}
                               className="text-indigo-600 hover:text-indigo-900 flex items-center gap-1 bg-indigo-50 px-3 py-1.5 rounded-md hover:bg-indigo-100 transition-colors"

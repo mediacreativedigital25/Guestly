@@ -190,6 +190,16 @@ export default function RouteBreadcrumbs() {
         label: 'Hak Akses & Role',
         shortCode: 'Roles',
       });
+    } else if (first === 'sessions') {
+      segments.push({
+        label: 'Manajemen User',
+        shortCode: 'Users',
+        to: '/auth/login/users',
+      });
+      segments.push({
+        label: 'Sesi Aktif',
+        shortCode: 'Sessions',
+      });
     } else if (first === 'approvals') {
       segments.push({
         label: 'Approvals',
@@ -263,7 +273,14 @@ export default function RouteBreadcrumbs() {
         segments.push({ label: 'Template E-Invitation', shortCode: 'E-Invite Templates' });
       } else if (second === 'greeting-templates') {
         segments.push({ label: 'Template Layar Sapa', shortCode: 'Greeting Templates' });
+      } else if (second === 'sessions') {
+        segments.push({ label: 'Sesi Aktif', shortCode: 'Sessions' });
       }
+    } else if (first === 'wedding-planner') {
+      segments.push({
+        label: 'Wedding Planner',
+        shortCode: 'Wedding Planner',
+      });
     } else if (first === 'media') {
       segments.push({
         label: 'Media Library',
@@ -299,14 +316,14 @@ export default function RouteBreadcrumbs() {
               {seg.to && !isLast ? (
                 <Link
                   to={seg.to}
-                  className="inline-flex items-center gap-1.5 font-medium text-gray-500 hover:text-indigo-600 transition-colors"
+                  className="inline-flex items-center gap-1.5 font-medium text-gray-500 hover:text-[#8C3A50] transition-colors"
                 >
                   {isFirst && <Home className="w-4 h-4 text-gray-400 shrink-0" />}
                   <span>{seg.label}</span>
                 </Link>
               ) : (
                 <span className="inline-flex items-center gap-1.5 font-semibold text-gray-900">
-                  {isFirst && <Home className="w-4 h-4 text-indigo-600 shrink-0" />}
+                  {isFirst && <Home className="w-4 h-4 text-[#8C3A50] shrink-0" />}
                   <span>{seg.label}</span>
                 </span>
               )}
@@ -319,7 +336,7 @@ export default function RouteBreadcrumbs() {
         <button
           type="button"
           onClick={() => navigate(parentSegment.to!)}
-          className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-indigo-600 transition-colors cursor-pointer shrink-0"
+          className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-[#8C3A50] transition-colors cursor-pointer shrink-0"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           <span>Kembali</span>

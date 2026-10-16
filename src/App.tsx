@@ -37,15 +37,20 @@ import ServicesCatalog from './pages/services/ServicesCatalog';
 import MyServices from './pages/services/MyServices';
 import ServiceCheckout from './pages/services/ServiceCheckout';
 import MyInvoices from './pages/invoices/MyInvoices';
+import PublicPayment from './pages/public/PublicPayment';
+import ActiveSessions from './pages/admin/ActiveSessions';
+import WeddingPlannerComingSoon from './pages/wedding-planner/WeddingPlannerComingSoon';
 
 import ServicesDashboard from './pages/services/ServicesDashboard';
+import { CartProvider } from './CartContext';
 
 export default function App() {
   return (
     <SettingsProvider>
       <AuthProvider>
-        <BrowserRouter>
-          <Routes>
+        <CartProvider>
+          <BrowserRouter>
+            <Routes>
           <Route path="/" element={<SalesPage />} />
           <Route path="/auth/login" element={<AppLayout />}>
             <Route index element={<Dashboard />} />
@@ -61,6 +66,7 @@ export default function App() {
             <Route path="clients/add" element={<ClientsList />} />
             <Route path="clients/:clientId/edit" element={<ClientsList />} />
             <Route path="clients/:clientId/view" element={<ClientsList />} />
+            <Route path="wedding-planner" element={<WeddingPlannerComingSoon />} />
             <Route path="approvals" element={<Approvals />} />
             <Route path="settings" element={<WhiteLabelSettings />} />
             <Route path="businesses" element={<BusinessesList />} />
@@ -70,11 +76,14 @@ export default function App() {
             <Route path="users/add" element={<UsersList />} />
             <Route path="users/:userId/edit" element={<UsersList />} />
             <Route path="roles" element={<RolesSettings />} />
+            <Route path="sessions" element={<ActiveSessions />} />
+            <Route path="admin/sessions" element={<ActiveSessions />} />
             <Route path="changelog" element={<Changelog />} />
             
             {/* Informasi Layanan Routes */}
             <Route path="services/dashboard" element={<ServicesDashboard />} />
             <Route path="services/catalog" element={<ServicesCatalog />} />
+            <Route path="services/checkout" element={<ServiceCheckout />} />
             <Route path="services/checkout/:serviceId" element={<ServiceCheckout />} />
             <Route path="services/my" element={<MyServices />} />
             <Route path="invoices/my" element={<MyInvoices />} />
@@ -90,6 +99,9 @@ export default function App() {
             <Route path="media" element={<MediaLibrary />} />
           </Route>
           {/* Public Route */}
+          <Route path="/pay/:invoiceId" element={<PublicPayment />} />
+          <Route path="/public/pay/:invoiceId" element={<PublicPayment />} />
+          <Route path="/invoices/pay/:invoiceId" element={<PublicPayment />} />
           <Route path="/rsvp/:eventId/:ticketCode" element={<RSVP />} />
           <Route path="/public/rsvp/:eventId" element={<PublicRSVP />} />
           <Route path="/public/qr" element={<PublicQR />} />
@@ -97,6 +109,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>
+        </CartProvider>
       </AuthProvider>
     </SettingsProvider>
   );

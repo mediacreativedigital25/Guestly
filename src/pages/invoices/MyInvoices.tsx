@@ -5,7 +5,8 @@ import { useAuth } from '../../AuthContext';
 import { useSettings } from '../../SettingsContext';
 import { Modal } from '../../components/Modal';
 import { showAlert, showConfirm } from '../../lib/alerts';
-import { Copy, Check, MessageCircle } from 'lucide-react';
+import { Copy, Check, MessageCircle, ExternalLink } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 export default function MyInvoices() {
   const { appUser, currentUser } = useAuth();
@@ -160,37 +161,65 @@ export default function MyInvoices() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {inv.createdAt ? new Date(inv.createdAt.toMillis()).toLocaleDateString('id-ID') : '-'}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {inv.serviceName}
+                    <td className="px-6 py-4 text-sm text-gray-900">
+                      <div className="font-semibold">{inv.serviceName}</div>
+                      {inv.items && inv.items.length > 1 && (
+                        <div className="flex gap-1 mt-1">
+                          <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 text-[10px] font-bold rounded border border-purple-200">
+                            {inv.items.length} Layanan Termasuk
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
                       Rp {inv.amount?.toLocaleString('id-ID')}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        inv.status === 'paid' ? 'bg-green-100 text-green-800' :
-                        inv.status === 'cancelled' ? 'bg-red-100 text-red-800' :
-                        'bg-yellow-100 text-yellow-800'
+                      <span className={`px-2.5 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                        inv.status === 'paid' ? 'bg-emerald-100 text-emerald-800' :
+                        inv.status === 'pending_verification' ? 'bg-blue-100 text-blue-800' :
+                        inv.status === 'cancelled' ? 'bg-rose-100 text-rose-800' :
+                        'bg-amber-100 text-amber-800'
                       }`}>
-                        {inv.status === 'paid' ? 'Lunas' : inv.status === 'cancelled' ? 'Dibatalkan' : 'Menunggu Pembayaran'}
+                        {inv.status === 'paid' ? 'Lunas' : inv.status === 'pending_verification' ? 'Menunggu Verifikasi' : inv.status === 'cancelled' ? 'Dibatalkan' : 'Menunggu Pembayaran'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm space-x-2">
-                      {inv.status === 'pending' && (
+                      {inv.status === 'pending' || inv.status === 'pending_verification' ? (
                         <>
+                          <Link
+                            to={`/pay/${inv.id}`}
+                            className="text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <span>Bayar</span>
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </Link>
                           <button
                             onClick={() => handlePayNow(inv)}
-                            className="text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors inline-block"
+                            className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1.5 rounded-md text-sm font-medium transition-colors inline-block cursor-pointer"
+                            title="Rincian Instruksi"
                           >
-                            Bayar Sekarang
+                            Detail
                           </button>
-                          <button
-                            onClick={() => handleCancelInvoice(inv.id, inv.serviceName)}
-                            className="text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors inline-block"
-                          >
-                            Batalkan
-                          </button>
+                          {inv.status === 'pending' && (
+                            <button
+                              onClick={() => handleCancelInvoice(inv.id, inv.serviceName)}
+                              className="text-red-600 bg-red-50 hover:bg-red-100 px-2.5 py-1.5 rounded-md text-sm font-medium transition-colors inline-block cursor-pointer"
+                            >
+                              Batal
+                            </button>
+                          )}
                         </>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <Link
+                            to={`/pay/${inv.id}`}
+                            className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <span>Lihat Bukti</span>
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </Link>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -209,11 +238,40 @@ export default function MyInvoices() {
       >
         {selectedInvoice && (
           <div className="space-y-4">
-            <div className="bg-blue-50 p-4 rounded-md">
-              <p className="text-sm text-blue-800 font-medium mb-1">Informasi Tagihan</p>
+            {/* Items Breakdown if multi-item */}
+            {selectedInvoice.items && Array.isArray(selectedInvoice.items) && selectedInvoice.items.length > 0 && (
+              <div className="border border-gray-200 rounded-xl overflow-hidden text-xs">
+                <div className="bg-gray-50 px-3.5 py-2 border-b border-gray-200 font-semibold text-gray-700">
+                  Rincian Layanan &amp; Add-on
+                </div>
+                <div className="divide-y divide-gray-100 bg-white">
+                  {selectedInvoice.items.map((item: any, idx: number) => (
+                    <div key={idx} className="p-3 flex justify-between items-center gap-2">
+                      <div>
+                        <span className="font-semibold text-gray-900 block">{item.serviceName}</span>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${item.type === 'package' ? 'bg-rose-50 text-[#8C3A50]' : 'bg-purple-50 text-purple-700'}`}>
+                            {item.type === 'package' ? 'Paket Utama' : 'Add-on'}
+                          </span>
+                          {item.quantity > 1 && (
+                            <span className="text-gray-500 text-[11px]">x{item.quantity}</span>
+                          )}
+                        </div>
+                      </div>
+                      <span className="font-mono font-bold text-gray-900">
+                        Rp {((item.price || 0) * (item.quantity || 1)).toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+              <p className="text-xs text-blue-800 font-bold uppercase tracking-wider mb-1">Informasi Tagihan</p>
               <div className="flex justify-between items-center text-sm">
-                <span className="text-gray-600">Total Harga:</span>
-                <span className="font-bold text-gray-900 font-mono text-lg">Rp {selectedInvoice.amount?.toLocaleString('id-ID')}</span>
+                <span className="text-gray-600">Total Pembayaran:</span>
+                <span className="font-black text-gray-900 font-mono text-xl">Rp {selectedInvoice.amount?.toLocaleString('id-ID')}</span>
               </div>
             </div>
             
@@ -285,19 +343,27 @@ export default function MyInvoices() {
             </div>
             
             <div className="flex justify-end pt-4 gap-2 flex-wrap sm:flex-nowrap">
+              <a
+                href={`/pay/${selectedInvoice?.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-medium transition-colors flex items-center justify-center gap-1.5 w-full sm:w-auto text-xs sm:text-sm"
+              >
+                <ExternalLink className="w-4 h-4" /> Buka Halaman Bayar
+              </a>
               {settings?.activePaymentMethod !== 'tripay' && (
                 <a
-                  href={`https://wa.me/6285158636606?text=${encodeURIComponent(`Halo Admin, saya ingin konfirmasi pembayaran untuk Invoice ${selectedInvoice?.id} atas layanan ${selectedInvoice?.serviceName}. Berikut saya lampirkan bukti transfernya.`)}`}
+                  href={`https://wa.me/${settings?.adminPhone || '6285158636606'}?text=${encodeURIComponent(`Halo Admin, saya ingin konfirmasi pembayaran untuk Invoice ${selectedInvoice?.id} atas layanan ${selectedInvoice?.serviceName}. Berikut saya lampirkan bukti transfernya.`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 w-full sm:w-auto"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 w-full sm:w-auto text-xs sm:text-sm"
                 >
                   <MessageCircle className="w-4 h-4" /> Kirim Bukti via WhatsApp
                 </a>
               )}
               <button
                 onClick={() => setIsPaymentModalOpen(false)}
-                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors w-full sm:w-auto text-center"
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors w-full sm:w-auto text-center text-xs sm:text-sm cursor-pointer"
               >
                 Tutup
               </button>

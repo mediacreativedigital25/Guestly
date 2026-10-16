@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
 import { User } from './types';
 import { showAlert } from './lib/alerts';
 import { resolveMediaUrl, isGreetingScreenUser } from './lib/utils';
+import { getDeviceId, getDeviceName, isSessionExpired } from './lib/deviceUtils';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
@@ -75,6 +76,21 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               if (liveData.bannerUrl) liveData.bannerUrl = resolveMediaUrl(liveData.bannerUrl);
               if (liveData.brandingImageUrl) liveData.brandingImageUrl = resolveMediaUrl(liveData.brandingImageUrl);
               setAppUser({ id: snap.id, ...liveData });
+
+              // Active Device Session Guard (Except superadmin & TV greeting screen)
+              if (liveData.role !== 'superadmin' && !isGreetingScreenUser(liveData)) {
+                const myDeviceId = getDeviceId();
+                // If session was revoked by Admin/Owner OR if activeDeviceId exists and doesn't match this device
+                if (liveData.sessionRevoked || (liveData.activeDeviceId && liveData.activeDeviceId !== myDeviceId)) {
+                  auth.signOut();
+                  showAlert(
+                    'Sesi Terputus',
+                    'Sesi perangkat Anda telah direset oleh Super Admin / Owner atau dialihkan ke perangkat lain.',
+                    'warning'
+                  );
+                  return;
+                }
+              }
             }
           });
 
@@ -100,9 +116,57 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      if (currentUser) {
+        const myDeviceId = getDeviceId();
+        const userDocRef = doc(db, 'users', currentUser.uid);
+        const userSnap = await getDoc(userDocRef);
+        if (userSnap.exists() && userSnap.data()?.activeDeviceId === myDeviceId) {
+          await updateDoc(userDocRef, {
+            activeDeviceId: null,
+            activeDeviceName: null,
+            sessionRevoked: false,
+            updatedAt: serverTimestamp()
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Error clearing active device on logout:', err);
+    }
     auth.signOut();
   };
+
+  // Heartbeat to update lastActiveAt every 5 minutes while user is active
+  useEffect(() => {
+    if (!currentUser || !appUser) return;
+    if (isGreetingScreenUser(appUser)) return;
+
+    let lastHeartbeat = Date.now();
+
+    const sendHeartbeat = () => {
+      const now = Date.now();
+      // Throttle to update at most once every 5 minutes (300,000 ms)
+      if (now - lastHeartbeat >= 5 * 60 * 1000) {
+        lastHeartbeat = now;
+        try {
+          const userDocRef = doc(db, 'users', currentUser.uid);
+          updateDoc(userDocRef, {
+            lastActiveAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }).catch(() => {});
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    const events = ['mousedown', 'keydown', 'touchstart'];
+    events.forEach(e => window.addEventListener(e, sendHeartbeat, { passive: true }));
+    return () => {
+      events.forEach(e => window.removeEventListener(e, sendHeartbeat));
+    };
+  }, [currentUser, appUser]);
 
   useEffect(() => {
     if (!currentUser) return;

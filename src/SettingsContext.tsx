@@ -6,6 +6,7 @@ import { resolveMediaUrl } from './lib/utils';
 interface GlobalSettings {
   logoUrl?: string;
   faviconUrl?: string;
+  adminPhone?: string;
   fonnteToken?: string;
   fonnteTemplates?: {
     orderCreated?: string;

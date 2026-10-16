@@ -38,6 +38,12 @@ export interface User {
   createdBy?: string;
   createdByName?: string;
   activeUntil?: any;
+  activeDeviceId?: string | null;
+  activeDeviceName?: string | null;
+  activeSessionToken?: string | null;
+  lastActiveAt?: any;
+  lastLoginAt?: any;
+  sessionRevoked?: boolean;
   createdAt: any;
   updatedAt: any;
 }
@@ -324,4 +330,38 @@ export interface GuestbookEntry {
   attendance: 'hadir' | 'tidak_hadir' | 'ragu_ragu';
   reply?: string;
   timestamp: any;
+}
+
+export interface InvoiceItem {
+  serviceId: string;
+  serviceName: string;
+  type: 'package' | 'addon';
+  price: number;
+  normalPrice?: number;
+  activePeriodDays?: number;
+  eventQuota?: number;
+  clientQuota?: number;
+  guestQuota?: number;
+  waBlastQuota?: number;
+  quantity: number;
+}
+
+export interface ServiceInvoice {
+  id?: string;
+  userId: string;
+  userName: string;
+  userPhone?: string;
+  serviceId: string;
+  serviceName: string;
+  items?: InvoiceItem[];
+  amount: number;
+  totalEventQuota?: number;
+  totalClientQuota?: number;
+  totalGuestQuota?: number;
+  totalWaBlastQuota?: number;
+  totalActivePeriodDays?: number;
+  status: 'pending' | 'paid' | 'cancelled';
+  paymentMethod?: string;
+  createdAt: any;
+  updatedAt: any;
 }

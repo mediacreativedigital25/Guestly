@@ -20,6 +20,7 @@ export default function AdminSettings() {
   const [serverFonnteStatus, setServerFonnteStatus] = useState<{ configured: boolean; envConfigured: boolean; source: string } | null>(null);
   const [testWaPhone, setTestWaPhone] = useState('');
   const [isTestingWa, setIsTestingWa] = useState(false);
+  const [adminPhone, setAdminPhone] = useState(settings?.adminPhone || '6285158636606');
 
   const [templateOrderCreated, setTemplateOrderCreated] = useState(settings?.fonnteTemplates?.orderCreated || '');
   const [templateOrderPaid, setTemplateOrderPaid] = useState(settings?.fonnteTemplates?.orderPaid || '');
@@ -98,6 +99,7 @@ export default function AdminSettings() {
       setLogoUrl(settings.logoUrl || '');
       setFaviconUrl(settings.faviconUrl || '');
       setFonnteToken(settings.fonnteToken || '');
+      setAdminPhone(settings.adminPhone || '6285158636606');
       setTemplateOrderCreated(settings.fonnteTemplates?.orderCreated || '');
       setTemplateOrderPaid(settings.fonnteTemplates?.orderPaid || '');
       setTemplateOrderCancelled(settings.fonnteTemplates?.orderCancelled || '');
@@ -177,6 +179,7 @@ export default function AdminSettings() {
       } else if (tab === 'fonnte') {
         await setDoc(globalSettingsRef, { 
           ...currentData, 
+          adminPhone: adminPhone.trim(),
           fonnteToken: fonnteToken.trim(),
           fonnteTemplates: {
             orderCreated: templateOrderCreated,
@@ -396,35 +399,102 @@ export default function AdminSettings() {
                         </button>
                       </div>
                     </div>
+
+                    {/* Admin WhatsApp Recipient */}
+                    <div className="pt-3 border-t border-indigo-100">
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">
+                        Nomor WhatsApp Admin (Penerima Bukti Pembayaran / CS)
+                      </label>
+                      <input
+                        type="tel"
+                        value={adminPhone}
+                        onChange={e => setAdminPhone(e.target.value)}
+                        placeholder="Contoh: 6285158636606"
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white font-mono"
+                      />
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        Nomor ini akan digunakan sebagai tujuan saat pelanggan menekan tombol <strong>Konfirmasi Pembayaran via WhatsApp</strong>. Format angka dengan awalan 62 (contoh: 6285158636606).
+                      </p>
+                    </div>
                   </div>
                   
                   <div className="pt-4 border-t border-gray-200">
-                    <h3 className="text-md font-semibold text-gray-900 mb-3">Template Pesan WhatsApp</h3>
-                    <p className="text-xs text-gray-500 mb-4">Anda dapat menggunakan variabel berikut dalam template: <br/><code>{"{userName}"}</code>, <code>{"{serviceName}"}</code>, <code>{"{invoiceId}"}</code>, <code>{"{amount}"}</code></p>
+                    <h3 className="text-md font-semibold text-gray-900 mb-1">Template Pesan WhatsApp Otomatis</h3>
+                    <p className="text-xs text-gray-500 mb-3">
+                      Pesan otomatis yang dikirimkan ke nomor WhatsApp pelanggan saat status pesanan berubah.
+                    </p>
+
+                    <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-lg p-3 mb-4 text-xs">
+                      <span className="font-bold text-indigo-900 block mb-1.5">Variabel Tersedia (Klik untuk Menyisipkan ke Template):</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setTemplateOrderCreated(prev => (prev || '') + ' {userName}')}
+                          className="px-2 py-1 bg-white hover:bg-indigo-100 text-indigo-700 rounded border border-indigo-200 font-mono text-[11px] font-semibold transition-colors cursor-pointer"
+                        >
+                          + {"{userName}"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTemplateOrderCreated(prev => (prev || '') + ' {serviceName}')}
+                          className="px-2 py-1 bg-white hover:bg-indigo-100 text-indigo-700 rounded border border-indigo-200 font-mono text-[11px] font-semibold transition-colors cursor-pointer"
+                        >
+                          + {"{serviceName}"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTemplateOrderCreated(prev => (prev || '') + ' {invoiceId}')}
+                          className="px-2 py-1 bg-white hover:bg-indigo-100 text-indigo-700 rounded border border-indigo-200 font-mono text-[11px] font-semibold transition-colors cursor-pointer"
+                        >
+                          + {"{invoiceId}"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTemplateOrderCreated(prev => (prev || '') + ' {amount}')}
+                          className="px-2 py-1 bg-white hover:bg-indigo-100 text-indigo-700 rounded border border-indigo-200 font-mono text-[11px] font-semibold transition-colors cursor-pointer"
+                        >
+                          + {"{amount}"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTemplateOrderCreated(prev => (prev || '') + ' {paymentLink}')}
+                          className="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded border border-indigo-600 font-mono text-[11px] font-bold shadow-2xs transition-colors cursor-pointer"
+                        >
+                          + {"{paymentLink}"} (Link Bayar Langsung)
+                        </button>
+                      </div>
+                    </div>
                     
                     <div className="space-y-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Pesanan Dibuat (Pending)</label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-sm font-medium text-gray-700">
+                            1. Pesanan Dibuat (Menunggu Pembayaran / Pending)
+                          </label>
+                          <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                            Mendukung Link Pembayaran
+                          </span>
+                        </div>
                         <textarea 
                           value={templateOrderCreated} 
                           onChange={e => setTemplateOrderCreated(e.target.value)} 
-                          placeholder={"Halo {userName},\n\nPesanan Anda untuk {serviceName} berhasil dibuat.\nNomor: {invoiceId}\nTotal: {amount}"} 
-                          rows={4} 
+                          placeholder={"Halo {userName},\n\nPesanan Anda untuk {serviceName} berhasil dibuat.\nNomor Invoice: {invoiceId}\nTotal: {amount}\n\n💳 Link Pembayaran:\n{paymentLink}\n\nSilakan selesaikan pembayaran melalui tautan di atas."} 
+                          rows={5} 
                           className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white" 
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Pesanan Dibayar (Sukses)</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">2. Pesanan Dibayar &amp; Dikonfirmasi (Sukses / Lunas)</label>
                         <textarea 
                           value={templateOrderPaid} 
                           onChange={e => setTemplateOrderPaid(e.target.value)} 
-                          placeholder={"Halo {userName},\n\nPembayaran untuk pesanan {serviceName} ({invoiceId}) telah berhasil dikonfirmasi.\nLayanan Anda sudah aktif."} 
+                          placeholder={"Halo {userName},\n\nPembayaran untuk pesanan {serviceName} ({invoiceId}) telah berhasil dikonfirmasi.\nLayanan Anda sudah aktif dan kuota telah ditambahkan ke akun."} 
                           rows={4} 
                           className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white" 
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Pesanan Dibatalkan</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">3. Pesanan Dibatalkan</label>
                         <textarea 
                           value={templateOrderCancelled} 
                           onChange={e => setTemplateOrderCancelled(e.target.value)} 
@@ -444,6 +514,7 @@ export default function AdminSettings() {
                   onClick={() => {
                     if (settings) {
                       setFonnteToken(settings.fonnteToken || '');
+                      setAdminPhone(settings.adminPhone || '6285158636606');
                       setTemplateOrderCreated(settings.fonnteTemplates?.orderCreated || '');
                       setTemplateOrderPaid(settings.fonnteTemplates?.orderPaid || '');
                       setTemplateOrderCancelled(settings.fonnteTemplates?.orderCancelled || '');

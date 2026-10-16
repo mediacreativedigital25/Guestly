@@ -458,7 +458,14 @@ export default function MyServices() {
                   {invoices.map((invoice) => (
                     <tr key={invoice.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <p className="text-sm font-semibold text-gray-900">{invoice.serviceName}</p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-sm font-semibold text-gray-900">{invoice.serviceName}</p>
+                          {invoice.items && invoice.items.length > 1 && (
+                            <span className="px-1.5 py-0.2 bg-purple-50 text-purple-700 text-[10px] font-bold rounded border border-purple-200">
+                              {invoice.items.length} item
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs font-mono text-indigo-600">#{invoice.id}</p>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">

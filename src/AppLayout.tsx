@@ -29,13 +29,21 @@ import {
   Clock,
   CheckCircle2,
   Monitor,
+  Radio,
+  ShieldAlert,
+  Laptop,
+  ArrowRight,
+  HeartHandshake,
 } from 'lucide-react';
+import { useCart } from './CartContext';
 import { cn, getRoleLabel, shouldHideServiceInfo, isGreetingScreenUser, canUserAccessEvent, getUserBusinessId } from './lib/utils';
 import { showConfirm } from './lib/alerts';
 import RouteBreadcrumbs from './components/RouteBreadcrumbs';
+import { Modal } from './components/Modal';
 import { auth, db } from './lib/firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc, getDocs, collection, query, where, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, query, where, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { getDeviceId, getDeviceName, isSessionExpired, getTimeRemainingMs, formatTimeRemaining, formatRelativeActivity } from './lib/deviceUtils';
 
 interface TopbarNotification {
   id: string;
@@ -61,6 +69,7 @@ export default function AppLayout() {
   // Topbar states
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
+  const [isCartDropdownOpen, setIsCartDropdownOpen] = useState(false);
   const [notifications, setNotifications] = useState<TopbarNotification[]>([]);
   const [readNotifIds, setReadNotifIds] = useState<string[]>([]);
   const [globalSearch, setGlobalSearch] = useState('');
@@ -68,8 +77,20 @@ export default function AppLayout() {
 
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const notifDropdownRef = useRef<HTMLDivElement>(null);
+  const cartDropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  // Cart context data for header cart icon
+  const {
+    mainPackage,
+    addons,
+    itemCount,
+    totalPrice,
+    clearCart,
+    removeAddon,
+    setMainPackage,
+  } = useCart();
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -79,6 +100,9 @@ export default function AppLayout() {
       }
       if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
         setIsNotifDropdownOpen(false);
+      }
+      if (cartDropdownRef.current && !cartDropdownRef.current.contains(e.target as Node)) {
+        setIsCartDropdownOpen(false);
       }
       if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
         setIsSearchOpen(false);
@@ -122,7 +146,8 @@ export default function AppLayout() {
     } else if (
       p.startsWith('/auth/login/users') ||
       p.startsWith('/auth/login/businesses') ||
-      p.startsWith('/auth/login/roles')
+      p.startsWith('/auth/login/roles') ||
+      p.startsWith('/auth/login/sessions')
     ) {
       setIsUserMenuOpen(true);
       setIsServiceInfoMenuOpen(false);
@@ -478,6 +503,14 @@ export default function AppLayout() {
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [lockedSessionInfo, setLockedSessionInfo] = useState<{
+    email: string;
+    name: string;
+    deviceName: string;
+    lastActiveAt: any;
+    remainingStr: string;
+    partnerId?: string | null;
+  } | null>(null);
 
   // Ensure URL resets to /auth/login whenever user is logged out
   useEffect(() => {
@@ -557,7 +590,56 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
           });
         }
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const loggedUser = userCredential.user;
+
+        // Check single active device lock & 2-hour inactivity auto-reset
+        const userDocRef = doc(db, 'users', loggedUser.uid);
+        const userDocSnap = await getDoc(userDocRef);
+
+        if (userDocSnap.exists()) {
+          const uData = userDocSnap.data();
+
+          // Superadmin and Greeting TV accounts have multi-device bypass
+          if (uData.role !== 'superadmin' && !isGreetingScreenUser(uData)) {
+            const currentDevId = getDeviceId();
+            const activeDevId = uData.activeDeviceId;
+
+            // If an active session on a different device is recorded
+            if (activeDevId && activeDevId !== currentDevId) {
+              const expired = isSessionExpired(uData.lastActiveAt);
+
+              if (!expired) {
+                // Device is active and locked on another device!
+                await auth.signOut();
+
+                const remainingMs = getTimeRemainingMs(uData.lastActiveAt);
+                const remainingStr = formatTimeRemaining(remainingMs);
+
+                setLockedSessionInfo({
+                  email: uData.email || email,
+                  name: uData.name || 'Pengguna',
+                  deviceName: uData.activeDeviceName || 'Perangkat Lain',
+                  lastActiveAt: uData.lastActiveAt,
+                  remainingStr,
+                  partnerId: uData.partnerId,
+                });
+                setIsLoggingIn(false);
+                return;
+              }
+            }
+
+            // Either no previous device, same device, or 2 hours have expired -> Claim device
+            await updateDoc(userDocRef, {
+              activeDeviceId: currentDevId,
+              activeDeviceName: getDeviceName(),
+              lastActiveAt: serverTimestamp(),
+              lastLoginAt: serverTimestamp(),
+              sessionRevoked: false,
+              updatedAt: serverTimestamp(),
+            });
+          }
+        }
       }
       navigate('/auth/login', { replace: true });
     } catch (error: any) {
@@ -717,6 +799,82 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
             </div>
           </div>
         </div>
+
+        {/* Locked Device Session Modal */}
+        <Modal
+          isOpen={Boolean(lockedSessionInfo)}
+          onClose={() => setLockedSessionInfo(null)}
+          title="Akun Aktif di Perangkat Lain"
+          maxWidth="max-w-md"
+        >
+          {lockedSessionInfo && (
+            <div className="space-y-4 text-slate-700">
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+                <ShieldAlert className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="text-sm font-bold text-amber-900">
+                    Batasan 1 Akun = 1 Perangkat Aktif
+                  </h4>
+                  <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                    Akun <strong>{lockedSessionInfo.email}</strong> saat ini sedang memegang sesi login aktif di perangkat lain.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Perangkat Aktif:</span>
+                  <span className="font-bold text-slate-800 flex items-center gap-1">
+                    <Laptop className="w-3.5 h-3.5 text-indigo-600" />
+                    {lockedSessionInfo.deviceName}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Aktivitas Terakhir:</span>
+                  <span className="font-semibold text-slate-800">
+                    {formatRelativeActivity(lockedSessionInfo.lastActiveAt)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center pt-1 border-t border-slate-200">
+                  <span className="text-slate-500">Auto-Reset Otomatis:</span>
+                  <span className="font-bold text-emerald-700">
+                    {lockedSessionInfo.remainingStr}
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Jika perangkat lama sudah tidak digunakan atau tertinggal, kuncian akan otomatis lepas sendiri jika tidak ada aktivitas selama 2 jam. Atau Anda dapat meminta <strong>Super Admin / Owner</strong> untuk memutuskan sesi sekarang juga.
+              </p>
+
+              <div className="pt-2 flex flex-col gap-2">
+                <a
+                  href={`https://wa.me/${settings?.adminPhone || '6285158636606'}?text=${encodeURIComponent(
+                    `Halo Admin / Owner, tolong bantu reset sesi login perangkat akun saya:\nEmail: ${lockedSessionInfo.email}\nNama: ${lockedSessionInfo.name}\n\nSaya ingin login di perangkat baru. Terima kasih!`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs transition-colors"
+                >
+                  <img
+                    src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg"
+                    alt="WhatsApp"
+                    className="w-4 h-4 brightness-0 invert"
+                  />
+                  <span>Minta Reset Sesi via WhatsApp</span>
+                </a>
+
+                <button
+                  type="button"
+                  onClick={() => setLockedSessionInfo(null)}
+                  className="w-full py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  Tutup &amp; Coba Lagi Nanti
+                </button>
+              </div>
+            </div>
+          )}
+        </Modal>
       </div>
     );
   }
@@ -766,10 +924,17 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
   }
 
   const isStaff = appUser.role === 'staff';
-  const navItems = [
+  const navItems: Array<{
+    name: string;
+    path: string;
+    icon: any;
+    role?: string[];
+    badge?: string;
+  }> = [
     { name: isStaff ? 'Workspace Petugas' : 'Dashboard', path: '/auth/login', icon: LayoutDashboard },
     { name: 'Clients', path: '/auth/login/clients', icon: Users, role: ['superadmin', 'owner', 'partner'] },
     { name: isStaff ? 'Acara Ditugaskan' : 'Events', path: '/auth/login/events', icon: CalendarDays },
+    { name: 'Wedding Planner', path: '/auth/login/wedding-planner', icon: HeartHandshake, role: ['superadmin', 'owner', 'admin', 'partner', 'client'], badge: 'Segera' },
     { name: 'Approvals', path: '/auth/login/approvals', icon: FileText, role: ['superadmin', 'owner', 'admin', 'partner', 'client'] },
     { name: 'Media', path: '/auth/login/media', icon: ImageIcon, role: ['superadmin'] },
     { name: 'White Label', path: '/auth/login/settings', icon: Settings, role: ['superadmin', 'owner', 'partner'] },
@@ -786,6 +951,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
         ]
       : []),
     { label: 'Events (Daftar Acara)', path: '/auth/login/events', keywords: 'events acara pernikahan tamu undangan' },
+    { label: 'Wedding Planner (Segera)', path: '/auth/login/wedding-planner', keywords: 'wedding planner rundown vendor budget panitia meja segera' },
     { label: 'Approvals (Persetujuan Tamu)', path: '/auth/login/approvals', keywords: 'approvals persetujuan edit tamu' },
     { label: 'Profil Saya', path: '/auth/login/profile', keywords: 'profil saya akun password ubah' },
     ...(!isStaff ? [{ label: 'Changelog', path: '/auth/login/changelog', keywords: 'changelog update versi baru' }] : []),
@@ -812,7 +978,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
           >
             <Link
               to="/auth/login"
-              className="flex items-center gap-2 font-bold text-xl tracking-tight text-indigo-600"
+              className="flex items-center gap-2 font-bold text-xl tracking-tight text-[#8C3A50]"
             >
               {/* Tampilan Mobile: Selalu Gunakan Favicon */}
               <span className="flex md:hidden items-center justify-center">
@@ -828,7 +994,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     }}
                   />
                 ) : (
-                  <span className="w-9 h-9 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg">
+                  <span className="w-9 h-9 rounded-md bg-rose-50 text-[#8C3A50] flex items-center justify-center font-bold text-lg">
                     G
                   </span>
                 )}
@@ -849,7 +1015,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       }}
                     />
                   ) : (
-                    <span className="w-9 h-9 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg">
+                    <span className="w-9 h-9 rounded-md bg-rose-50 text-[#8C3A50] flex items-center justify-center font-bold text-lg">
                       G
                     </span>
                   )
@@ -909,7 +1075,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                   }
                 }}
                 placeholder="Cari tamu, event, atau informasi..."
-                className="w-full pl-10 pr-16 py-2 text-sm bg-gray-50/90 border border-gray-200 rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:bg-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/15 transition-all"
+                className="w-full pl-10 pr-16 py-2 text-sm bg-gray-50/90 border border-gray-200 rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:bg-white focus:border-[#8C3A50] focus:ring-2 focus:ring-[#8C3A50]/15 transition-all"
               />
               <div className="absolute right-2.5 flex items-center gap-1 pointer-events-none">
                 <kbd className="px-1.5 py-0.5 text-[10px] font-semibold text-gray-500 bg-white border border-gray-200 rounded shadow-2xs">
@@ -940,7 +1106,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       setIsSearchOpen(false);
                       setGlobalSearch('');
                     }}
-                    className="w-full flex items-center justify-between px-4 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors text-left"
+                    className="w-full flex items-center justify-between px-4 py-2 text-sm text-gray-700 hover:bg-rose-50 hover:text-[#8C3A50] transition-colors text-left cursor-pointer"
                   >
                     <span className="font-medium">{item.label}</span>
                     <span className="text-xs text-gray-400">Buka &rarr;</span>
@@ -953,38 +1119,196 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     navigate('/auth/login/events');
                     setIsSearchOpen(false);
                   }}
-                  className="w-full px-4 py-2.5 text-xs text-gray-600 hover:bg-gray-50 text-left flex items-center justify-between"
+                  className="w-full px-4 py-2.5 text-xs text-gray-600 hover:bg-gray-50 text-left flex items-center justify-between cursor-pointer"
                 >
                   <span>Cari "{globalSearch}" di halaman Events</span>
-                  <span className="text-indigo-600 font-semibold">Lihat Events &rarr;</span>
+                  <span className="text-[#8C3A50] font-semibold">Lihat Events &rarr;</span>
                 </button>
               )}
             </div>
           </div>
         </div>
 
-        {/* Right: Notification Bell & Person Profile Dropdown */}
-        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-          {/* 1. Notification Bell & Popup (Smooth & Mutually Exclusive) */}
+        {/* Right: Cart, Notification Bell & Person Profile Dropdown */}
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+          {/* 0. Cart Icon & Popover (Standard Guestly Palette) */}
+          <div ref={cartDropdownRef} className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setIsCartDropdownOpen((prev) => !prev);
+                setIsNotifDropdownOpen(false);
+                setIsProfileDropdownOpen(false);
+                setIsSearchOpen(false);
+              }}
+              className={cn(
+                "relative p-2 rounded-full transition-all duration-200 cursor-pointer",
+                isCartDropdownOpen
+                  ? "bg-rose-50 text-[#8C3A50] ring-2 ring-[#8C3A50]/20"
+                  : "text-gray-600 hover:text-[#8C3A50] hover:bg-rose-50/60"
+              )}
+              title="Keranjang Belanja"
+              aria-label="Keranjang Belanja"
+            >
+              <ShoppingBag className="w-5 h-5" />
+              {itemCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#8C3A50] text-white text-[10px] font-bold flex items-center justify-center shadow-xs">
+                  {itemCount}
+                </span>
+              )}
+            </button>
+
+            {/* Cart Dropdown Preview */}
+            <div
+              className={cn(
+                "absolute right-0 mt-1.5 w-80 sm:w-96 bg-white rounded-2xl shadow-xl border border-rose-100 py-1.5 z-50 origin-top-right transition-all duration-200 ease-out",
+                isCartDropdownOpen
+                  ? "opacity-100 scale-100 translate-y-0 pointer-events-auto visible"
+                  : "opacity-0 scale-95 -translate-y-1.5 pointer-events-none invisible"
+              )}
+            >
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-rose-50 text-[#8C3A50] flex items-center justify-center">
+                    <ShoppingBag className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-bold text-gray-900 block leading-tight">Keranjang Belanja</span>
+                    <span className="text-[11px] text-gray-500 font-medium">{itemCount} item dipilih</span>
+                  </div>
+                </div>
+                {itemCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => clearCart()}
+                    className="text-xs font-semibold text-rose-600 hover:text-rose-800 cursor-pointer"
+                  >
+                    Kosongkan
+                  </button>
+                )}
+              </div>
+
+              {itemCount === 0 ? (
+                <div className="p-6 text-center space-y-2">
+                  <div className="w-12 h-12 rounded-full bg-rose-50 text-[#8C3A50] flex items-center justify-center mx-auto">
+                    <ShoppingBag className="w-6 h-6" />
+                  </div>
+                  <p className="text-xs font-bold text-gray-900">Keranjang Anda masih kosong</p>
+                  <p className="text-[11px] text-gray-500 max-w-xs mx-auto">
+                    Pilih paket buku tamu utama atau add-on kuota tambahan dari katalog layanan.
+                  </p>
+                  <div className="pt-2">
+                    <Link
+                      to="/auth/login/services"
+                      onClick={() => setIsCartDropdownOpen(false)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                    >
+                      <span>Buka Katalog Layanan</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 space-y-3">
+                  <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                    {mainPackage && (
+                      <div className="p-2.5 rounded-xl bg-rose-50/50 border border-rose-200/60 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-[#8C3A50] uppercase tracking-wider inline-block">
+                            Paket Utama
+                          </span>
+                          <p className="text-xs font-bold text-gray-900 truncate mt-1">{mainPackage.name}</p>
+                          <p className="text-xs font-mono font-bold text-[#8C3A50] mt-0.5">
+                            Rp {(mainPackage.price || 0).toLocaleString('id-ID')}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setMainPackage(null)}
+                          className="text-gray-400 hover:text-rose-600 p-1 cursor-pointer transition-colors"
+                          title="Hapus paket"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+
+                    {addons.map((addon) => (
+                      <div
+                        key={addon.service.id}
+                        className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/70 flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0">
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 uppercase tracking-wider inline-block">
+                            Add-on ({addon.quantity}x)
+                          </span>
+                          <p className="text-xs font-semibold text-gray-900 truncate mt-1">{addon.service.name}</p>
+                          <p className="text-xs font-mono font-bold text-gray-800 mt-0.5">
+                            Rp {((addon.service.price || 0) * addon.quantity).toLocaleString('id-ID')}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeAddon(addon.service.id!)}
+                          className="text-gray-400 hover:text-rose-600 p-1 cursor-pointer transition-colors"
+                          title="Hapus add-on"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-xs">
+                    <span className="text-gray-600 font-medium">Total Tagihan:</span>
+                    <span className="font-mono font-black text-sm text-[#8C3A50]">
+                      Rp {totalPrice.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <Link
+                      to="/auth/login/services"
+                      onClick={() => setIsCartDropdownOpen(false)}
+                      className="w-full py-2 px-3 rounded-xl border border-gray-200 hover:bg-rose-50/50 hover:border-rose-200 hover:text-[#8C3A50] text-gray-700 text-xs font-semibold text-center transition-colors"
+                    >
+                      Katalog
+                    </Link>
+                    <Link
+                      to="/auth/login/services/checkout"
+                      onClick={() => setIsCartDropdownOpen(false)}
+                      className="w-full py-2 px-3 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-xs font-bold text-center shadow-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <span>Checkout</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </Link>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 1. Notification Bell & Popup (Standard Guestly Palette) */}
           <div ref={notifDropdownRef} className="relative">
             <button
               type="button"
               onClick={() => {
                 setIsNotifDropdownOpen((prev) => !prev);
                 setIsProfileDropdownOpen(false);
+                setIsCartDropdownOpen(false);
                 setIsSearchOpen(false);
               }}
               className={cn(
                 "relative p-2 rounded-full transition-all duration-200 cursor-pointer",
                 isNotifDropdownOpen
-                  ? "bg-indigo-50 text-indigo-600 ring-2 ring-indigo-500/15"
-                  : "text-gray-600 hover:text-indigo-600 hover:bg-gray-100"
+                  ? "bg-rose-50 text-[#8C3A50] ring-2 ring-[#8C3A50]/20"
+                  : "text-gray-600 hover:text-[#8C3A50] hover:bg-rose-50/60"
               )}
               title="Notifikasi"
             >
               <Bell className="w-5 h-5" />
               {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center shadow-2xs">
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#8C3A50] text-white text-[10px] font-bold flex items-center justify-center shadow-xs">
                   {unreadCount}
                 </span>
               )}
@@ -1004,7 +1328,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                   <button
                     type="button"
                     onClick={() => setReadNotifIds(notifications.map(n => n.id))}
-                    className="text-xs font-medium text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                    className="text-xs font-semibold text-[#8C3A50] hover:text-[#722B3E] cursor-pointer"
                   >
                     Tandai sudah dibaca
                   </button>
@@ -1025,7 +1349,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       }}
                       className={cn(
                         "w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors cursor-pointer",
-                        !isRead ? "bg-indigo-50/30" : ""
+                        !isRead ? "bg-rose-50/30" : ""
                       )}
                     >
                       <div
@@ -1034,7 +1358,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                           notif.type === 'approval'
                             ? "bg-amber-100 text-amber-600"
                             : notif.type === 'event'
-                            ? "bg-indigo-100 text-indigo-600"
+                            ? "bg-rose-100 text-[#8C3A50]"
                             : "bg-emerald-100 text-emerald-600"
                         )}
                       >
@@ -1049,7 +1373,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <p className="text-xs font-semibold text-gray-900 truncate">{notif.title}</p>
-                          {!isRead && <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />}
+                          {!isRead && <span className="w-2 h-2 rounded-full bg-[#8C3A50] shrink-0" />}
                         </div>
                         <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{notif.description}</p>
                         <p className="text-[11px] text-gray-400 mt-1">{notif.timeLabel}</p>
@@ -1061,19 +1385,20 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
             </div>
           </div>
 
-          {/* 2. Person Icon + User Info + Dropdown (Smooth & Mutually Exclusive) */}
+          {/* 2. Person Icon + User Info + Dropdown (Standard Guestly Palette) */}
           <div ref={profileDropdownRef} className="relative">
             <button
               type="button"
               onClick={() => {
                 setIsProfileDropdownOpen((prev) => !prev);
                 setIsNotifDropdownOpen(false);
+                setIsCartDropdownOpen(false);
                 setIsSearchOpen(false);
               }}
               className={cn(
                 "flex items-center gap-2.5 py-1.5 px-2 rounded-lg transition-all duration-200 cursor-pointer text-left",
                 isProfileDropdownOpen
-                  ? "bg-indigo-50/80 ring-2 ring-indigo-500/15"
+                  ? "bg-rose-50/80 ring-2 ring-[#8C3A50]/20"
                   : "hover:bg-gray-100"
               )}
               title="Menu Profil"
@@ -1082,7 +1407,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                 className={cn(
                   "w-9 h-9 rounded-full border flex items-center justify-center shrink-0 transition-colors duration-200",
                   isProfileDropdownOpen
-                    ? "bg-indigo-100 border-indigo-200 text-indigo-700"
+                    ? "bg-rose-100 border-rose-200 text-[#8C3A50]"
                     : "bg-slate-100 border-slate-200 text-slate-700"
                 )}
               >
@@ -1099,7 +1424,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
               <ChevronDown
                 className={cn(
                   "w-4 h-4 text-gray-500 shrink-0 transition-transform duration-200",
-                  isProfileDropdownOpen ? "rotate-180 text-indigo-600" : ""
+                  isProfileDropdownOpen ? "rotate-180 text-[#8C3A50]" : ""
                 )}
               />
             </button>
@@ -1117,7 +1442,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                 <div className="text-xs font-bold text-gray-900 truncate">
                   {appUser.name || appUser.email}
                 </div>
-                <div className="text-[11px] font-medium text-indigo-600 mt-0.5">
+                <div className="text-[11px] font-semibold text-[#8C3A50] mt-0.5">
                   {getRoleLabel(appUser.role, appUser.staffType)}
                 </div>
                 {(appUser.role === 'superadmin' ? 'Guestly Official (Super Admin)' : (appUser.businessName || resolvedBusinessName)) && (
@@ -1125,7 +1450,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     className="mt-2 pt-2 border-t border-gray-100 text-[11px] font-medium text-gray-600 flex items-center gap-1.5 truncate"
                     title={appUser.role === 'superadmin' ? 'Guestly Official (Super Admin)' : (appUser.businessName || resolvedBusinessName)}
                   >
-                    <Building2 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                    <Building2 className="w-3.5 h-3.5 text-[#8C3A50] shrink-0" />
                     <span className="truncate">
                       {appUser.role === 'superadmin' ? 'Guestly Official (Super Admin)' : (appUser.businessName || resolvedBusinessName)}
                     </span>
@@ -1133,7 +1458,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                 )}
               </div>
 
-              {/* Menu: Profil Saya & Changelog (Saling Bergantian Aktif) */}
+              {/* Menu: Profil Saya & Changelog (Standard Guestly Palette) */}
               <div className="py-1">
                 <Link
                   to="/auth/login/profile"
@@ -1141,14 +1466,14 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                   className={cn(
                     "flex items-center gap-2.5 px-4 py-2 text-sm font-medium transition-colors",
                     location.pathname === '/auth/login/profile'
-                      ? "bg-indigo-50 text-indigo-700 font-semibold"
-                      : "text-gray-700 hover:bg-indigo-50 hover:text-indigo-700"
+                      ? "bg-rose-50 text-[#8C3A50] font-semibold"
+                      : "text-gray-700 hover:bg-rose-50/50 hover:text-[#8C3A50]"
                   )}
                 >
                   <User
                     className={cn(
                       "w-4 h-4",
-                      location.pathname === '/auth/login/profile' ? "text-indigo-600" : "text-gray-400"
+                      location.pathname === '/auth/login/profile' ? "text-[#8C3A50]" : "text-gray-400"
                     )}
                   />
                   <span>Profil Saya</span>
@@ -1160,14 +1485,14 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     className={cn(
                       "flex items-center gap-2.5 px-4 py-2 text-sm font-medium transition-colors",
                       location.pathname === '/auth/login/changelog'
-                        ? "bg-indigo-50 text-indigo-700 font-semibold"
-                        : "text-gray-700 hover:bg-indigo-50 hover:text-indigo-700"
+                        ? "bg-rose-50 text-[#8C3A50] font-semibold"
+                        : "text-gray-700 hover:bg-rose-50/50 hover:text-[#8C3A50]"
                     )}
                   >
                     <FileText
                       className={cn(
                         "w-4 h-4",
-                        location.pathname === '/auth/login/changelog' ? "text-indigo-600" : "text-gray-400"
+                        location.pathname === '/auth/login/changelog' ? "text-[#8C3A50]" : "text-gray-400"
                       )}
                     />
                     <span>Changelog</span>
@@ -1215,7 +1540,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
         >
           {/* Mobile Drawer Top Header */}
           <div className="flex md:hidden h-16 items-center justify-between px-6 border-b border-gray-200">
-            <div className="flex items-center gap-2.5 font-bold text-xl tracking-tight text-indigo-600 truncate">
+            <div className="flex items-center gap-2.5 font-bold text-xl tracking-tight text-[#8C3A50] truncate">
               {settings?.faviconUrl || settings?.logoUrl ? (
                 <img
                   src={settings?.faviconUrl || '/favicon.ico'}
@@ -1258,17 +1583,26 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                       isSidebarCollapsed ? "justify-center px-0" : "",
                       isItemActive
-                        ? "bg-indigo-50 text-indigo-700"
+                        ? "bg-rose-50 text-[#8C3A50] font-semibold"
                         : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
                     )}
                   >
                     <item.icon className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
-                    {!isSidebarCollapsed && <span>{item.name}</span>}
+                    {!isSidebarCollapsed && (
+                      <div className="flex items-center justify-between flex-1 min-w-0">
+                        <span className="truncate">{item.name}</span>
+                        {item.badge && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 leading-none">
+                            {item.badge}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </Link>
                 );
               })}
 
-            {/* Informasi Layanan Dropdown (Smooth Accordion & Saling Bergantian Aktif) */}
+            {/* Informasi Layanan Dropdown (Standard Guestly Palette) */}
             {!shouldHideServiceInfo(appUser) && (
               <div className="mt-2">
                 <button
@@ -1294,7 +1628,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     isServiceInfoMenuOpen ||
                       location.pathname.startsWith('/auth/login/services') ||
                       location.pathname.startsWith('/auth/login/invoices')
-                      ? "bg-indigo-50/70 text-indigo-700"
+                      ? "bg-rose-50/70 text-[#8C3A50]"
                       : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
                   )}
                 >
@@ -1306,7 +1640,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     <ChevronRight
                       className={cn(
                         "h-4 w-4 transition-transform duration-300 ease-in-out",
-                        isServiceInfoMenuOpen ? "rotate-90 text-indigo-600" : ""
+                        isServiceInfoMenuOpen ? "rotate-90 text-[#8C3A50]" : ""
                       )}
                     />
                   )}
@@ -1327,7 +1661,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                         className={cn(
                           "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
                           location.pathname === '/auth/login/services/dashboard'
-                            ? "bg-indigo-50 text-indigo-700"
+                            ? "bg-rose-50 text-[#8C3A50] font-semibold"
                             : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                         )}
                       >
@@ -1342,7 +1676,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                         className={cn(
                           "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
                           location.pathname === '/auth/login/services/catalog'
-                            ? "bg-indigo-50 text-indigo-700"
+                            ? "bg-rose-50 text-[#8C3A50] font-semibold"
                             : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                         )}
                       >
@@ -1357,7 +1691,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                         className={cn(
                           "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
                           location.pathname === '/auth/login/invoices/my'
-                            ? "bg-indigo-50 text-indigo-700"
+                            ? "bg-rose-50 text-[#8C3A50] font-semibold"
                             : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                         )}
                       >
@@ -1384,7 +1718,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                           className={cn(
                             "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
                             location.pathname === '/auth/login/services/my'
-                              ? "bg-indigo-50 text-indigo-700"
+                              ? "bg-rose-50 text-[#8C3A50] font-semibold"
                               : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                           )}
                         >
@@ -1427,7 +1761,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                         location.pathname.startsWith('/auth/login/users') ||
                         location.pathname.startsWith('/auth/login/businesses') ||
                         location.pathname === '/auth/login/roles'
-                        ? "bg-indigo-50/70 text-indigo-700"
+                        ? "bg-rose-50/70 text-[#8C3A50]"
                         : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
                     )}
                   >
@@ -1439,7 +1773,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       <ChevronRight
                         className={cn(
                           "h-4 w-4 transition-transform duration-300 ease-in-out",
-                          isUserMenuOpen ? "rotate-90 text-indigo-600" : ""
+                          isUserMenuOpen ? "rotate-90 text-[#8C3A50]" : ""
                         )}
                       />
                     )}
@@ -1461,7 +1795,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
                               location.pathname.startsWith('/auth/login/businesses')
-                                ? "bg-indigo-50 text-indigo-700"
+                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
                                 : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                             )}
                           >
@@ -1474,12 +1808,32 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                           className={cn(
                             "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
                             location.pathname.startsWith('/auth/login/users')
-                              ? "bg-indigo-50 text-indigo-700"
+                              ? "bg-rose-50 text-[#8C3A50] font-semibold"
                               : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                           )}
                         >
                           User & Petugas
                         </Link>
+                        {['superadmin', 'owner', 'partner', 'admin'].includes(appUser.role) && (
+                          <Link
+                            to="/auth/login/sessions"
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={cn(
+                              "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                              location.pathname.startsWith('/auth/login/sessions')
+                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
+                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                            )}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="flex items-center gap-2">
+                                <Radio className="h-4 w-4 text-emerald-500 animate-pulse" />
+                                Sesi Aktif
+                              </span>
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            </div>
+                          </Link>
+                        )}
                         {['superadmin', 'owner', 'admin'].includes(appUser.role) && (
                           <Link
                             to="/auth/login/roles"
@@ -1487,7 +1841,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
                               location.pathname === '/auth/login/roles'
-                                ? "bg-indigo-50 text-indigo-700"
+                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
                                 : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                             )}
                           >
@@ -1522,7 +1876,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                         "w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
                         isSidebarCollapsed ? "justify-center px-0" : "",
                         isAdminPanelMenuOpen || location.pathname.startsWith('/auth/login/admin')
-                          ? "bg-indigo-50/70 text-indigo-700"
+                          ? "bg-rose-50/70 text-[#8C3A50]"
                           : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
                       )}
                     >
@@ -1534,7 +1888,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                         <ChevronRight
                           className={cn(
                             "h-4 w-4 transition-transform duration-300 ease-in-out",
-                            isAdminPanelMenuOpen ? "rotate-90 text-indigo-600" : ""
+                            isAdminPanelMenuOpen ? "rotate-90 text-[#8C3A50]" : ""
                           )}
                         />
                       )}
@@ -1555,7 +1909,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
                               location.pathname === '/auth/login/admin/services'
-                                ? "bg-indigo-50 text-indigo-700"
+                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
                                 : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                             )}
                           >
@@ -1570,7 +1924,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
                               location.pathname === '/auth/login/admin/invoice'
-                                ? "bg-indigo-50 text-indigo-700"
+                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
                                 : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                             )}
                           >
@@ -1585,7 +1939,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
                               location.pathname === '/auth/login/admin/settings'
-                                ? "bg-indigo-50 text-indigo-700"
+                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
                                 : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                             )}
                           >
@@ -1600,7 +1954,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
                               location.pathname === '/auth/login/admin/calendar'
-                                ? "bg-indigo-50 text-indigo-700"
+                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
                                 : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                             )}
                           >
@@ -1615,7 +1969,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
                               location.pathname === '/auth/login/admin/wa-templates'
-                                ? "bg-indigo-50 text-indigo-700"
+                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
                                 : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                             )}
                           >
@@ -1630,7 +1984,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
                               location.pathname === '/auth/login/admin/e-invitation-templates'
-                                ? "bg-indigo-50 text-indigo-700"
+                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
                                 : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                             )}
                           >
@@ -1645,7 +1999,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
                               location.pathname === '/auth/login/admin/greeting-templates'
-                                ? "bg-indigo-50 text-indigo-700"
+                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
                                 : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                             )}
                           >
