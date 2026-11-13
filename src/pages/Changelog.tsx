@@ -49,7 +49,7 @@ const CATEGORY_BADGE_STYLES: Record<ChangeItem['category'], string> = {
   'Performa & Keandalan': 'bg-slate-100 text-slate-700 border-slate-200',
 };
 
-const VERSIONS: ReleaseVersion[] = [
+export const VERSIONS: ReleaseVersion[] = [
   {
     version: 'V2.4.0',
     date: '13 November 2026',
@@ -359,6 +359,46 @@ const VERSIONS: ReleaseVersion[] = [
   },
 ];
 
+function parseSemverTuple(raw: string): [number, number, number] {
+  const matches = [...raw.matchAll(/(\d+)\.(\d+)(?:\.(\d+))?/g)];
+  if (matches.length === 0) return [0, 0, 0];
+  const last = matches[matches.length - 1];
+  return [
+    Number(last[1] || 0),
+    Number(last[2] || 0),
+    Number(last[3] || 0),
+  ];
+}
+
+function compareSemver(a: [number, number, number], b: [number, number, number]): number {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
+function resolveLatestRelease(): { version: string; date?: string } {
+  const sorted = [...VERSIONS].sort((a, b) =>
+    compareSemver(parseSemverTuple(b.version), parseSemverTuple(a.version))
+  );
+  const topChangelog = sorted[0] || VERSIONS[0];
+  const pkgRaw = (import.meta.env.VITE_APP_VERSION || '').trim();
+
+  if (pkgRaw) {
+    const pkgTuple = parseSemverTuple(pkgRaw);
+    const changelogTuple = parseSemverTuple(topChangelog.version);
+    if (compareSemver(pkgTuple, changelogTuple) > 0) {
+      const normalized = pkgRaw.toUpperCase().startsWith('V') ? pkgRaw.toUpperCase() : `V${pkgRaw}`;
+      return { version: normalized };
+    }
+  }
+
+  return { version: topChangelog.version, date: topChangelog.date };
+}
+
+export const LATEST_RELEASE = resolveLatestRelease();
+export const CURRENT_APP_VERSION = LATEST_RELEASE.version;
+
 export default function Changelog() {
   const [badgeFilter, setBadgeFilter] = useState<string>('ALL');
 
@@ -395,7 +435,7 @@ export default function Changelog() {
         <div className="inline-flex items-center gap-2 text-xs text-slate-600 bg-rose-50/70 border border-rose-200/80 px-3 py-1.5 rounded-xl w-fit shrink-0">
           <Tag className="w-3.5 h-3.5 text-[#8C3A50]" />
           <span>Versi Aktif Saat Ini:</span>
-          <strong className="font-mono text-[#8C3A50]">{VERSIONS[0].version}</strong>
+          <strong className="font-mono text-[#8C3A50]">{CURRENT_APP_VERSION}</strong>
         </div>
       </div>
 

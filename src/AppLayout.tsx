@@ -39,9 +39,11 @@ import {
   Wallet,
   CalendarClock,
   LayoutGrid,
+  Tag,
 } from 'lucide-react';
 import { useCart } from './CartContext';
 import { cn, getRoleLabel, shouldHideServiceInfo, isGreetingScreenUser, canUserAccessEvent, getUserBusinessId } from './lib/utils';
+import { CURRENT_APP_VERSION, LATEST_RELEASE } from './pages/Changelog';
 import { showConfirm } from './lib/alerts';
 import RouteBreadcrumbs from './components/RouteBreadcrumbs';
 import { Modal } from './components/Modal';
@@ -864,6 +866,17 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
               >
                 {isRegistering ? 'Sudah punya akun? Masuk' : 'Belum punya akun? Daftar'}
               </button>
+            </div>
+
+            <div className="pt-4 border-t border-gray-100 flex items-center justify-center gap-2 text-xs text-gray-500">
+              <span>Versi Saat Ini</span>
+              <span
+                className="inline-flex items-center gap-1 font-mono font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200/80 px-2 py-0.5 rounded-lg"
+                title={LATEST_RELEASE.date ? `Rilis ${LATEST_RELEASE.date}` : undefined}
+              >
+                <Tag className="w-3 h-3" />
+                {CURRENT_APP_VERSION}
+              </span>
             </div>
           </div>
         </div>
