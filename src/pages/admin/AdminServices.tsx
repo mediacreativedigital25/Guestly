@@ -90,11 +90,6 @@ export default function AdminServices() {
       return;
     }
 
-    const confirmed = await showConfirm("Apakah Anda yakin ingin menyimpan layanan ini?");
-    if (!confirmed) {
-      return;
-    }
-
     setIsSaving(true);
     try {
       const payload: any = {
@@ -224,13 +219,73 @@ export default function AdminServices() {
                    }
                 }
              }}
-             className="flex items-center gap-2 bg-white text-indigo-600 border border-indigo-600 px-4 py-2 rounded-md hover:bg-indigo-50 transition text-sm font-medium"
+             className="flex items-center gap-2 bg-white text-indigo-600 border border-indigo-600 px-4 py-2 rounded-md hover:bg-indigo-50 transition text-sm font-medium cursor-pointer"
           >
              Buat Template WA Blast Otomatis
           </button>
+          <button
+             type="button"
+             onClick={async () => {
+                const confirmed = await showConfirm("Buat otomatis Add-on Perpanjangan Masa Aktif Acara (+30 Hari & +60 Hari)?");
+                if (confirmed) {
+                   setIsSaving(true);
+                   try {
+                     const timeNow = serverTimestamp();
+                     const renewalTemplates = [
+                       {
+                         name: "Perpanjangan Masa Aktif +30 Hari",
+                         description: "Tambah masa aktif acara +30 hari (membuka kembali seluruh akses publik, Scanner QR, & Layar Sapa)",
+                         type: "addon",
+                         targetRole: "all",
+                         activePeriodDays: 30,
+                         eventQuota: 0,
+                         clientQuota: 0,
+                         guestQuota: 0,
+                         waBlastQuota: 0,
+                         price: 49000,
+                         normalPrice: 75000,
+                         isActive: true,
+                         createdAt: timeNow,
+                         updatedAt: timeNow
+                       },
+                       {
+                         name: "Perpanjangan Masa Aktif +60 Hari",
+                         description: "Paket hemat perpanjangan masa aktif acara +60 hari penuh",
+                         type: "addon",
+                         targetRole: "all",
+                         activePeriodDays: 60,
+                         eventQuota: 0,
+                         clientQuota: 0,
+                         guestQuota: 0,
+                         waBlastQuota: 0,
+                         price: 89000,
+                         normalPrice: 135000,
+                         isActive: true,
+                         createdAt: timeNow,
+                         updatedAt: timeNow
+                       }
+                     ];
+                     const created: any[] = [];
+                     for (const payload of renewalTemplates) {
+                       const docRef = await addDoc(collection(db, 'services'), payload);
+                       created.push({ id: docRef.id, ...payload, createdAt: new Date() });
+                     }
+                     setServices([...services, ...created]);
+                     showAlert("Berhasil", "Add-on Perpanjangan Masa Aktif berhasil dibuat!", "success");
+                   } catch (err) {
+                     showAlert("Gagal", "Terjadi kesalahan saat membuat add-on perpanjangan.", "error");
+                   } finally {
+                     setIsSaving(false);
+                   }
+                }
+             }}
+             className="flex items-center gap-2 bg-white text-[#8C3A50] border border-[#8C3A50] px-4 py-2 rounded-xl hover:bg-rose-50 transition text-sm font-semibold cursor-pointer"
+          >
+             Buat Add-on Perpanjangan (+30/+60 Hr)
+          </button>
           <button 
             onClick={openCreateModal}
-            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition font-medium text-sm"
+            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 transition font-semibold text-sm shadow-xs cursor-pointer"
           >
             <Plus className="w-4 h-4" /> Tambah Layanan Manual
           </button>

@@ -5,7 +5,7 @@ import { db, handleFirestoreError, OperationType, createAuthUserSilently } from 
 import { Client, User } from '../types';
 import { parseFirestoreDate, getUserBusinessId } from '../lib/utils';
 import { format } from 'date-fns';
-import { Plus, Trash2, Edit, Eye, Phone, MessageSquare } from 'lucide-react';
+import { Plus, Trash2, Edit, Eye, Phone, MessageSquare, Send } from 'lucide-react';
 import { Link, useNavigate, useLocation, useParams } from 'react-router-dom';
 import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 import { Modal } from '../components/Modal';
@@ -236,9 +236,6 @@ export default function ClientsList() {
     e.preventDefault();
     if (!appUser) return;
     
-    const confirmed = await showConfirm('Apakah Anda yakin ingin menambahkan client ini?');
-    if (!confirmed) return;
-    
     setIsSubmitting(true);
     setError('');
 
@@ -421,9 +418,6 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
     e.preventDefault();
     if (!editingClient || !editingClient.id) return;
     
-    const confirmed = await showConfirm('Apakah Anda yakin ingin menyimpan perubahan client ini?');
-    if (!confirmed) return;
-    
     setIsSubmitting(true);
     setError('');
 
@@ -471,7 +465,7 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
             setIsAddingClient(true);
             navigate('/auth/login/clients/add');
           }}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium shadow-sm transition-colors"
+          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-semibold text-sm shadow-xs transition-colors cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           Add Client
@@ -684,6 +678,15 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                        <div className="flex justify-end gap-2">
+                         {appUser?.role !== 'client' && appUser?.role !== 'staff' && (
+                           <Link
+                             to={`/auth/login/clients/${client.id}/send-access`}
+                             className="text-[#8C3A50] hover:text-[#722B3E] bg-rose-50 hover:bg-rose-100 p-2 rounded-md transition-colors inline-block"
+                             title="Kirim Akses ke Client"
+                           >
+                             <Send className="w-4 h-4" />
+                           </Link>
+                         )}
                          <button
                            onClick={() => openViewModal(client)}
                            className="text-gray-500 hover:text-gray-700 bg-gray-50 hover:bg-gray-200 p-2 rounded-md transition-colors inline-block"

@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { runTransaction, doc, getDoc, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
-import { GuestlyService } from '../../types';
+import { GuestlyService, EventRecord } from '../../types';
 import { useAuth } from '../../AuthContext';
 import { useSettings } from '../../SettingsContext';
 import { useCart } from '../../CartContext';
 import { showAlert, showConfirm, showCancelAlert } from '../../lib/alerts';
+import { canUserAccessEvent, isEventExpired, resolveEventActiveUntil } from '../../lib/utils';
 import {
   Copy,
   Check,
@@ -47,6 +48,8 @@ export default function ServiceCheckout() {
     updateAddonQuantity,
     clearCart,
     isAddonInCart,
+    renewEventId,
+    setRenewEventId,
     itemCount,
     totalPrice,
     totalNormalPrice,
@@ -60,9 +63,17 @@ export default function ServiceCheckout() {
 
   const [loading, setLoading] = useState(true);
   const [availableAddons, setAvailableAddons] = useState<GuestlyService[]>([]);
+  const [accessibleEvents, setAccessibleEvents] = useState<EventRecord[]>([]);
+  const [targetEventId, setTargetEventId] = useState<string>(renewEventId || '');
   const [ordering, setOrdering] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('transfer');
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (renewEventId) {
+      setTargetEventId(renewEventId);
+    }
+  }, [renewEventId]);
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -131,8 +142,28 @@ export default function ServiceCheckout() {
           );
         }
 
+        // 3. Fetch user's accessible events for optional Top-Up / Renewal linking
+        let loadedEvents: EventRecord[] = [];
+        if (appUser) {
+          try {
+            const evSnap = await getDocs(collection(db, 'events'));
+            loadedEvents = evSnap.docs
+              .map((d) => ({ id: d.id, ...d.data() } as EventRecord))
+              .filter((ev) => canUserAccessEvent(appUser, ev.id, ev.partnerId));
+            loadedEvents.sort((a, b) => {
+              const expA = isEventExpired(a) ? 0 : 1;
+              const expB = isEventExpired(b) ? 0 : 1;
+              if (expA !== expB) return expA - expB;
+              return (a.title || '').localeCompare(b.title || '');
+            });
+          } catch {
+            // ignore events load error
+          }
+        }
+
         if (isMounted) {
           setAvailableAddons(filteredAddons);
+          setAccessibleEvents(loadedEvents);
         }
       } catch (error) {
         console.error('Init checkout error:', error);
@@ -146,7 +177,7 @@ export default function ServiceCheckout() {
     return () => {
       isMounted = false;
     };
-  }, [serviceId, appUser?.role]);
+  }, [serviceId, appUser?.role, appUser?.id]);
 
   // Handle Order creation
   const handleOrder = async () => {
@@ -233,6 +264,7 @@ export default function ServiceCheckout() {
         createdInvoiceId = invoiceId;
 
         const newInvoiceRef = doc(db, 'invoices', invoiceId);
+        const selectedTargetEvent = accessibleEvents.find((ev) => ev.id === targetEventId);
 
         transaction.set(newInvoiceRef, {
           userId: currentUser.uid,
@@ -247,6 +279,12 @@ export default function ServiceCheckout() {
           totalGuestQuota,
           totalWaBlastQuota,
           totalActivePeriodDays,
+          ...(selectedTargetEvent
+            ? {
+                targetEventId: selectedTargetEvent.id,
+                targetEventTitle: selectedTargetEvent.title,
+              }
+            : {}),
           status: 'pending',
           paymentMethod: paymentMethod,
           createdAt: serverTimestamp(),
@@ -323,27 +361,6 @@ export default function ServiceCheckout() {
 
   return (
     <div className="w-full space-y-5 pb-12">
-      {/* Top Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200/80">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[#96475D]">
-              Guestly Checkout
-            </span>
-            <span className="text-slate-300">·</span>
-            <span className="text-xs text-slate-500">Konfirmasi Pemesanan &amp; Pembayaran</span>
-          </div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight mt-0.5">
-            Checkout Layanan &amp; Add-on
-          </h1>
-        </div>
-
-        <div className="flex items-center gap-2 self-start sm:self-auto bg-emerald-50 text-emerald-800 border border-emerald-200/80 px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-2xs">
-          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>Enkripsi SSL 256-Bit Aman</span>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 items-start">
         {/* Kolom Kiri: Rincian Paket, Add-on Selector, & Metode Pembayaran */}
         <div className="lg:col-span-7 xl:col-span-8 space-y-5">
@@ -445,14 +462,14 @@ export default function ServiceCheckout() {
                     </div>
 
                     {mainPackage.waBlastQuota ? (
-                      <div className="p-3.5 rounded-xl border border-purple-200/80 bg-purple-50/40">
+                      <div className="p-3.5 rounded-xl border border-rose-200/80 bg-rose-50/40">
                         <div className="flex items-center gap-2 mb-1.5">
-                          <div className="w-7 h-7 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
+                          <div className="w-7 h-7 rounded-lg bg-rose-100 text-[#8C3A50] flex items-center justify-center shrink-0">
                             <Send className="w-4 h-4" />
                           </div>
-                          <span className="text-xs font-medium text-purple-900">Kuota Blast</span>
+                          <span className="text-xs font-medium text-[#722B3E]">Kuota Blast</span>
                         </div>
-                        <div className="text-base font-bold text-purple-950">
+                        <div className="text-base font-bold text-[#5E2232]">
                           {mainPackage.waBlastQuota.toLocaleString('id-ID')} Pesan
                         </div>
                       </div>
@@ -512,6 +529,47 @@ export default function ServiceCheckout() {
             </div>
           )}
 
+          {/* Target Event Selector for Renewal / Active Period Top-Up */}
+          {accessibleEvents.length > 0 && (
+            <div className={`rounded-2xl shadow-xs border p-5 sm:p-6 space-y-3 ${targetEventId ? 'bg-rose-50/40 border-rose-200' : 'bg-white border-slate-200/90'}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#8C3A50] block">
+                    Perpanjangan Masa Aktif Acara
+                  </span>
+                  <h2 className="text-base font-bold text-slate-900 mt-0.5">
+                    Terapkan Top-Up ke Acara Tertentu (Opsional)
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Jika dipilih, saat pembayaran dikonfirmasi, masa aktif acara tersebut akan otomatis diperpanjang dan statusnya kembali menjadi <strong>Published</strong>.
+                  </p>
+                </div>
+              </div>
+
+              <select
+                value={targetEventId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setTargetEventId(val);
+                  setRenewEventId(val || null);
+                }}
+                className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs sm:text-sm text-slate-900 focus:border-[#8C3A50] focus:ring-[#8C3A50]"
+              >
+                <option value="">-- Tidak ditautkan ke acara spesifik (tambah ke kuota akun saja) --</option>
+                {accessibleEvents.map((ev) => {
+                  const expired = isEventExpired(ev);
+                  const expiryDate = resolveEventActiveUntil(ev);
+                  const dateLabel = expiryDate ? expiryDate.toLocaleDateString('id-ID') : '-';
+                  return (
+                    <option key={ev.id} value={ev.id}>
+                      {ev.title} — [{expired ? 'Kedaluwarsa / Draft' : ev.status === 'draft' ? 'Draft' : 'Published'} • Aktif s/d {dateLabel}]
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
+
           {/* Kartu 2: Add-on Terpilih & Selector Add-on Baru */}
           <div className="bg-white rounded-2xl shadow-xs border border-slate-200/90 p-5 sm:p-6 space-y-5">
             <div className="flex items-center justify-between">
@@ -521,7 +579,7 @@ export default function ServiceCheckout() {
                   Tambahkan kuota ekstra (tamu, blast, masa aktif) dalam satu invoice sekaligus.
                 </p>
               </div>
-              <span className="text-xs font-bold font-mono px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+              <span className="text-xs font-bold font-mono px-2.5 py-1 rounded-full bg-rose-50 text-[#8C3A50] border border-rose-200">
                 {addons.length} Add-on Terpilih
               </span>
             </div>
@@ -536,21 +594,21 @@ export default function ServiceCheckout() {
                   {addons.map((item) => (
                     <div
                       key={item.service.id}
-                      className="p-3.5 rounded-xl border border-purple-200/90 bg-purple-50/40 flex items-center justify-between gap-3"
+                      className="p-3.5 rounded-xl border border-rose-200/90 bg-rose-50/40 flex items-center justify-between gap-3"
                     >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-bold text-slate-900 truncate">
                             {item.service.name}
                           </span>
-                          <span className="text-[10px] font-bold px-2 py-0.5 bg-purple-100 text-purple-800 rounded-md">
+                          <span className="text-[10px] font-bold px-2 py-0.5 bg-rose-100 text-[#8C3A50] rounded-md">
                             Add-on
                           </span>
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">
                           {item.service.description}
                         </p>
-                        <div className="flex items-center gap-2 mt-1 text-[11px] text-purple-900">
+                        <div className="flex items-center gap-2 mt-1 text-[11px] text-[#722B3E]">
                           {item.service.guestQuota ? (
                             <span>+{item.service.guestQuota * item.quantity} Tamu</span>
                           ) : null}
@@ -568,17 +626,17 @@ export default function ServiceCheckout() {
                         <button
                           type="button"
                           onClick={() => updateAddonQuantity(item.service.id!, item.quantity - 1)}
-                          className="w-7 h-7 bg-white rounded-lg border border-purple-200 text-purple-700 hover:bg-purple-100 flex items-center justify-center text-sm font-bold cursor-pointer"
+                          className="w-7 h-7 bg-white rounded-lg border border-rose-200 text-[#8C3A50] hover:bg-rose-100 flex items-center justify-center text-sm font-bold cursor-pointer"
                         >
                           -
                         </button>
-                        <span className="text-xs font-bold font-mono text-purple-950 w-6 text-center">
+                        <span className="text-xs font-bold font-mono text-slate-900 w-6 text-center">
                           {item.quantity}
                         </span>
                         <button
                           type="button"
                           onClick={() => updateAddonQuantity(item.service.id!, item.quantity + 1)}
-                          className="w-7 h-7 bg-white rounded-lg border border-purple-200 text-purple-700 hover:bg-purple-100 flex items-center justify-center text-sm font-bold cursor-pointer"
+                          className="w-7 h-7 bg-white rounded-lg border border-rose-200 text-[#8C3A50] hover:bg-rose-100 flex items-center justify-center text-sm font-bold cursor-pointer"
                         >
                           +
                         </button>
@@ -586,7 +644,7 @@ export default function ServiceCheckout() {
 
                       {/* Price & Delete */}
                       <div className="text-right min-w-[90px]">
-                        <span className="text-sm font-bold font-mono text-purple-950 block">
+                        <span className="text-sm font-bold font-mono text-slate-900 block">
                           Rp {(item.service.price * item.quantity).toLocaleString('id-ID')}
                         </span>
                         <button
@@ -623,7 +681,7 @@ export default function ServiceCheckout() {
                         key={addon.id}
                         className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between ${
                           inCart
-                            ? 'border-purple-300 bg-purple-50/20'
+                            ? 'border-rose-300 bg-rose-50/30'
                             : 'border-slate-200 bg-slate-50/50 hover:bg-white hover:border-slate-300'
                         }`}
                       >
@@ -642,7 +700,7 @@ export default function ServiceCheckout() {
                               </span>
                             ) : null}
                             {addon.waBlastQuota ? (
-                              <span className="bg-purple-50 text-purple-800 px-1.5 py-0.5 rounded border border-purple-200/60">
+                              <span className="bg-rose-50 text-[#8C3A50] px-1.5 py-0.5 rounded border border-rose-200/60">
                                 +{addon.waBlastQuota.toLocaleString('id-ID')} Blast
                               </span>
                             ) : null}
@@ -667,7 +725,7 @@ export default function ServiceCheckout() {
                             <button
                               type="button"
                               onClick={() => addAddon(addon)}
-                              className="px-3 py-1 rounded-lg text-[11px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 transition-colors flex items-center gap-1 cursor-pointer"
+                              className="px-3 py-1 rounded-lg text-[11px] font-semibold text-[#8C3A50] bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors flex items-center gap-1 cursor-pointer"
                             >
                               <Plus className="w-3 h-3" />
                               <span>Tambah Add-on</span>
@@ -894,9 +952,9 @@ export default function ServiceCheckout() {
                     <span className="font-semibold text-slate-900 block">
                       {item.service.name} {item.quantity > 1 ? `(x${item.quantity})` : ''}
                     </span>
-                    <span className="text-[11px] text-purple-600">Add-on Tambahan</span>
+                    <span className="text-[11px] text-[#8C3A50]">Add-on Tambahan</span>
                   </div>
-                  <span className="font-mono font-semibold text-purple-900 shrink-0">
+                  <span className="font-mono font-semibold text-slate-900 shrink-0">
                     Rp {(item.service.price * item.quantity).toLocaleString('id-ID')}
                   </span>
                 </div>
@@ -926,7 +984,7 @@ export default function ServiceCheckout() {
                 {totalWaBlastQuota > 0 && (
                   <div className="flex justify-between">
                     <span className="text-slate-500">Kuota WA Blast:</span>
-                    <span className="font-bold text-purple-700 font-mono">
+                    <span className="font-bold text-[#8C3A50] font-mono">
                       {totalWaBlastQuota.toLocaleString('id-ID')} Pesan
                     </span>
                   </div>

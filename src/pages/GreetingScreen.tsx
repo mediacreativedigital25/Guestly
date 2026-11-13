@@ -4,9 +4,9 @@ import { supabaseDb } from '../lib/supabaseDb';
 import { EventRecord, Guest, GreetingScreenTemplate } from '../types';
 import { useSettings } from '../SettingsContext';
 import { useAuth } from '../AuthContext';
-import { isGreetingScreenUser } from '../lib/utils';
+import { isGreetingScreenUser, isEventExpired, isEventInactiveOrExpired, shouldHideServiceInfo } from '../lib/utils';
 import { showConfirm } from '../lib/alerts';
-import { Maximize2, Minimize2, Sparkles, Clock, LogOut } from 'lucide-react';
+import { Maximize2, Minimize2, Sparkles, Clock, LogOut, Lock, CreditCard } from 'lucide-react';
 import { offlineSyncService } from '../services/offlineSyncService';
 import {
   greetingTemplateService,
@@ -213,6 +213,62 @@ export default function GreetingScreen() {
         />
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-rose-500"></div>
         <p className="text-slate-600 font-medium">Memuat Layar Sapa Guestly...</p>
+      </div>
+    );
+  }
+
+  if (isEventInactiveOrExpired(eventData)) {
+    const expired = isEventExpired(eventData);
+    return (
+      <div className="min-h-screen bg-[#FAF5F0] flex flex-col items-center justify-center p-6 text-center">
+        <div className="max-w-lg w-full bg-white rounded-3xl shadow-xl border border-rose-200/80 p-8 space-y-5">
+          <div className="w-16 h-16 rounded-2xl bg-rose-50 text-[#8C3A50] border border-rose-200 flex items-center justify-center mx-auto">
+            <Lock className="w-8 h-8" />
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-xs font-bold uppercase tracking-widest text-[#8C3A50]">
+              {expired ? 'Masa Aktif Berakhir (Draft)' : 'Status Acara: Draft'}
+            </p>
+            <h1 className="text-2xl font-bold text-slate-900">
+              Layar Sapa Dikunci Sementara
+            </h1>
+            <p className="text-sm font-semibold text-slate-700">{eventData.title}</p>
+          </div>
+          <p className="text-sm text-slate-600 leading-relaxed">
+            {expired
+              ? 'Masa aktif 30 hari acara ini telah habis dan otomatis berubah menjadi Draft. Perpanjang paket acara melalui dashboard agar Layar Sapa TV kembali aktif.'
+              : 'Layar Sapa TV hanya aktif saat acara berstatus Published. Silakan aktifkan status acara atau lakukan perpanjangan paket di dashboard.'}
+          </p>
+          {appUser && (
+            <div className="pt-2 flex flex-wrap items-center justify-center gap-2.5">
+              {!isGreetingScreenUser(appUser) && !shouldHideServiceInfo(appUser) && eventId && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/auth/login/services/catalog?renewEvent=${eventId}`)}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-xs font-bold shadow-xs cursor-pointer"
+                >
+                  <CreditCard className="w-4 h-4" />
+                  <span>Top-Up Paket / Perpanjang</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={async () => {
+                  const confirmed = await showConfirm(
+                    'Keluar dari Akun Layar Sapa?',
+                    `Anda akan keluar dari sesi ${appUser.name || appUser.email} dan kembali ke halaman login.`
+                  );
+                  if (!confirmed) return;
+                  logout();
+                }}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Keluar Akun</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     );
   }

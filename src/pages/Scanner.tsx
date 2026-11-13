@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Html5QrcodeScanner } from 'html5-qrcode';
-import { doc, serverTimestamp, collection, query, where, getDocs, limit, runTransaction, onSnapshot, orderBy, updateDoc } from 'firebase/firestore';
+import { doc, serverTimestamp, collection, query, where, getDocs, getDoc, limit, runTransaction, onSnapshot, orderBy, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { supabaseDb } from '../lib/supabaseDb';
-import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel } from '../lib/utils';
+import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel, isEventExpired, isEventInactiveOrExpired, shouldHideServiceInfo } from '../lib/utils';
 import { useAuth } from '../AuthContext';
-import { Guest, SouvenirItem, SouvenirLog } from '../types';
+import { Guest, SouvenirItem, SouvenirLog, EventRecord } from '../types';
 import { 
   CheckCircle, 
   AlertCircle, 
@@ -45,7 +45,9 @@ import {
   ChevronUp,
   QrCode,
   Edit3,
-  X
+  X,
+  Lock,
+  CreditCard
 } from 'lucide-react';
 import ScannerStressTestModal from '../components/ScannerStressTestModal';
 import { souvenirStorage } from '../services/souvenirStorage';
@@ -208,6 +210,7 @@ export default function Scanner() {
   const [isManualCheckingInId, setIsManualCheckingInId] = useState<string | null>(null);
   
   // Real-time tracking & Data lists
+  const [eventData, setEventData] = useState<EventRecord | null>(null);
   const [recentScans, setRecentScans] = useState<Guest[]>([]);
   const [allGuests, setAllGuests] = useState<Guest[]>([]);
   const [souvenirLogs, setSouvenirLogs] = useState<SouvenirLog[]>([]);
@@ -611,6 +614,26 @@ export default function Scanner() {
   // Subscribe to real-time check-ins, souvenirs, and lightweight delta sync
   useEffect(() => {
     if (!eventId) return;
+
+    const cachedEv = offlineSyncService.getEventSnapshot(eventId);
+    if (cachedEv?.event) {
+      setEventData(cachedEv.event);
+    }
+
+    supabaseDb.getEvent(eventId).then((ev) => {
+      if (ev) {
+        setEventData(ev);
+        offlineSyncService.saveEventSnapshot(eventId, ev);
+      } else {
+        getDoc(doc(db, 'events', eventId)).then((snap) => {
+          if (snap.exists()) {
+            const evDoc = { id: snap.id, ...snap.data() } as EventRecord;
+            setEventData(evDoc);
+            offlineSyncService.saveEventSnapshot(eventId, evDoc);
+          }
+        }).catch(() => {});
+      }
+    }).catch(() => {});
 
     // Initial full load (1x on mount)
     loadAllGuests();
@@ -1513,8 +1536,8 @@ export default function Scanner() {
   useEffect(() => {
     let scanner: Html5QrcodeScanner | null = null;
     let isStarted = false;
-    
-    if (scanMode === 'camera') {
+
+    if (scanMode === 'camera' && !isEventInactiveOrExpired(eventData)) {
       const initScanner = () => {
         scanner = new Html5QrcodeScanner(
           "reader",
@@ -1544,7 +1567,7 @@ export default function Scanner() {
         }
       };
     }
-  }, [eventId, scanMode, stationMode, selectedSouvenirId]);
+  }, [eventId, scanMode, stationMode, selectedSouvenirId, eventData?.status, eventData?.activeUntil, eventData?.subscriptionStatus]);
 
   const handleManualGuestCheckIn = async (guest: Guest) => {
     if (isProcessingRef.current || isManualCheckingInId) return;
@@ -1659,6 +1682,49 @@ export default function Scanner() {
         >
           <ArrowLeft className="w-4 h-4" /> Kembali ke Daftar Acara
         </Link>
+      </div>
+    );
+  }
+
+  if (eventData && isEventInactiveOrExpired(eventData)) {
+    const expired = isEventExpired(eventData);
+    return (
+      <div className="max-w-lg mx-auto mt-12 bg-white p-8 rounded-2xl shadow-sm border border-rose-200 text-center space-y-4">
+        <div className="w-14 h-14 bg-rose-50 text-[#8C3A50] rounded-2xl border border-rose-200 flex items-center justify-center mx-auto">
+          <Lock className="w-7 h-7" />
+        </div>
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-[#8C3A50]">
+            {expired ? 'Masa Aktif Acara Berakhir' : 'Acara Berstatus Draft'}
+          </p>
+          <h2 className="text-xl font-bold text-slate-900 mt-1">
+            QR Scanner &amp; Check-In Dikunci
+          </h2>
+          <p className="text-sm font-medium text-slate-700 mt-1">{eventData.title}</p>
+        </div>
+        <p className="text-sm text-slate-600 leading-relaxed">
+          {expired
+            ? 'Masa aktif 30 hari acara ini telah habis dan otomatis berubah menjadi Draft. Silakan perpanjang paket terlebih dahulu agar sistem Scanner kembali aktif.'
+            : 'Scanner kehadiran dan penukaran souvenir hanya dapat digunakan ketika status acara Published.'}
+        </p>
+        <div className="pt-2 flex flex-wrap items-center justify-center gap-2.5">
+          <Link
+            to={appUser?.role === 'staff' ? '/auth/login/events' : `/auth/login/events/${eventId}`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-sm font-semibold transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>{appUser?.role === 'staff' ? 'Kembali ke Daftar Acara' : 'Kembali ke Detail Acara'}</span>
+          </Link>
+          {appUser?.role !== 'staff' && !shouldHideServiceInfo(appUser) && (
+            <Link
+              to={`/auth/login/services/catalog?renewEvent=${eventId}`}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#8C3A50] hover:bg-[#722B3E] text-white text-sm font-bold shadow-xs transition-colors"
+            >
+              <CreditCard className="w-4 h-4" />
+              <span>Top-Up Paket</span>
+            </Link>
+          )}
+        </div>
       </div>
     );
   }
@@ -3250,24 +3316,24 @@ export default function Scanner() {
       {/* Dedicated High-Priority Alert Popup for VIP & VVIP Guests - Styled with Guestly Signature Theme */}
       {vipModal && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#5B4B63]/45 backdrop-blur-sm animate-in fade-in duration-200"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/55 backdrop-blur-sm animate-in fade-in duration-200"
           onClick={() => {
             setVipModal(null);
             inputRef.current?.focus();
           }}
         >
           <div 
-            className={`relative w-full max-w-md rounded-2xl sm:rounded-3xl p-6 sm:p-7 text-center border transition-all duration-200 transform scale-100 shadow-[0_20px_50px_-12px_rgba(91,75,99,0.22),0_4px_16px_-4px_rgba(201,143,157,0.15)] bg-white ${
+            className={`relative w-full max-w-md rounded-2xl sm:rounded-3xl p-6 sm:p-7 text-center border transition-all duration-200 transform scale-100 shadow-2xl bg-white ${
               vipModal.isVvip 
-                ? 'border-[#F3C68F] ring-4 ring-[#FDE68A]/35 bg-gradient-to-b from-[#FFFDF9] via-white to-white' 
-                : 'border-[#D8C7F3] ring-4 ring-[#D8C7F3]/35 bg-gradient-to-b from-[#FAF8FB] via-white to-white'
+                ? 'border-amber-300 ring-4 ring-amber-200/40 bg-gradient-to-b from-amber-50/40 via-white to-white' 
+                : 'border-rose-200 ring-4 ring-rose-100/60 bg-gradient-to-b from-rose-50/40 via-white to-white'
             }`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Guestly Brand Header & Close Button */}
-            <div className="flex items-center justify-between pb-3 mb-4 border-b border-[#f2eef5]">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#f5eff5] border border-[#D8C7F3]/70 text-[#C98F9D] text-[11px] font-bold tracking-wider uppercase">
-                <Sparkles className="w-3.5 h-3.5 text-[#C98F9D]" />
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-50 border border-rose-200 text-[#8C3A50] text-[11px] font-bold tracking-wider uppercase">
+                <Sparkles className="w-3.5 h-3.5 text-[#8C3A50]" />
                 <span>Guestly • Priority Access</span>
               </div>
               <button
@@ -3275,7 +3341,7 @@ export default function Scanner() {
                   setVipModal(null);
                   inputRef.current?.focus();
                 }}
-                className="p-1.5 rounded-full text-[#74638a] hover:text-[#5B4B63] hover:bg-[#f5eff5] transition-colors cursor-pointer"
+                className="p-1.5 rounded-full text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
                 title="Tutup (Esc)"
               >
                 <X className="w-5 h-5" />
@@ -3286,8 +3352,8 @@ export default function Scanner() {
             <div className="flex justify-center mb-3">
               <div className={`w-18 h-18 sm:w-20 sm:h-20 rounded-full flex items-center justify-center relative shadow-lg ${
                 vipModal.isVvip 
-                  ? 'bg-gradient-to-tr from-[#C98F9D] via-[#E5A87D] to-[#F5D061] text-white shadow-[#E5A87D]/35 ring-4 ring-[#FDE68A]/40' 
-                  : 'bg-gradient-to-tr from-[#C98F9D] via-[#E7B8C4] to-[#D8C7F3] text-white shadow-[#C98F9D]/35 ring-4 ring-[#D8C7F3]/50'
+                  ? 'bg-gradient-to-tr from-[#8C3A50] via-amber-500 to-amber-300 text-white shadow-amber-500/25 ring-4 ring-amber-200/50' 
+                  : 'bg-gradient-to-tr from-[#722B3E] via-[#8C3A50] to-[#C25972] text-white shadow-[#8C3A50]/30 ring-4 ring-rose-200/60'
               }`}>
                 {vipModal.isVvip ? (
                   <Crown className="w-9 h-9 sm:w-10 sm:h-10 animate-pulse text-white drop-shadow-md" />
@@ -3295,8 +3361,8 @@ export default function Scanner() {
                   <Star className="w-9 h-9 sm:w-10 sm:h-10 animate-pulse text-white drop-shadow-md" />
                 )}
                 <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#C98F9D] opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-[#C98F9D]"></span>
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#8C3A50] opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-[#8C3A50]"></span>
                 </span>
               </div>
             </div>
@@ -3305,74 +3371,74 @@ export default function Scanner() {
             <div className="mb-2">
               <span className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider shadow-2xs ${
                 vipModal.isVvip 
-                  ? 'bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]' 
-                  : 'bg-[#f5eff5] text-[#C98F9D] border border-[#D8C7F3]'
+                  ? 'bg-amber-100 text-amber-900 border border-amber-300' 
+                  : 'bg-rose-50 text-[#8C3A50] border border-rose-200'
               }`}>
                 {vipModal.isVvip ? '👑 TAMU KEHORMATAN VVIP' : '⭐ TAMU KEHORMATAN VIP'}
               </span>
             </div>
 
             {/* Guest Name */}
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-[#5B4B63] tracking-tight mt-2 mb-1 break-words">
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight mt-2 mb-1 break-words">
               {vipModal.name}
             </h2>
 
             {/* Specific Category if detailed */}
             {vipModal.category && (
-              <p className="text-xs font-medium text-[#74638a] mb-3">
-                Kategori: <span className="font-bold text-[#5B4B63] bg-[#f5eff5] px-2 py-0.5 rounded-md border border-[#e6dfec]">{vipModal.category}</span>
+              <p className="text-xs font-medium text-slate-600 mb-3">
+                Kategori: <span className="font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">{vipModal.category}</span>
               </p>
             )}
 
             {/* Table & Pax Badges */}
             <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
               {vipModal.tableNumber && (
-                <div className="px-3 py-1.5 rounded-xl bg-[#FFF9F2] border border-[#FDE68A] text-[#92400E] font-bold text-xs sm:text-sm flex items-center gap-1.5 shadow-2xs">
+                <div className="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-bold text-xs sm:text-sm flex items-center gap-1.5 shadow-2xs">
                   <span>🪑</span>
-                  <span>Meja: <span className="font-extrabold text-[#78350F]">{vipModal.tableNumber}</span></span>
+                  <span>Meja: <span className="font-extrabold text-amber-950">{vipModal.tableNumber}</span></span>
                 </div>
               )}
               {vipModal.pax && (
-                <div className="px-3 py-1.5 rounded-xl bg-[#FAF8FB] border border-[#e6dfec] text-[#5B4B63] font-semibold text-xs sm:text-sm flex items-center gap-1.5 shadow-2xs">
-                  <Users className="w-3.5 h-3.5 text-[#C98F9D]" />
+                <div className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-800 font-semibold text-xs sm:text-sm flex items-center gap-1.5 shadow-2xs">
+                  <Users className="w-3.5 h-3.5 text-[#8C3A50]" />
                   <span>{vipModal.pax} Tamu</span>
                 </div>
               )}
               {vipModal.ticketCode && (
-                <div className="px-2.5 py-1.5 rounded-xl bg-[#f2eef5] border border-[#e6dfec] text-[#74638a] font-mono text-[11px] shadow-2xs">
+                <div className="px-2.5 py-1.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-600 font-mono text-[11px] shadow-2xs">
                   {vipModal.ticketCode}
                 </div>
               )}
             </div>
 
             {/* Field Crew Brief Guidance */}
-            <div className="p-3 rounded-xl bg-[#FAF8FB] border border-[#e6dfec] text-left mb-5">
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-left mb-5">
               <div className="flex items-center gap-2 mb-1">
-                <span className="w-5 h-5 rounded-full bg-[#f5eff5] text-[#C98F9D] flex items-center justify-center shrink-0">
+                <span className="w-5 h-5 rounded-full bg-rose-50 text-[#8C3A50] flex items-center justify-center shrink-0">
                   <Sparkles className="w-3 h-3" />
                 </span>
-                <p className="text-xs font-bold text-[#5B4B63]">Instruksi Khusus Petugas Front Gate & Usher</p>
+                <p className="text-xs font-bold text-slate-900">Instruksi Khusus Petugas Front Gate & Usher</p>
               </div>
-              <p className="text-[12px] text-[#74638a] leading-relaxed pl-7">
+              <p className="text-[12px] text-slate-600 leading-relaxed pl-7">
                 Sambut tamu dengan hormat & ramah. Berikan pendampingan langsung menuju meja atau area kehormatan.
               </p>
             </div>
 
-            {/* Acknowledge Button styled with Guestly Rose Gold */}
+            {/* Acknowledge Button styled with Guestly Burgundy */}
             <button
               onClick={() => {
                 setVipModal(null);
                 inputRef.current?.focus();
               }}
-              className="w-full py-3 px-5 rounded-xl font-bold text-sm text-white bg-[#C98F9D] hover:bg-[#b07080] border border-[#C98F9D] shadow-md shadow-[#C98F9D]/35 transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 active:scale-[0.98]"
+              className="w-full py-3 px-5 rounded-xl font-bold text-sm text-white bg-[#8C3A50] hover:bg-[#722B3E] border border-[#8C3A50] shadow-md shadow-[#8C3A50]/25 transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 active:scale-[0.98]"
             >
               <span>Mengerti & Lanjutkan Scan</span>
               <span className="text-xs font-medium bg-white/25 px-2 py-0.5 rounded-full font-mono text-white">
                 ({vipCountdown}s)
               </span>
             </button>
-            <p className="text-[11px] text-[#74638a] mt-2 font-medium">
-              Auto-close {vipCountdown} dtk • Tekan <kbd className="px-1.5 py-0.5 rounded bg-[#f2eef5] border border-[#e6dfec] font-mono text-[10px] text-[#5B4B63]">Enter</kbd> atau <kbd className="px-1.5 py-0.5 rounded bg-[#f2eef5] border border-[#e6dfec] font-mono text-[10px] text-[#5B4B63]">Esc</kbd> untuk lanjut
+            <p className="text-[11px] text-slate-500 mt-2 font-medium">
+              Auto-close {vipCountdown} dtk • Tekan <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 font-mono text-[10px] text-slate-800">Enter</kbd> atau <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 font-mono text-[10px] text-slate-800">Esc</kbd> untuk lanjut
             </p>
           </div>
         </div>

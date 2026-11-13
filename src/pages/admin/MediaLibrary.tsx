@@ -175,7 +175,7 @@ export default function MediaLibrary() {
         </div>
         <button 
           onClick={() => setIsUploadModalOpen(true)}
-          className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition-colors"
+          className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2.5 rounded-xl hover:bg-indigo-700 font-semibold text-sm shadow-xs transition-colors cursor-pointer"
         >
           <Upload size={18} />
           Upload Media

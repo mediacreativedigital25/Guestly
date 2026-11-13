@@ -15,7 +15,7 @@ import { supabaseDb } from '../lib/supabaseDb';
 import { Guest, EventRecord, EInviteTemplate } from '../types';
 import { useSettings } from '../SettingsContext';
 import { useAuth } from '../AuthContext';
-import { exportCardToPng, parseFirestoreDate, getMediaFallbackUrls } from '../lib/utils';
+import { exportCardToPng, parseFirestoreDate, getMediaFallbackUrls, isEventExpired, isEventInactiveOrExpired, shouldHideServiceInfo } from '../lib/utils';
 import { EInvitationCard } from '../components/EInvitationCard';
 import {
   eInviteTemplateService,
@@ -33,6 +33,8 @@ import {
   Send,
   Users,
   ArrowLeft,
+  Lock,
+  CreditCard,
 } from 'lucide-react';
 
 type InviteThemeKey = 'rose' | 'gold' | 'sage';
@@ -346,6 +348,7 @@ export default function RSVP() {
   const handleSubmitRSVPForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!guest?.id || !eventId) return;
+    if (isEventInactiveOrExpired(eventData)) return;
     setSubmitting(true);
     setSubmitSuccess(false);
 
@@ -422,6 +425,52 @@ export default function RSVP() {
           <p className="text-gray-500 mt-2 text-sm">
             Tautan E-Invitation tidak valid atau data tamu telah diperbarui.
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (eventData && isEventInactiveOrExpired(eventData)) {
+    const expired = isEventExpired(eventData);
+    return (
+      <div className="min-h-screen bg-[#F5EFEA] flex items-center justify-center px-4 font-sans text-center">
+        <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full border border-rose-200/70 space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-rose-50 text-[#8C3A50] flex items-center justify-center mx-auto border border-rose-200">
+            <Lock className="w-7 h-7" />
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-widest text-[#8C3A50]">
+              {expired ? 'Masa Aktif Layanan Berakhir' : 'Undangan Sedang Nonaktif'}
+            </p>
+            <h1 className="text-xl font-bold text-slate-900 mt-1">
+              {eventData.title || eventData.coupleName || 'E-Invitation & RSVP'}
+            </h1>
+          </div>
+          <p className="text-sm text-slate-600 leading-relaxed">
+            {expired
+              ? 'Masa aktif 30 hari buku tamu digital acara ini telah berakhir sehingga akses E-Invitation dan QR Kehadiran dikunci sementara.'
+              : 'Halaman E-Invitation & RSVP ini sedang dinonaktifkan sementara oleh penyelenggara (status Draft).'}
+          </p>
+          {appUser && eventId && (
+            <div className="pt-2 flex flex-wrap items-center justify-center gap-2">
+              <Link
+                to={`/auth/login/events/${eventId}`}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Kembali ke Acara</span>
+              </Link>
+              {!shouldHideServiceInfo(appUser) && (
+                <Link
+                  to={`/auth/login/services/catalog?renewEvent=${eventId}`}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-xs font-bold shadow-xs"
+                >
+                  <CreditCard className="w-3.5 h-3.5" />
+                  <span>Top-Up Paket</span>
+                </Link>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );

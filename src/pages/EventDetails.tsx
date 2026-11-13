@@ -1,12 +1,12 @@
 import { useParams, Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { QrCode, Printer, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code, MessageCircle, RefreshCcw, Users, Loader2, Gift, ArrowUpDown, AlertCircle, ArrowLeft, Image as ImageIcon, Calendar, MapPin, Clock, ChevronDown, ChevronUp, MoreHorizontal, X, Check, ChevronRight } from 'lucide-react';
+import { QrCode, Printer, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code, MessageCircle, RefreshCcw, Users, Loader2, Gift, ArrowUpDown, AlertCircle, ArrowLeft, Image as ImageIcon, Calendar, MapPin, Clock, ChevronDown, ChevronUp, MoreHorizontal, X, Check, ChevronRight, Send, Lock, CreditCard } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'react-qr-code';
 import { collection, query, getDocs, addDoc, serverTimestamp, doc, getDoc, deleteDoc, updateDoc, deleteField, onSnapshot, writeBatch } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { supabaseDb } from '../lib/supabaseDb';
 import { Guest, EventRecord, WATemplate, EInviteTemplate } from '../types';
-import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel, exportCardToPng, resolveMediaUrl, getGuestBaseName, formatGuestFullName } from '../lib/utils';
+import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel, exportCardToPng, resolveMediaUrl, getGuestBaseName, formatGuestFullName, isEventExpired, isEventInactiveOrExpired, getDaysRemaining, resolveEventActiveUntil, computeDefaultActiveUntil, DEFAULT_EVENT_ACTIVE_DAYS, shouldHideServiceInfo } from '../lib/utils';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -230,7 +230,37 @@ export default function EventDetails() {
         // Listen to event details
         unsubscribeEvent = onSnapshot(doc(db, 'events', eventId), async (eventDoc) => {
           if (eventDoc.exists()) {
-            const eventData = { id: eventDoc.id, ...eventDoc.data() } as EventRecord;
+            let eventData = { id: eventDoc.id, ...eventDoc.data() } as EventRecord;
+            const resolvedActive = !eventData.activeUntil && eventData.createdAt
+              ? computeDefaultActiveUntil(eventData.createdAt, eventData.activeDays || DEFAULT_EVENT_ACTIVE_DAYS)
+              : eventData.activeUntil;
+            if (eventData.status === 'published' && isEventExpired(eventData)) {
+              const expiryUpdate: any = {
+                status: 'draft',
+                subscriptionStatus: 'expired',
+                activeDays: eventData.activeDays || DEFAULT_EVENT_ACTIVE_DAYS,
+                ...(resolvedActive ? { activeUntil: resolvedActive } : {}),
+                updatedAt: serverTimestamp(),
+              };
+              eventData = {
+                ...eventData,
+                status: 'draft',
+                subscriptionStatus: 'expired',
+                activeDays: eventData.activeDays || DEFAULT_EVENT_ACTIVE_DAYS,
+                ...(resolvedActive ? { activeUntil: resolvedActive } : {}),
+              };
+              updateDoc(doc(db, 'events', eventId), expiryUpdate).catch(() => {});
+            } else if (!eventData.activeUntil && resolvedActive) {
+              eventData = {
+                ...eventData,
+                activeUntil: resolvedActive,
+                activeDays: eventData.activeDays || DEFAULT_EVENT_ACTIVE_DAYS,
+              };
+              updateDoc(doc(db, 'events', eventId), {
+                activeUntil: resolvedActive,
+                activeDays: eventData.activeDays || DEFAULT_EVENT_ACTIVE_DAYS,
+              }).catch(() => {});
+            }
             setEvent(eventData);
             if (eventData.clientId) {
               try {
@@ -380,9 +410,6 @@ export default function EventDetails() {
       showAlert('Kuota Habis', `Anda telah mencapai batas maksimal kuota tamu (${appUser.guestQuota} tamu). Silakan beli atau upgrade layanan Anda.`, 'warning');
       return;
     }
-
-    const confirmed = await showConfirm("Apakah Anda yakin ingin menambahkan tamu ini?");
-    if (!confirmed) return;
     
     const cleanedGuestTitle = newGuestTitle.trim();
     const cleanedBaseName = newGuestName.trim();
@@ -650,16 +677,38 @@ export default function EventDetails() {
 
   const handleStatusChange = async (newStatus: string) => {
     if (!eventId || !event) return;
-    
+
+    if (newStatus === 'published' && isEventExpired(event)) {
+      if (appUser?.role === 'superadmin') {
+        showAlert(
+          'Masa Aktif Berakhir',
+          'Masa aktif acara ini telah habis. Silakan perpanjang melalui Top-Up Paket atau ubah tanggal Masa Aktif Acara di menu Edit Events terlebih dahulu.',
+          'warning'
+        );
+      } else {
+        showAlert(
+          'Masa Aktif Berakhir',
+          'Acara ini sudah melewati masa aktif 30 hari dan otomatis menjadi Draft. Silakan Top-Up Paket terlebih dahulu untuk mengaktifkan kembali acara ini.',
+          'warning'
+        );
+      }
+      return;
+    }
+
     const confirmed = await showConfirm(`Apakah Anda yakin ingin mengubah status acara menjadi ${newStatus}?`);
     if (!confirmed) return;
-    
+
     try {
+      const extraUpdates =
+        newStatus === 'published' && !isEventExpired(event)
+          ? { subscriptionStatus: 'active' }
+          : {};
       await updateDoc(doc(db, 'events', eventId), {
         status: newStatus,
+        ...extraUpdates,
         updatedAt: serverTimestamp()
       });
-      setEvent({ ...event, status: newStatus as any });
+      setEvent({ ...event, status: newStatus as any, ...(extraUpdates as any) });
       showAlert("Berhasil", "Status acara berhasil diubah!", "success");
     } catch (error) {
       showAlert("Gagal", "Gagal mengubah status acara", "error");
@@ -1639,8 +1688,77 @@ export default function EventDetails() {
     );
   }
 
+  const eventExpired = isEventExpired(event);
+  const eventInactive = isEventInactiveOrExpired(event);
+  const resolvedActiveDate = event ? resolveEventActiveUntil(event) : null;
+  const daysLeft = event ? getDaysRemaining(event) : 0;
+  const hideServiceCatalog = shouldHideServiceInfo(appUser);
+
   return (
     <div className="space-y-6">
+      {/* Expiry & Draft Lock Warning Banner */}
+      {event && eventInactive && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50/90 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-rose-100 text-[#8C3A50] flex items-center justify-center shrink-0 mt-0.5">
+              <Lock className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-[#6E293C]">
+                {eventExpired
+                  ? 'Masa Aktif Acara Berakhir — Status Otomatis Draft'
+                  : 'Acara Berstatus Draft — Fasilitas Publik Dikunci'}
+              </h3>
+              <p className="text-xs text-rose-800/90 mt-0.5 leading-relaxed">
+                {eventExpired
+                  ? 'Masa aktif 30 hari acara ini telah habis. Data tamu, RSVP, dan laporan tetap aman di dashboard, namun Form RSVP Publik, E-Invitation, QR Scanner, dan Layar Sapa dikunci sementara hingga masa aktif diperpanjang.'
+                  : 'Saat ini Form RSVP Publik, E-Invitation, QR Scanner, dan Layar Sapa dinonaktifkan sementara. Ubah status menjadi Published atau perpanjang paket untuk membuka akses kembali.'}
+              </p>
+            </div>
+          </div>
+
+          {!isStaff && (
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {!hideServiceCatalog ? (
+                <Link
+                  to={`/auth/login/services/catalog?renewEvent=${eventId}`}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#8C3A50] hover:bg-[#722B3E] text-white text-xs font-bold shadow-xs transition-colors"
+                >
+                  <CreditCard className="w-4 h-4" />
+                  <span>Top-Up Paket / Perpanjang</span>
+                </Link>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-rose-200 text-xs font-semibold text-[#8C3A50]">
+                  Hubungi Partner/Admin untuk perpanjangan
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* H-7 Active Period Reminder Banner */}
+      {event && !eventInactive && daysLeft > 0 && daysLeft <= 7 && !isStaff && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 text-amber-900">
+            <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+            <p className="text-xs font-medium">
+              Masa aktif acara tersisa <strong>{daysLeft} hari</strong>{' '}
+              {resolvedActiveDate ? `(berakhir ${format(resolvedActiveDate, 'dd MMM yyyy')})` : ''}. Setelah habis, status otomatis berubah menjadi <strong>Draft</strong>.
+            </p>
+          </div>
+          {!hideServiceCatalog && (
+            <Link
+              to={`/auth/login/services/catalog?renewEvent=${eventId}`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shrink-0 transition-colors"
+            >
+              <CreditCard className="w-3.5 h-3.5" />
+              <span>Perpanjang Masa Aktif</span>
+            </Link>
+          )}
+        </div>
+      )}
+
       {/* Streamlined Modern Event Hero Card */}
       <div className="bg-white rounded-xl shadow-2xs border border-slate-200">
         <div className="p-4 sm:p-5">
@@ -1749,14 +1867,15 @@ export default function EventDetails() {
                     </>
                   )}
 
-                  {event?.activeUntil && parseFirestoreDate(event.activeUntil) && (
+                  {resolvedActiveDate && (
                     <>
                       <span className="text-slate-300 hidden md:inline">•</span>
-                      <div className="flex items-center gap-1 text-slate-500 text-[11px]">
-                        <Clock className="w-3 h-3 text-slate-400 shrink-0" />
+                      <div className={`flex items-center gap-1 text-[11px] font-medium ${eventExpired ? 'text-rose-600 font-semibold' : daysLeft <= 7 ? 'text-amber-600 font-semibold' : 'text-slate-500'}`}>
+                        <Clock className="w-3 h-3 shrink-0" />
                         <span>
-                          Aktif s/d{' '}
-                          {format(parseFirestoreDate(event.activeUntil)!, 'dd MMM yyyy')}
+                          {eventExpired ? 'Kedaluwarsa sejak ' : 'Aktif s/d '}
+                          {format(resolvedActiveDate, 'dd MMM yyyy')}
+                          {!eventExpired && ` (${daysLeft} hr lagi)`}
                         </span>
                       </div>
                     </>
@@ -1813,51 +1932,77 @@ export default function EventDetails() {
 
             {/* Right Column: Main Actions Bar */}
             <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-start lg:justify-end shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100">
-              {/* Primary Action Button: Buka Scanner */}
-              <Link
-                to={
-                  isStaffSouvenirOnly
-                    ? `/auth/login/events/${eventId}/scan?mode=souvenir`
-                    : isStaffCheckinOnly
-                    ? `/auth/login/events/${eventId}/scan?mode=checkin`
-                    : `/auth/login/events/${eventId}/scan`
-                }
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs sm:text-sm shadow-xs transition-colors"
-                title="Buka sistem scanner QR tiket & POS penukaran souvenir"
-              >
-                <ScanLine className="w-4 h-4" />
-                <span>
-                  {isStaffSouvenirOnly
-                    ? 'Scanner Souvenir'
-                    : isStaffCheckinOnly
-                    ? 'Scanner Kehadiran'
-                    : 'Buka Scanner'}
-                </span>
-              </Link>
+              {eventInactive ? (
+                <>
+                  <button
+                    type="button"
+                    disabled
+                    className="flex items-center gap-2 px-3.5 py-2 bg-slate-100 text-slate-400 border border-slate-200 rounded-lg font-semibold text-xs sm:text-sm cursor-not-allowed"
+                    title="Scanner dikunci saat acara berstatus Draft atau Masa Aktif berakhir"
+                  >
+                    <Lock className="w-4 h-4" />
+                    <span>Scanner Terkunci</span>
+                  </button>
+                  {!isStaff && !hideServiceCatalog && (
+                    <Link
+                      to={`/auth/login/services/catalog?renewEvent=${eventId}`}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-[#8C3A50] hover:bg-[#722B3E] text-white rounded-lg font-bold text-xs sm:text-sm shadow-xs transition-colors"
+                      title="Perpanjang masa aktif acara melalui Katalog Paket & Add-on"
+                    >
+                      <CreditCard className="w-4 h-4" />
+                      <span>Top-Up Paket</span>
+                    </Link>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* Primary Action Button: Buka Scanner */}
+                  <Link
+                    to={
+                      isStaffSouvenirOnly
+                        ? `/auth/login/events/${eventId}/scan?mode=souvenir`
+                        : isStaffCheckinOnly
+                        ? `/auth/login/events/${eventId}/scan?mode=checkin`
+                        : `/auth/login/events/${eventId}/scan`
+                    }
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs sm:text-sm shadow-xs transition-colors"
+                    title="Buka sistem scanner QR tiket & POS penukaran souvenir"
+                  >
+                    <ScanLine className="w-4 h-4" />
+                    <span>
+                      {isStaffSouvenirOnly
+                        ? 'Scanner Souvenir'
+                        : isStaffCheckinOnly
+                        ? 'Scanner Kehadiran'
+                        : 'Buka Scanner'}
+                    </span>
+                  </Link>
 
-              {/* E-Invitation & RSVP View */}
-              {!isStaff && guests.length > 0 && (
-                <Link
-                  to={`/rsvp/${eventId}/${guests[0].ticketCode}`}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold text-xs sm:text-sm transition-colors shadow-2xs"
-                  title="Lihat tampilan Kartu E-Invitation + Form RSVP & Ucapan Tamu"
-                >
-                  <QrCode className="w-4 h-4" />
-                  <span>E-Invitation</span>
-                </Link>
-              )}
+                  {/* E-Invitation & RSVP View */}
+                  {!isStaff && guests.length > 0 && (
+                    <Link
+                      to={`/rsvp/${eventId}/${guests[0].ticketCode}`}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold text-xs sm:text-sm transition-colors shadow-2xs"
+                      title="Lihat tampilan Kartu E-Invitation + Form RSVP & Ucapan Tamu"
+                    >
+                      <QrCode className="w-4 h-4" />
+                      <span>E-Invitation</span>
+                    </Link>
+                  )}
 
-              {/* Layar Sapa TV */}
-              {!isStaffSouvenirOnly && (
-                <Link
-                  to={`/events/${eventId}/greeting`}
-                  target="_blank"
-                  className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-medium text-xs sm:text-sm transition-colors shadow-2xs"
-                  title="Buka Layar Sapa Tamu untuk TV/Monitor"
-                >
-                  <Monitor className="w-4 h-4 text-indigo-600" />
-                  <span>Layar Sapa</span>
-                </Link>
+                  {/* Layar Sapa TV */}
+                  {!isStaffSouvenirOnly && (
+                    <Link
+                      to={`/events/${eventId}/greeting`}
+                      target="_blank"
+                      className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-medium text-xs sm:text-sm transition-colors shadow-2xs"
+                      title="Buka Layar Sapa Tamu untuk TV/Monitor"
+                    >
+                      <Monitor className="w-4 h-4 text-indigo-600" />
+                      <span>Layar Sapa</span>
+                    </Link>
+                  )}
+                </>
               )}
 
               {/* Options Dropdown Menu for Secondary Actions */}
@@ -1901,6 +2046,17 @@ export default function EventDetails() {
                           <FileText className="w-4 h-4 text-pink-500" />
                           <span>Form RSVP Publik</span>
                         </Link>
+
+                        {appUser?.role !== 'client' && (
+                          <Link
+                            to={`/auth/login/events/${eventId}/send-access`}
+                            onClick={() => setIsOptionsDropdownOpen(false)}
+                            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-slate-700 hover:bg-rose-50 hover:text-[#8C3A50]"
+                          >
+                            <Send className="w-4 h-4 text-[#8C3A50]" />
+                            <span>Kirim Akses ke Client</span>
+                          </Link>
+                        )}
 
                         <button
                           type="button"

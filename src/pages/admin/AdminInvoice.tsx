@@ -6,6 +6,7 @@ import { useSettings } from '../../SettingsContext';
 import { showAlert, showConfirm } from '../../lib/alerts';
 import { CheckCircle, XCircle, Eye, ShoppingBag, Layers, Users, Send, Calendar, Clock, ExternalLink, Copy, Check, Image as ImageIcon, MessageCircle } from 'lucide-react';
 import { Modal } from '../../components/Modal';
+import { resolveEventActiveUntil, formatDateInputYMD } from '../../lib/utils';
 
 export default function AdminInvoice() {
   const { appUser } = useAuth();
@@ -90,6 +91,9 @@ export default function AdminInvoice() {
           throw new Error("Pengguna tidak ditemukan.");
         }
 
+        const targetEventRef = invoice.targetEventId ? doc(db, 'events', invoice.targetEventId) : null;
+        const targetEventDoc = targetEventRef ? await transaction.get(targetEventRef) : null;
+
         const userData = userDoc.data();
         const currentEventQuota = userData.eventCredit !== undefined ? userData.eventCredit : (userData.eventQuota || 0);
         const currentClientQuota = userData.clientCredit !== undefined ? userData.clientCredit : (userData.clientQuota || 0);
@@ -151,6 +155,24 @@ export default function AdminInvoice() {
           ...(newActiveUntil ? { activeUntil: newActiveUntil } : {}),
           updatedAt: serverTimestamp(),
         });
+
+        if (targetEventRef && targetEventDoc && targetEventDoc.exists() && (addedActiveDays > 0 || addedEventQuota > 0)) {
+          const evData = targetEventDoc.data() as any;
+          const now = new Date();
+          const extensionDays = addedActiveDays > 0 ? addedActiveDays : 30;
+          const currentEvExpiry = resolveEventActiveUntil(evData);
+          const baseEventDate = currentEvExpiry && currentEvExpiry > now ? currentEvExpiry : now;
+          const nextEvExpiryDate = new Date(baseEventDate.getTime() + extensionDays * 24 * 60 * 60 * 1000);
+          const nextEvActiveUntil = formatDateInputYMD(nextEvExpiryDate);
+
+          transaction.update(targetEventRef, {
+            activeUntil: nextEvActiveUntil,
+            activeDays: extensionDays,
+            status: 'published',
+            subscriptionStatus: 'active',
+            updatedAt: serverTimestamp(),
+          });
+        }
 
         transaction.update(invoiceRef, {
           status: 'paid',
@@ -268,6 +290,11 @@ export default function AdminInvoice() {
                           {inv.items.length} item
                         </span>
                       )}
+                      {inv.targetEventTitle && (
+                        <span className="px-1.5 py-0.5 bg-rose-50 text-[#8C3A50] text-[10px] font-bold rounded border border-rose-200">
+                          Perpanjang: {inv.targetEventTitle}
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
@@ -358,6 +385,12 @@ export default function AdminInvoice() {
                   Status: {viewingInvoice.status === 'paid' ? 'Lunas' : viewingInvoice.status === 'pending_verification' ? 'Menunggu Verifikasi' : viewingInvoice.status === 'cancelled' ? 'Dibatalkan' : 'Menunggu Pembayaran'}
                 </span>
               </div>
+              {viewingInvoice.targetEventTitle && (
+                <div className="col-span-2 pt-2 border-t border-slate-200/80 flex items-center justify-between gap-2">
+                  <span className="text-slate-500">Target Perpanjangan Acara:</span>
+                  <span className="font-bold text-[#8C3A50]">{viewingInvoice.targetEventTitle}</span>
+                </div>
+              )}
             </div>
 
             {/* Payment Proof Preview if uploaded */}

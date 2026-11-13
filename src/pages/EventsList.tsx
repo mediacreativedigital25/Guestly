@@ -3,10 +3,10 @@ import { useAuth } from '../AuthContext';
 import { collection, query, getDocs, where, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, deleteField, runTransaction, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { EventRecord, Client, User, EInviteTemplate, GreetingScreenTemplate, GreetingPhotoStyle, SeatingTable, Guest } from '../types';
-import { parseFirestoreDate, canUserAccessEvent, canUserCreateEvent, getUserBusinessId, getRoleLabel, isPartnerBusinessRegistered, resolveMediaUrl } from '../lib/utils';
+import { parseFirestoreDate, canUserAccessEvent, canUserCreateEvent, getUserBusinessId, getRoleLabel, isPartnerBusinessRegistered, resolveMediaUrl, DEFAULT_EVENT_ACTIVE_DAYS, computeDefaultActiveUntil, resolveEventActiveUntil, getDaysRemaining, isEventExpired, formatDateInputYMD } from '../lib/utils';
 import { format } from 'date-fns';
 import { Link, useNavigate, useLocation, useParams } from 'react-router-dom';
-import { Plus, Image as ImageIcon, Trash2, Edit, ScanLine, Eye, ArrowUp, ArrowDown, Gift, Building2, Lock, Sparkles, Check, MapPin, ExternalLink, Crown, Users, Search, Armchair, Monitor } from 'lucide-react';
+import { Plus, Image as ImageIcon, Trash2, Edit, ScanLine, Eye, ArrowUp, ArrowDown, Gift, Building2, Lock, Sparkles, Check, MapPin, ExternalLink, Crown, Users, Search, Armchair, Monitor, Send, Clock, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { MediaUploader } from '../components/media/MediaUploader';
 import { EInvitationCard, splitCoupleNames } from '../components/EInvitationCard';
@@ -140,7 +140,7 @@ export default function EventsList() {
     setNewEventTheme('default');
     setNewEventDisableTicketRsvpForm(false);
     setNewEventClientId('');
-    setNewEventActiveUntil('');
+    setNewEventActiveUntil(computeDefaultActiveUntil(new Date(), DEFAULT_EVENT_ACTIVE_DAYS));
     setGuestCategories(['VIP', 'Keluarga', 'Reguler']);
     setNewCategory('');
     setInvitationTypes(['Undangan Fisik', 'Undangan Cetak', 'Undangan Digital']);
@@ -256,7 +256,12 @@ export default function EventsList() {
     setNewEventTheme(event.rsvpTheme || 'default');
     setNewEventDisableTicketRsvpForm(event.disableTicketRsvpForm || false);
     setNewEventClientId(event.clientId || '');
-    setNewEventActiveUntil(event.activeUntil || '');
+    const resolvedActive = resolveEventActiveUntil(event);
+    setNewEventActiveUntil(
+      resolvedActive
+        ? formatDateInputYMD(resolvedActive)
+        : computeDefaultActiveUntil(event.createdAt || new Date(), DEFAULT_EVENT_ACTIVE_DAYS)
+    );
     setGuestCategories(event.guestCategories || []);
     setNewCategory('');
     setInvitationTypes(event.invitationTypes && event.invitationTypes.length > 0 ? event.invitationTypes : ['Undangan Fisik', 'Undangan Cetak', 'Undangan Digital']);
@@ -479,10 +484,48 @@ export default function EventsList() {
                 : ev.partnerId;
             return canUserAccessEvent(appUser, ev.id, effectivePartnerId, allowedPartnerIds);
           });
-          setEvents(data);
+
+          // Auto-transition expired published events to draft + backfill default 30-day activeUntil
+          const expiredToSync: { id: string; activeUntil: string }[] = [];
+          const normalizedData = data.map((ev) => {
+            const resolvedExpiry = resolveEventActiveUntil(ev);
+            const ymdExpiry = resolvedExpiry ? formatDateInputYMD(resolvedExpiry) : ev.activeUntil;
+            const expired = isEventExpired(ev);
+            if (expired && ev.status === 'published' && ev.id) {
+              expiredToSync.push({
+                id: ev.id,
+                activeUntil: ymdExpiry || computeDefaultActiveUntil(ev.createdAt || new Date(), DEFAULT_EVENT_ACTIVE_DAYS),
+              });
+              return {
+                ...ev,
+                activeUntil: ymdExpiry || ev.activeUntil,
+                status: 'draft' as const,
+                subscriptionStatus: 'expired' as const,
+              };
+            }
+            return {
+              ...ev,
+              activeUntil: ev.activeUntil || ymdExpiry,
+            };
+          });
+
+          setEvents(normalizedData);
           setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
           setHasMore(snapshot.docs.length === 100);
           setLoading(false);
+
+          if (expiredToSync.length > 0) {
+            Promise.all(
+              expiredToSync.map((item) =>
+                updateDoc(doc(db, 'events', item.id), {
+                  status: 'draft',
+                  subscriptionStatus: 'expired',
+                  activeUntil: item.activeUntil,
+                  updatedAt: serverTimestamp(),
+                }).catch((e) => console.warn('Failed auto-expiring event:', item.id, e))
+              )
+            );
+          }
         } catch(error) {
           handleFirestoreError(error, OperationType.GET, 'events');
           setLoading(false);
@@ -541,9 +584,6 @@ export default function EventsList() {
       return;
     }
     
-    const confirmed = await showConfirm('Apakah Anda yakin ingin menyimpan acara ini?');
-    if (!confirmed) return;
-    
     const selectedClient = clients.find(c => c.id === newEventClientId);
     const partnerId = selectedClient?.partnerId || getUserBusinessId(appUser) || appUser.id || 'default-partner';
     
@@ -565,8 +605,26 @@ export default function EventsList() {
       if (newEventDigitalInviteLink) payload.digitalInviteLink = newEventDigitalInviteLink;
       else if (editingEventId) payload.digitalInviteLink = deleteField();
       
-      if (newEventActiveUntil) payload.activeUntil = newEventActiveUntil;
-      else if (editingEventId) payload.activeUntil = deleteField();
+      const resolvedActiveUntil = editingEventId
+        ? (newEventActiveUntil || computeDefaultActiveUntil(new Date(), DEFAULT_EVENT_ACTIVE_DAYS))
+        : (appUser?.role === 'superadmin' && newEventActiveUntil
+            ? newEventActiveUntil
+            : computeDefaultActiveUntil(new Date(), DEFAULT_EVENT_ACTIVE_DAYS));
+      payload.activeUntil = resolvedActiveUntil;
+      payload.activeDays = DEFAULT_EVENT_ACTIVE_DAYS;
+
+      if (editingEventId) {
+        const nextExpired = isEventExpired({ activeUntil: resolvedActiveUntil });
+        payload.subscriptionStatus = nextExpired ? 'expired' : 'active';
+        if (nextExpired) {
+          payload.status = 'draft';
+        } else {
+          const currentEv = events.find((e) => e.id === editingEventId);
+          if (currentEv?.status === 'draft' && currentEv?.subscriptionStatus === 'expired') {
+            payload.status = 'published';
+          }
+        }
+      }
       
       if (newEventFrame) payload.frameOverlayUrl = newEventFrame;
       else if (editingEventId) payload.frameOverlayUrl = deleteField();
@@ -655,6 +713,7 @@ export default function EventsList() {
         showAlert('Berhasil', 'Acara berhasil diperbarui!', 'success');
       } else {
         payload.status = 'published';
+        payload.subscriptionStatus = 'active';
         payload.partnerId = partnerId;
         payload.createdAt = serverTimestamp();
         let newDocId = '';
@@ -883,7 +942,7 @@ export default function EventsList() {
         {canUserCreateEvent(appUser) && (
           <button 
             onClick={openCreateModal}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium self-start sm:self-auto"
+            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-semibold text-sm shadow-xs transition-colors self-start sm:self-auto cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             Create Event
@@ -1147,6 +1206,37 @@ export default function EventsList() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Link Undangan Digital (Opsional)</label>
                   <input value={newEventDigitalInviteLink} onChange={e => setNewEventDigitalInviteLink(e.target.value)} type="url" className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Contoh: https://undangan.com/iklas-yunis" />
                 </div>
+              </div>
+
+              {/* Masa Aktif Otomatis 30 Hari */}
+              <div className="rounded-lg border border-rose-100 bg-rose-50/50 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <Clock className="w-4 h-4 text-[#8C3A50] mt-0.5 shrink-0" />
+                  <div>
+                    <div className="text-xs font-bold text-slate-800">
+                      Masa Aktif Acara (Otomatis 30 Hari dari Pembuatan)
+                    </div>
+                    <p className="text-[11px] text-slate-600 mt-0.5">
+                      Setelah melewati tanggal masa aktif, status acara otomatis menjadi <strong>Draft</strong> dan fitur publik terkunci sampai dilakukan Top-Up paket.
+                    </p>
+                  </div>
+                </div>
+                {appUser?.role === 'superadmin' ? (
+                  <div className="shrink-0">
+                    <input
+                      type="date"
+                      value={newEventActiveUntil}
+                      onChange={(e) => setNewEventActiveUntil(e.target.value)}
+                      className="border border-rose-200 bg-white rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-800 focus:ring-[#8C3A50] focus:border-[#8C3A50]"
+                    />
+                  </div>
+                ) : (
+                  <span className="inline-flex items-center px-3 py-1.5 rounded-lg bg-white border border-rose-200 text-xs font-semibold text-[#8C3A50] shrink-0">
+                    {newEventActiveUntil && parseFirestoreDate(newEventActiveUntil)
+                      ? `Aktif s/d ${format(parseFirestoreDate(newEventActiveUntil)!, 'dd MMM yyyy')}`
+                      : '30 Hari'}
+                  </span>
+                )}
               </div>
 
               <div className="border border-gray-200 rounded-lg p-4 bg-gray-50/60 space-y-3">
@@ -2739,16 +2829,58 @@ export default function EventsList() {
                       {event.createdAt && parseFirestoreDate(event.createdAt) ? format(parseFirestoreDate(event.createdAt)!, 'dd MMM yyyy') : '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <Link to={`/auth/login/events/${event.id}`} className="text-sm font-medium text-gray-900 hover:text-indigo-600 transition-colors">
+                      <Link to={`/auth/login/events/${event.id}`} className="text-sm font-medium text-gray-900 hover:text-[#8C3A50] transition-colors">
                         {event.title}
                       </Link>
-                      <div className="text-sm text-gray-500 capitalize">{event.status}</div>
+                      {isEventExpired(event) || event.status === 'draft' ? (
+                        <div className="mt-0.5 flex items-center gap-1.5">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 capitalize">
+                            {event.status === 'draft' ? 'Draft' : 'Expired'}
+                          </span>
+                          {isEventExpired(event) && (
+                            <span className="text-[11px] font-medium text-rose-600">
+                              • Masa Aktif Habis
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-xs font-medium text-emerald-700 capitalize mt-0.5">
+                          {event.status || 'Published'}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {parseFirestoreDate(event.date) ? format(parseFirestoreDate(event.date)!, 'dd MMM yyyy') : '-'}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {parseFirestoreDate(event.activeUntil) ? format(parseFirestoreDate(event.activeUntil)!, 'dd MMM yyyy') : '-'}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      {(() => {
+                        const resolvedExpiry = resolveEventActiveUntil(event);
+                        if (!resolvedExpiry) return <span className="text-gray-400">-</span>;
+                        const expired = isEventExpired(event);
+                        const daysLeft = getDaysRemaining(event);
+                        return (
+                          <div className="space-y-1">
+                            <div className="text-gray-800 font-medium text-xs">
+                              {format(resolvedExpiry, 'dd MMM yyyy')}
+                            </div>
+                            {expired ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                <AlertTriangle className="w-2.5 h-2.5" />
+                                Kedaluwarsa
+                              </span>
+                            ) : daysLeft <= 7 ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                <Clock className="w-2.5 h-2.5" />
+                                Sisa {daysLeft} hari
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                Aktif • {daysLeft} hr
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex space-x-3">
@@ -2763,6 +2895,13 @@ export default function EventsList() {
                          )}
                          {appUser?.role !== 'client' && appUser?.role !== 'staff' && (
                            <>
+                             <Link
+                               to={`/auth/login/events/${event.id}/send-access`}
+                               className="text-[#8C3A50] hover:text-[#722B3E] flex items-center justify-center p-1 rounded-full hover:bg-rose-50 transition-colors"
+                               title="Kirim Akses ke Client"
+                             >
+                               <Send className="w-4 h-4" />
+                             </Link>
                              <button 
                                  onClick={() => openEditModal(event)} 
                                  className="text-blue-600 hover:text-blue-900 flex items-center justify-center p-1 rounded-full hover:bg-blue-50 transition-colors" 
@@ -2783,7 +2922,21 @@ export default function EventsList() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
                        <div className="flex items-center justify-center gap-2">
-                         {appUser?.role === 'staff' && appUser?.staffType === 'souvenir' ? (
+                         {isEventExpired(event) || event.status === 'draft' ? (
+                           appUser?.role === 'staff' ? (
+                             <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 text-slate-500 rounded-full text-xs font-semibold">
+                               <Lock className="w-3.5 h-3.5" /> Terkunci
+                             </span>
+                           ) : (
+                             <Link
+                               to={`/auth/login/services/catalog?renewEvent=${event.id}`}
+                               className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#8C3A50] hover:bg-[#722B3E] text-white rounded-full text-xs font-semibold transition-colors shadow-xs"
+                               title="Masa aktif habis / Draft — Perpanjang sesuai paket"
+                             >
+                               <RefreshCw className="w-3.5 h-3.5" /> Top-Up Paket
+                             </Link>
+                           )
+                         ) : appUser?.role === 'staff' && appUser?.staffType === 'souvenir' ? (
                            <Link 
                              to={`/auth/login/events/${event.id}/scan?mode=souvenir`} 
                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white hover:bg-purple-700 rounded-full text-xs font-semibold transition-colors shadow-sm"

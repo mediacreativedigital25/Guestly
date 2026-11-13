@@ -36,7 +36,7 @@ export default function WeddingPlannerComingSoon() {
       title: 'Checklist & Tugas Panitia',
       description: 'Pembagian penanggung jawab (PIC) keluarga dan tim Wedding Organizer dengan pengingat notifikasi tugas terintegrasi.',
       badge: 'Perancangan Logika',
-      accent: 'border-purple-200/80 bg-purple-50/40 text-purple-700'
+      accent: 'border-slate-200 bg-slate-50 text-slate-700'
     },
     {
       icon: LayoutGrid,
@@ -48,41 +48,7 @@ export default function WeddingPlannerComingSoon() {
   ];
 
   return (
-    <div className="space-y-8 max-w-6xl mx-auto pb-16">
-      {/* Hero Header */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-[#4A1623] via-[#652435] to-[#8C3A50] text-white p-8 sm:p-10 rounded-3xl border border-rose-900/40 shadow-xl shadow-[#8C3A50]/15">
-        <div className="absolute top-0 right-0 -mr-16 -mt-16 w-80 h-80 rounded-full bg-gradient-to-bl from-rose-300/20 to-transparent blur-2xl pointer-events-none" />
-        <div className="absolute bottom-0 left-1/3 -mb-20 w-64 h-64 rounded-full bg-white/5 blur-3xl pointer-events-none" />
-
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="max-w-2xl space-y-3">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold bg-white/10 backdrop-blur-md text-rose-200 border border-white/20">
-              <Sparkles className="w-3.5 h-3.5 text-rose-200" />
-              <span>GUESTLY ECOSYSTEM ROADMAP</span>
-            </div>
-            <h1 className="text-2xl sm:text-4xl font-black tracking-tight text-white flex items-center gap-3">
-              <span>Guestly Wedding Planner</span>
-              <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-400 text-slate-950 uppercase tracking-wider">
-                Segera Hadir
-              </span>
-            </h1>
-            <p className="text-sm sm:text-base text-rose-100/90 leading-relaxed">
-              Modul perencanaan dan manajemen pernikahan terpadu yang dirancang khusus untuk mempermudah koordinasi calon pengantin, keluarga, dan Wedding Organizer dalam satu platform terintegrasi.
-            </p>
-          </div>
-
-          <div className="shrink-0 flex md:flex-col items-center md:items-end gap-3">
-            <div className="bg-black/20 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/15 text-xs text-rose-100 text-left md:text-right">
-              <span className="text-[10px] uppercase font-bold text-rose-300 tracking-wider block">Status Pengembangan</span>
-              <span className="font-bold text-white text-sm flex items-center gap-1.5 md:justify-end mt-0.5">
-                <Clock className="w-4 h-4 text-amber-300 animate-pulse" />
-                Dalam Tahap R&amp;D
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
+    <div className="space-y-6 max-w-6xl mx-auto pb-16">
       {/* Notice Banner */}
       <div className="p-4 sm:p-5 rounded-2xl bg-amber-50 border border-amber-200/80 flex items-start sm:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-3">
@@ -90,7 +56,13 @@ export default function WeddingPlannerComingSoon() {
             <BellRing className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-amber-900">Fitur Sedang Dalam Tahap Pengembangan</h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-bold text-amber-900">Fitur Sedang Dalam Tahap Pengembangan</h3>
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900 uppercase tracking-wider">
+                <Clock className="w-3 h-3" />
+                Segera Hadir • Tahap R&amp;D
+              </span>
+            </div>
             <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
               Kami sedang menyiapkan fitur Wedding Planner ini agar langsung terhubung dengan data acara dan buku tamu digital yang sudah Anda buat di Guestly.
             </p>

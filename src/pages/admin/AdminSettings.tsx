@@ -162,11 +162,6 @@ export default function AdminSettings() {
   };
 
   const handleSave = async (tab: string) => {
-    const confirmed = await showConfirm("Apakah Anda yakin ingin menyimpan pengaturan ini?");
-    if (!confirmed) {
-      return;
-    }
-    
     setIsSaving(true);
     try {
       const globalSettingsRef = doc(db, 'settings', 'global');

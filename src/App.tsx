@@ -39,16 +39,19 @@ import ServiceCheckout from './pages/services/ServiceCheckout';
 import MyInvoices from './pages/invoices/MyInvoices';
 import PublicPayment from './pages/public/PublicPayment';
 import ActiveSessions from './pages/admin/ActiveSessions';
-import WeddingPlannerComingSoon from './pages/wedding-planner/WeddingPlannerComingSoon';
+import WeddingPlannerWorkspace from './pages/wedding-planner/WeddingPlannerWorkspace';
+import SendClientAccess from './pages/SendClientAccess';
 
 import ServicesDashboard from './pages/services/ServicesDashboard';
 import { CartProvider } from './CartContext';
+import { Toaster } from 'sonner';
 
 export default function App() {
   return (
     <SettingsProvider>
       <AuthProvider>
         <CartProvider>
+          <Toaster position="top-right" richColors closeButton />
           <BrowserRouter>
             <Routes>
           <Route path="/" element={<SalesPage />} />
@@ -58,6 +61,7 @@ export default function App() {
             <Route path="events/add" element={<EventsList />} />
             <Route path="events/:eventId/edit" element={<EventsList />} />
             <Route path="events/:eventId/tables" element={<EventsList />} />
+            <Route path="events/:eventId/send-access" element={<SendClientAccess />} />
             <Route path="events/:eventId" element={<EventDetails />} />
             <Route path="events/:eventId/guests/add" element={<EventDetails />} />
             <Route path="events/:eventId/guests/:guestId/edit" element={<EventDetails />} />
@@ -66,7 +70,13 @@ export default function App() {
             <Route path="clients/add" element={<ClientsList />} />
             <Route path="clients/:clientId/edit" element={<ClientsList />} />
             <Route path="clients/:clientId/view" element={<ClientsList />} />
-            <Route path="wedding-planner" element={<WeddingPlannerComingSoon />} />
+            <Route path="clients/:clientId/send-access" element={<SendClientAccess />} />
+            <Route path="wedding-planner" element={<WeddingPlannerWorkspace section="overview" />} />
+            <Route path="wedding-planner/checklist" element={<WeddingPlannerWorkspace section="checklist" />} />
+            <Route path="wedding-planner/vendors" element={<WeddingPlannerWorkspace section="vendors" />} />
+            <Route path="wedding-planner/budget" element={<WeddingPlannerWorkspace section="budget" />} />
+            <Route path="wedding-planner/rundown" element={<WeddingPlannerWorkspace section="rundown" />} />
+            <Route path="wedding-planner/seating" element={<WeddingPlannerWorkspace section="seating" />} />
             <Route path="approvals" element={<Approvals />} />
             <Route path="settings" element={<WhiteLabelSettings />} />
             <Route path="businesses" element={<BusinessesList />} />

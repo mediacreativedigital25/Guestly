@@ -9,6 +9,8 @@ export interface CartAddonItem {
 interface CartContextType {
   mainPackage: GuestlyService | null;
   addons: CartAddonItem[];
+  renewEventId: string | null;
+  setRenewEventId: (eventId: string | null) => void;
   setMainPackage: (pkg: GuestlyService | null) => void;
   addAddon: (addon: GuestlyService) => void;
   removeAddon: (serviceId: string) => void;
@@ -59,6 +61,19 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return [];
   });
 
+  const [renewEventId, setRenewEventIdState] = useState<string | null>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.renewEventId || null;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  });
+
   useEffect(() => {
     try {
       localStorage.setItem(
@@ -66,12 +81,17 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         JSON.stringify({
           mainPackage,
           addons,
+          renewEventId,
         })
       );
     } catch (e) {
       console.warn('Failed to save cart to localStorage', e);
     }
-  }, [mainPackage, addons]);
+  }, [mainPackage, addons, renewEventId]);
+
+  const setRenewEventId = (eventId: string | null) => {
+    setRenewEventIdState(eventId);
+  };
 
   const setMainPackage = (pkg: GuestlyService | null) => {
     setMainPackageState(pkg);
@@ -118,6 +138,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const clearCart = () => {
     setMainPackageState(null);
     setAddonsState([]);
+    setRenewEventIdState(null);
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch (e) {
@@ -180,6 +201,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         mainPackage,
         addons,
+        renewEventId,
+        setRenewEventId,
         setMainPackage,
         addAddon,
         removeAddon,

@@ -1261,7 +1261,7 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                 <label
                   className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
                     newUserStaffType === 'all'
-                      ? 'bg-white border-purple-500 ring-2 ring-purple-500/20'
+                      ? 'bg-white border-indigo-600 ring-2 ring-indigo-500/20'
                       : 'bg-white/60 border-gray-200'
                   }`}
                 >
@@ -1270,7 +1270,7 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                     name="newStaffType"
                     checked={newUserStaffType === 'all'}
                     onChange={() => setNewUserStaffType('all')}
-                    className="mt-1 text-purple-600"
+                    className="mt-1 text-indigo-600"
                   />
                   <div>
                     <div className="text-xs font-bold text-gray-900">
@@ -1852,7 +1852,7 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                           <span
                             className={`inline-flex items-center w-fit px-2.5 py-1 rounded-full text-xs font-semibold border ${
                               user.role === 'superadmin'
-                                ? 'bg-purple-50 text-purple-800 border-purple-200'
+                                ? 'bg-rose-50 text-[#8C3A50] border-rose-200'
                                 : user.role === 'owner'
                                 ? 'bg-amber-50 text-amber-800 border-amber-200'
                                 : user.role === 'admin'
@@ -1917,7 +1917,7 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
                               Client: {user.clientCredit !== undefined ? user.clientCredit : (user.clientQuota || 0)}
                             </span>
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-rose-50 text-[#8C3A50] border border-rose-200">
                               Event: {user.eventCredit !== undefined ? user.eventCredit : (user.eventQuota || 0)}
                             </span>
                           </div>

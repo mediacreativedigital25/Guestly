@@ -34,6 +34,11 @@ import {
   Laptop,
   ArrowRight,
   HeartHandshake,
+  ListChecks,
+  Store,
+  Wallet,
+  CalendarClock,
+  LayoutGrid,
 } from 'lucide-react';
 import { useCart } from './CartContext';
 import { cn, getRoleLabel, shouldHideServiceInfo, isGreetingScreenUser, canUserAccessEvent, getUserBusinessId } from './lib/utils';
@@ -62,6 +67,8 @@ export default function AppLayout() {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isAdminPanelMenuOpen, setIsAdminPanelMenuOpen] = useState(false);
   const [isServiceInfoMenuOpen, setIsServiceInfoMenuOpen] = useState(false);
+  const [isWeddingPlannerMenuOpen, setIsWeddingPlannerMenuOpen] = useState(false);
+  const [hasClientWeddingPlanner, setHasClientWeddingPlanner] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [resolvedBusinessName, setResolvedBusinessName] = useState<string>('');
@@ -139,8 +146,14 @@ export default function AppLayout() {
       setIsSidebarCollapsed(false);
     }
 
-    if (p.startsWith('/auth/login/services') || p.startsWith('/auth/login/invoices')) {
+    if (p.startsWith('/auth/login/wedding-planner')) {
+      setIsWeddingPlannerMenuOpen(true);
+      setIsServiceInfoMenuOpen(false);
+      setIsUserMenuOpen(false);
+      setIsAdminPanelMenuOpen(false);
+    } else if (p.startsWith('/auth/login/services') || p.startsWith('/auth/login/invoices')) {
       setIsServiceInfoMenuOpen(true);
+      setIsWeddingPlannerMenuOpen(false);
       setIsUserMenuOpen(false);
       setIsAdminPanelMenuOpen(false);
     } else if (
@@ -150,18 +163,73 @@ export default function AppLayout() {
       p.startsWith('/auth/login/sessions')
     ) {
       setIsUserMenuOpen(true);
+      setIsWeddingPlannerMenuOpen(false);
       setIsServiceInfoMenuOpen(false);
       setIsAdminPanelMenuOpen(false);
     } else if (p.startsWith('/auth/login/admin')) {
       setIsAdminPanelMenuOpen(true);
+      setIsWeddingPlannerMenuOpen(false);
       setIsServiceInfoMenuOpen(false);
       setIsUserMenuOpen(false);
     } else {
+      setIsWeddingPlannerMenuOpen(false);
       setIsServiceInfoMenuOpen(false);
       setIsUserMenuOpen(false);
       setIsAdminPanelMenuOpen(false);
     }
   }, [location.pathname]);
+
+  // Check if role 'client' has at least one active Wedding Planner project
+  useEffect(() => {
+    if (!appUser || appUser.role !== 'client') {
+      setHasClientWeddingPlanner(false);
+      return;
+    }
+
+    let mounted = true;
+    const checkClientPlanner = async () => {
+      try {
+        const [evSnap, wpSnap] = await Promise.all([
+          getDocs(collection(db, 'events')),
+          getDocs(collection(db, 'wedding_planners')),
+        ]);
+        const targetClientId = appUser.clientId || appUser.id || '';
+        const assignedIds = Array.isArray(appUser.assignedEventIds) ? appUser.assignedEventIds : [];
+
+        const clientEventIds = new Set<string>();
+        evSnap.docs.forEach((d) => {
+          const ev = d.data() as any;
+          if (
+            (targetClientId && ev.clientId === targetClientId) ||
+            ev.clientUid === appUser.id ||
+            assignedIds.includes(d.id)
+          ) {
+            clientEventIds.add(d.id);
+          }
+        });
+
+        const hasEnrolled = wpSnap.docs.some((d) => {
+          const data = d.data() as any;
+          const evId = data.eventId || d.id;
+          return data.plannerStatus !== 'archived' && clientEventIds.has(evId);
+        });
+
+        if (mounted) {
+          setHasClientWeddingPlanner(hasEnrolled);
+        }
+      } catch {
+        if (mounted) setHasClientWeddingPlanner(false);
+      }
+    };
+
+    checkClientPlanner();
+    const handleRefresh = () => checkClientPlanner();
+    window.addEventListener('guestly-planner-updated', handleRefresh);
+    return () => {
+      mounted = false;
+      window.removeEventListener('guestly-planner-updated', handleRefresh);
+    };
+  }, [appUser]);
 
   // Load notifications (pending approvals & upcoming events)
   useEffect(() => {
@@ -934,11 +1002,14 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
     { name: isStaff ? 'Workspace Petugas' : 'Dashboard', path: '/auth/login', icon: LayoutDashboard },
     { name: 'Clients', path: '/auth/login/clients', icon: Users, role: ['superadmin', 'owner', 'partner'] },
     { name: isStaff ? 'Acara Ditugaskan' : 'Events', path: '/auth/login/events', icon: CalendarDays },
-    { name: 'Wedding Planner', path: '/auth/login/wedding-planner', icon: HeartHandshake, role: ['superadmin', 'owner', 'admin', 'partner', 'client'], badge: 'Segera' },
     { name: 'Approvals', path: '/auth/login/approvals', icon: FileText, role: ['superadmin', 'owner', 'admin', 'partner', 'client'] },
     { name: 'Media', path: '/auth/login/media', icon: ImageIcon, role: ['superadmin'] },
     { name: 'White Label', path: '/auth/login/settings', icon: Settings, role: ['superadmin', 'owner', 'partner'] },
   ];
+
+  const showWeddingPlannerNav =
+    ['superadmin', 'owner', 'admin', 'partner'].includes(appUser.role) ||
+    (appUser.role === 'client' && hasClientWeddingPlanner);
 
   const unreadCount = notifications.filter(n => !readNotifIds.includes(n.id)).length;
 
@@ -951,7 +1022,16 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
         ]
       : []),
     { label: 'Events (Daftar Acara)', path: '/auth/login/events', keywords: 'events acara pernikahan tamu undangan' },
-    { label: 'Wedding Planner (Segera)', path: '/auth/login/wedding-planner', keywords: 'wedding planner rundown vendor budget panitia meja segera' },
+    ...(showWeddingPlannerNav
+      ? [
+          { label: 'Wedding Planner — Overview', path: '/auth/login/wedding-planner', keywords: 'wedding planner overview ringkasan' },
+          { label: 'Wedding Planner — Checklist & Tugas', path: '/auth/login/wedding-planner/checklist', keywords: 'wedding planner checklist tugas panitia' },
+          { label: 'Wedding Planner — Vendor & Kontrak', path: '/auth/login/wedding-planner/vendors', keywords: 'wedding planner vendor kontrak catering dekorasi mua' },
+          { label: 'Wedding Planner — Anggaran & Pembayaran', path: '/auth/login/wedding-planner/budget', keywords: 'wedding planner anggaran budget dp pelunasan' },
+          { label: 'Wedding Planner — Rundown Hari-H', path: '/auth/login/wedding-planner/rundown', keywords: 'wedding planner rundown timeline jadwal akad resepsi' },
+          { label: 'Wedding Planner — Denah Meja & Tamu', path: '/auth/login/wedding-planner/seating', keywords: 'wedding planner denah meja seating kursi tamu' },
+        ]
+      : []),
     { label: 'Approvals (Persetujuan Tamu)', path: '/auth/login/approvals', keywords: 'approvals persetujuan edit tamu' },
     { label: 'Profil Saya', path: '/auth/login/profile', keywords: 'profil saya akun password ubah' },
     ...(!isStaff ? [{ label: 'Changelog', path: '/auth/login/changelog', keywords: 'changelog update versi baru' }] : []),
@@ -1158,50 +1238,69 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
               )}
             </button>
 
-            {/* Cart Dropdown Preview */}
+            {/* Mobile Backdrop for Cart Popover */}
+            {isCartDropdownOpen && (
+              <div
+                className="fixed inset-0 top-16 bg-slate-900/20 backdrop-blur-[1px] z-40 sm:hidden"
+                onClick={() => setIsCartDropdownOpen(false)}
+                aria-hidden="true"
+              />
+            )}
+
+            {/* Cart Dropdown Preview (Responsive across Mobile, Tablet, Desktop) */}
             <div
               className={cn(
-                "absolute right-0 mt-1.5 w-80 sm:w-96 bg-white rounded-2xl shadow-xl border border-rose-100 py-1.5 z-50 origin-top-right transition-all duration-200 ease-out",
+                "fixed inset-x-3 top-[70px] mx-auto w-auto max-w-md sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 sm:mx-0 sm:mt-2 sm:w-96 sm:max-w-none bg-white rounded-2xl shadow-xl border border-rose-100 z-50 origin-top sm:origin-top-right transition-all duration-200 ease-out flex flex-col max-h-[calc(100dvh-86px)] sm:max-h-[calc(100vh-96px)] overflow-hidden",
                 isCartDropdownOpen
                   ? "opacity-100 scale-100 translate-y-0 pointer-events-auto visible"
                   : "opacity-0 scale-95 -translate-y-1.5 pointer-events-none invisible"
               )}
             >
-              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-rose-50 text-[#8C3A50] flex items-center justify-center">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-2 shrink-0 bg-white">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-rose-50 text-[#8C3A50] flex items-center justify-center shrink-0">
                     <ShoppingBag className="w-4 h-4" />
                   </div>
-                  <div>
-                    <span className="text-sm font-bold text-gray-900 block leading-tight">Keranjang Belanja</span>
+                  <div className="min-w-0">
+                    <span className="text-sm font-bold text-gray-900 block leading-tight truncate">Keranjang Belanja</span>
                     <span className="text-[11px] text-gray-500 font-medium">{itemCount} item dipilih</span>
                   </div>
                 </div>
-                {itemCount > 0 && (
+                <div className="flex items-center gap-2 shrink-0">
+                  {itemCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => clearCart()}
+                      className="text-xs font-semibold text-rose-600 hover:text-rose-800 cursor-pointer px-2 py-1 rounded-lg hover:bg-rose-50 transition-colors"
+                    >
+                      Kosongkan
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => clearCart()}
-                    className="text-xs font-semibold text-rose-600 hover:text-rose-800 cursor-pointer"
+                    onClick={() => setIsCartDropdownOpen(false)}
+                    className="sm:hidden p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
+                    aria-label="Tutup keranjang"
                   >
-                    Kosongkan
+                    <X className="w-4 h-4" />
                   </button>
-                )}
+                </div>
               </div>
 
               {itemCount === 0 ? (
-                <div className="p-6 text-center space-y-2">
+                <div className="p-5 sm:p-6 text-center space-y-2.5 overflow-y-auto">
                   <div className="w-12 h-12 rounded-full bg-rose-50 text-[#8C3A50] flex items-center justify-center mx-auto">
                     <ShoppingBag className="w-6 h-6" />
                   </div>
-                  <p className="text-xs font-bold text-gray-900">Keranjang Anda masih kosong</p>
-                  <p className="text-[11px] text-gray-500 max-w-xs mx-auto">
+                  <p className="text-sm sm:text-xs font-bold text-gray-900">Keranjang Anda masih kosong</p>
+                  <p className="text-xs sm:text-[11px] text-gray-500 max-w-xs mx-auto leading-relaxed">
                     Pilih paket buku tamu utama atau add-on kuota tambahan dari katalog layanan.
                   </p>
                   <div className="pt-2">
                     <Link
                       to="/auth/login/services"
                       onClick={() => setIsCartDropdownOpen(false)}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                      className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 sm:py-2 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
                     >
                       <span>Buka Katalog Layanan</span>
                       <ChevronRight className="w-3.5 h-3.5" />
@@ -1209,11 +1308,11 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                   </div>
                 </div>
               ) : (
-                <div className="p-3 space-y-3">
-                  <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                <div className="flex flex-col min-h-0 flex-1">
+                  <div className="p-3 overflow-y-auto modal-scroll space-y-2 flex-1 min-h-0">
                     {mainPackage && (
-                      <div className="p-2.5 rounded-xl bg-rose-50/50 border border-rose-200/60 flex items-center justify-between gap-2">
-                        <div className="min-w-0">
+                      <div className="p-2.5 rounded-xl bg-rose-50/50 border border-rose-200/60 flex items-center justify-between gap-2.5">
+                        <div className="min-w-0 flex-1">
                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-[#8C3A50] uppercase tracking-wider inline-block">
                             Paket Utama
                           </span>
@@ -1225,7 +1324,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                         <button
                           type="button"
                           onClick={() => setMainPackage(null)}
-                          className="text-gray-400 hover:text-rose-600 p-1 cursor-pointer transition-colors"
+                          className="text-gray-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 shrink-0 cursor-pointer transition-colors"
                           title="Hapus paket"
                         >
                           <X className="w-4 h-4" />
@@ -1236,10 +1335,10 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     {addons.map((addon) => (
                       <div
                         key={addon.service.id}
-                        className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/70 flex items-center justify-between gap-2"
+                        className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/70 flex items-center justify-between gap-2.5"
                       >
-                        <div className="min-w-0">
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 uppercase tracking-wider inline-block">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-50 text-[#8C3A50] border border-rose-200/70 uppercase tracking-wider inline-block">
                             Add-on ({addon.quantity}x)
                           </span>
                           <p className="text-xs font-semibold text-gray-900 truncate mt-1">{addon.service.name}</p>
@@ -1250,7 +1349,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                         <button
                           type="button"
                           onClick={() => removeAddon(addon.service.id!)}
-                          className="text-gray-400 hover:text-rose-600 p-1 cursor-pointer transition-colors"
+                          className="text-gray-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 shrink-0 cursor-pointer transition-colors"
                           title="Hapus add-on"
                         >
                           <X className="w-4 h-4" />
@@ -1259,29 +1358,31 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     ))}
                   </div>
 
-                  <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-xs">
-                    <span className="text-gray-600 font-medium">Total Tagihan:</span>
-                    <span className="font-mono font-black text-sm text-[#8C3A50]">
-                      Rp {totalPrice.toLocaleString('id-ID')}
-                    </span>
-                  </div>
+                  <div className="p-3 border-t border-gray-100 bg-white space-y-2.5 shrink-0">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-600 font-medium">Total Tagihan:</span>
+                      <span className="font-mono font-black text-sm sm:text-base text-[#8C3A50]">
+                        Rp {totalPrice.toLocaleString('id-ID')}
+                      </span>
+                    </div>
 
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <Link
-                      to="/auth/login/services"
-                      onClick={() => setIsCartDropdownOpen(false)}
-                      className="w-full py-2 px-3 rounded-xl border border-gray-200 hover:bg-rose-50/50 hover:border-rose-200 hover:text-[#8C3A50] text-gray-700 text-xs font-semibold text-center transition-colors"
-                    >
-                      Katalog
-                    </Link>
-                    <Link
-                      to="/auth/login/services/checkout"
-                      onClick={() => setIsCartDropdownOpen(false)}
-                      className="w-full py-2 px-3 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-xs font-bold text-center shadow-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                    >
-                      <span>Checkout</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </Link>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Link
+                        to="/auth/login/services"
+                        onClick={() => setIsCartDropdownOpen(false)}
+                        className="w-full py-2.5 sm:py-2 px-3 rounded-xl border border-gray-200 hover:bg-rose-50/50 hover:border-rose-200 hover:text-[#8C3A50] text-gray-700 text-xs font-semibold text-center transition-colors"
+                      >
+                        Katalog
+                      </Link>
+                      <Link
+                        to="/auth/login/services/checkout"
+                        onClick={() => setIsCartDropdownOpen(false)}
+                        className="w-full py-2.5 sm:py-2 px-3 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-xs font-bold text-center shadow-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <span>Checkout</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1314,15 +1415,23 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
               )}
             </button>
 
+            {isNotifDropdownOpen && (
+              <div
+                className="fixed inset-0 top-16 bg-slate-900/20 backdrop-blur-[1px] z-40 sm:hidden"
+                onClick={() => setIsNotifDropdownOpen(false)}
+                aria-hidden="true"
+              />
+            )}
+
             <div
               className={cn(
-                "absolute right-0 mt-1.5 w-80 sm:w-96 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 origin-top-right transition-all duration-200 ease-out",
+                "fixed inset-x-3 top-[70px] mx-auto w-auto max-w-md sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 sm:mx-0 sm:mt-2 sm:w-96 sm:max-w-none bg-white rounded-2xl shadow-xl border border-gray-200 py-1.5 z-50 origin-top sm:origin-top-right transition-all duration-200 ease-out flex flex-col max-h-[calc(100dvh-86px)] sm:max-h-[calc(100vh-96px)] overflow-hidden",
                 isNotifDropdownOpen
                   ? "opacity-100 scale-100 translate-y-0 pointer-events-auto visible"
                   : "opacity-0 scale-95 -translate-y-1.5 pointer-events-none invisible"
               )}
             >
-              <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
+              <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between shrink-0">
                 <span className="text-sm font-bold text-gray-900">Notifikasi</span>
                 {unreadCount > 0 && (
                   <button
@@ -1335,7 +1444,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                 )}
               </div>
 
-              <div className="max-h-80 overflow-y-auto divide-y divide-gray-100">
+              <div className="flex-1 min-h-0 overflow-y-auto modal-scroll divide-y divide-gray-100">
                 {notifications.map((notif) => {
                   const isRead = readNotifIds.includes(notif.id);
                   return (
@@ -1565,7 +1674,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
             </button>
           </div>
 
-          <nav className="flex-1 flex flex-col gap-1 p-4 overflow-y-auto">
+          <nav className="flex-1 flex flex-col gap-1 p-3.5 sm:p-4 overflow-y-auto hide-scrollbar">
             {navItems
               .filter(item => !item.role || item.role.includes(appUser.role))
               .map((item) => {
@@ -1574,31 +1683,189 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     ? location.pathname === '/auth/login'
                     : location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
                 return (
-                  <Link
-                    key={item.name}
-                    to={item.path}
-                    title={isSidebarCollapsed ? item.name : undefined}
-                    onClick={() => setIsMobileMenuOpen(false)}
-                    className={cn(
-                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                      isSidebarCollapsed ? "justify-center px-0" : "",
-                      isItemActive
-                        ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                        : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
-                    )}
-                  >
-                    <item.icon className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
-                    {!isSidebarCollapsed && (
-                      <div className="flex items-center justify-between flex-1 min-w-0">
-                        <span className="truncate">{item.name}</span>
-                        {item.badge && (
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 leading-none">
-                            {item.badge}
-                          </span>
-                        )}
+                  <React.Fragment key={item.name}>
+                    <Link
+                      to={item.path}
+                      title={isSidebarCollapsed ? item.name : undefined}
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className={cn(
+                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                        isSidebarCollapsed ? "justify-center px-0" : "",
+                        isItemActive
+                          ? "bg-rose-50 text-[#8C3A50] font-semibold"
+                          : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                      )}
+                    >
+                      <item.icon className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                      {!isSidebarCollapsed && (
+                        <div className="flex items-center justify-between flex-1 min-w-0">
+                          <span className="truncate">{item.name}</span>
+                          {item.badge && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 leading-none">
+                              {item.badge}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </Link>
+
+                    {/* Wedding Planner Dropdown (Tepat di bawah menu Events, dengan badge New) */}
+                    {item.path === '/auth/login/events' && showWeddingPlannerNav && (
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isSidebarCollapsed) {
+                              setIsSidebarCollapsed(false);
+                              setIsWeddingPlannerMenuOpen(true);
+                              setIsServiceInfoMenuOpen(false);
+                              setIsUserMenuOpen(false);
+                              setIsAdminPanelMenuOpen(false);
+                            } else {
+                              const nextState = !isWeddingPlannerMenuOpen;
+                              setIsWeddingPlannerMenuOpen(nextState);
+                              if (nextState) {
+                                setIsServiceInfoMenuOpen(false);
+                                setIsUserMenuOpen(false);
+                                setIsAdminPanelMenuOpen(false);
+                              }
+                            }
+                          }}
+                          title={isSidebarCollapsed ? "Wedding Planner (New)" : undefined}
+                          className={cn(
+                            "w-full flex items-center justify-between gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                            isSidebarCollapsed ? "justify-center px-0" : "",
+                            isWeddingPlannerMenuOpen || location.pathname.startsWith('/auth/login/wedding-planner')
+                              ? "bg-rose-50/70 text-[#8C3A50]"
+                              : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                          )}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <HeartHandshake className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                            {!isSidebarCollapsed && (
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="whitespace-nowrap">Wedding Planner</span>
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-[#8C3A50] border border-rose-200 leading-none shrink-0">
+                                  New
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          {!isSidebarCollapsed && (
+                            <ChevronRight
+                              className={cn(
+                                "h-4 w-4 shrink-0 transition-transform duration-300 ease-in-out",
+                                isWeddingPlannerMenuOpen ? "rotate-90 text-[#8C3A50]" : ""
+                              )}
+                            />
+                          )}
+                        </button>
+                        <div
+                          className={cn(
+                            "grid transition-all duration-300 ease-in-out",
+                            !isSidebarCollapsed && isWeddingPlannerMenuOpen
+                              ? "grid-rows-[1fr] opacity-100 mt-1"
+                              : "grid-rows-[0fr] opacity-0 mt-0 pointer-events-none"
+                          )}
+                        >
+                          <div className="overflow-hidden">
+                            <div className="ml-8 flex flex-col gap-1 space-y-0.5 border-l border-rose-100 pl-2">
+                              <Link
+                                to="/auth/login/wedding-planner"
+                                onClick={() => setIsMobileMenuOpen(false)}
+                                className={cn(
+                                  "block rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                                  location.pathname === '/auth/login/wedding-planner'
+                                    ? "bg-rose-50 text-[#8C3A50] font-semibold"
+                                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                                )}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <LayoutDashboard className="h-4 w-4 shrink-0" />
+                                  <span>1. Overview</span>
+                                </div>
+                              </Link>
+                              <Link
+                                to="/auth/login/wedding-planner/checklist"
+                                onClick={() => setIsMobileMenuOpen(false)}
+                                className={cn(
+                                  "block rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                                  location.pathname === '/auth/login/wedding-planner/checklist'
+                                    ? "bg-rose-50 text-[#8C3A50] font-semibold"
+                                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                                )}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <ListChecks className="h-4 w-4 shrink-0" />
+                                  <span>2. Checklist</span>
+                                </div>
+                              </Link>
+                              <Link
+                                to="/auth/login/wedding-planner/vendors"
+                                onClick={() => setIsMobileMenuOpen(false)}
+                                className={cn(
+                                  "block rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                                  location.pathname === '/auth/login/wedding-planner/vendors'
+                                    ? "bg-rose-50 text-[#8C3A50] font-semibold"
+                                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                                )}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Store className="h-4 w-4 shrink-0" />
+                                  <span>3. Vendor</span>
+                                </div>
+                              </Link>
+                              <Link
+                                to="/auth/login/wedding-planner/budget"
+                                onClick={() => setIsMobileMenuOpen(false)}
+                                className={cn(
+                                  "block rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                                  location.pathname === '/auth/login/wedding-planner/budget'
+                                    ? "bg-rose-50 text-[#8C3A50] font-semibold"
+                                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                                )}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Wallet className="h-4 w-4 shrink-0" />
+                                  <span>4. Anggaran</span>
+                                </div>
+                              </Link>
+                              <Link
+                                to="/auth/login/wedding-planner/rundown"
+                                onClick={() => setIsMobileMenuOpen(false)}
+                                className={cn(
+                                  "block rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                                  location.pathname === '/auth/login/wedding-planner/rundown'
+                                    ? "bg-rose-50 text-[#8C3A50] font-semibold"
+                                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                                )}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <CalendarClock className="h-4 w-4 shrink-0" />
+                                  <span>5. Rundown</span>
+                                </div>
+                              </Link>
+                              <Link
+                                to="/auth/login/wedding-planner/seating"
+                                onClick={() => setIsMobileMenuOpen(false)}
+                                className={cn(
+                                  "block rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                                  location.pathname === '/auth/login/wedding-planner/seating'
+                                    ? "bg-rose-50 text-[#8C3A50] font-semibold"
+                                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                                )}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <LayoutGrid className="h-4 w-4 shrink-0" />
+                                  <span>6. Denah Meja</span>
+                                </div>
+                              </Link>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )}
-                  </Link>
+                  </React.Fragment>
                 );
               })}
 
@@ -1610,12 +1877,14 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     if (isSidebarCollapsed) {
                       setIsSidebarCollapsed(false);
                       setIsServiceInfoMenuOpen(true);
+                      setIsWeddingPlannerMenuOpen(false);
                       setIsUserMenuOpen(false);
                       setIsAdminPanelMenuOpen(false);
                     } else {
                       const nextState = !isServiceInfoMenuOpen;
                       setIsServiceInfoMenuOpen(nextState);
                       if (nextState) {
+                        setIsWeddingPlannerMenuOpen(false);
                         setIsUserMenuOpen(false);
                         setIsAdminPanelMenuOpen(false);
                       }
@@ -1742,12 +2011,14 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       if (isSidebarCollapsed) {
                         setIsSidebarCollapsed(false);
                         setIsUserMenuOpen(true);
+                        setIsWeddingPlannerMenuOpen(false);
                         setIsServiceInfoMenuOpen(false);
                         setIsAdminPanelMenuOpen(false);
                       } else {
                         const nextState = !isUserMenuOpen;
                         setIsUserMenuOpen(nextState);
                         if (nextState) {
+                          setIsWeddingPlannerMenuOpen(false);
                           setIsServiceInfoMenuOpen(false);
                           setIsAdminPanelMenuOpen(false);
                         }
@@ -1860,12 +2131,14 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                         if (isSidebarCollapsed) {
                           setIsSidebarCollapsed(false);
                           setIsAdminPanelMenuOpen(true);
+                          setIsWeddingPlannerMenuOpen(false);
                           setIsServiceInfoMenuOpen(false);
                           setIsUserMenuOpen(false);
                         } else {
                           const nextState = !isAdminPanelMenuOpen;
                           setIsAdminPanelMenuOpen(nextState);
                           if (nextState) {
+                            setIsWeddingPlannerMenuOpen(false);
                             setIsServiceInfoMenuOpen(false);
                             setIsUserMenuOpen(false);
                           }

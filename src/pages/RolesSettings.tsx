@@ -114,9 +114,9 @@ export default function RolesSettings() {
           Alur Hierarki Pendelegasian Role & Naungan Bisnis
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-center">
-          <div className="p-3.5 rounded-xl bg-purple-50 border border-purple-200">
-            <div className="text-xs font-bold text-purple-900">1. Super Admin</div>
-            <p className="text-[11px] text-purple-700 mt-1">
+          <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200">
+            <div className="text-xs font-bold text-[#722B3E]">1. Super Admin</div>
+            <p className="text-[11px] text-[#8C3A50] mt-1">
               Menambah <strong>Owner</strong> + Nama Bisnis WO & mengatur kuota.
             </p>
           </div>

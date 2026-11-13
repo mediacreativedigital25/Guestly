@@ -24,22 +24,103 @@ export function parseFirestoreDate(timestamp: any): Date | null {
   return null;
 }
 
-export function getExpirationDate(input: string | { date?: string; activeUntil?: string }): Date {
-  const dateString = typeof input === 'string' ? input : (input?.activeUntil || input?.date || new Date().toISOString());
-  const date = new Date(dateString);
-  if (isNaN(date.getTime())) return new Date();
-  date.setDate(date.getDate() + 30); // Or whatever default
-  return date;
+export const DEFAULT_EVENT_ACTIVE_DAYS = 30;
+
+export function formatDateInputYMD(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
-export function getDaysRemaining(input: string | { date?: string; activeUntil?: string }): number {
+export function computeDefaultActiveUntil(baseDate?: any, days: number = DEFAULT_EVENT_ACTIVE_DAYS): string {
+  const parsed = parseFirestoreDate(baseDate) || new Date();
+  const target = new Date(parsed.getTime());
+  target.setDate(target.getDate() + Math.max(1, days));
+  return formatDateInputYMD(target);
+}
+
+export function resolveEventActiveUntil(
+  input?: string | { activeUntil?: any; createdAt?: any; activeDays?: number; date?: string } | null
+): Date | null {
+  if (!input) return null;
+  if (typeof input === 'string') {
+    const d = parseFirestoreDate(input);
+    if (!d) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(input.trim())) {
+      d.setHours(23, 59, 59, 999);
+    }
+    return d;
+  }
+
+  const rawActive = input.activeUntil;
+  if (rawActive) {
+    const parsedActive = parseFirestoreDate(rawActive);
+    if (parsedActive && !isNaN(parsedActive.getTime())) {
+      if (typeof rawActive === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rawActive.trim())) {
+        parsedActive.setHours(23, 59, 59, 999);
+      }
+      return parsedActive;
+    }
+  }
+
+  const days = typeof input.activeDays === 'number' && input.activeDays > 0
+    ? input.activeDays
+    : DEFAULT_EVENT_ACTIVE_DAYS;
+
+  const created = parseFirestoreDate(input.createdAt);
+  if (created && !isNaN(created.getTime())) {
+    const expiry = new Date(created.getTime());
+    expiry.setDate(expiry.getDate() + days);
+    expiry.setHours(23, 59, 59, 999);
+    return expiry;
+  }
+
+  const evDate = parseFirestoreDate(input.date);
+  if (evDate && !isNaN(evDate.getTime())) {
+    const expiry = new Date(evDate.getTime());
+    expiry.setDate(expiry.getDate() + days);
+    expiry.setHours(23, 59, 59, 999);
+    return expiry;
+  }
+
+  return null;
+}
+
+export function getExpirationDate(
+  input: string | { date?: string; activeUntil?: any; createdAt?: any; activeDays?: number }
+): Date {
+  return resolveEventActiveUntil(input) || new Date();
+}
+
+export function getDaysRemaining(
+  input?: string | { date?: string; activeUntil?: any; createdAt?: any; activeDays?: number } | null
+): number {
   if (!input) return 0;
-  const diff = getExpirationDate(input).getTime() - new Date().getTime();
+  const expiry = resolveEventActiveUntil(input);
+  if (!expiry) return 0;
+  const diff = expiry.getTime() - Date.now();
   return Math.max(0, Math.ceil(diff / (1000 * 3600 * 24)));
 }
 
-export function isEventExpired(input: string | { date?: string; activeUntil?: string }): boolean {
-  return getDaysRemaining(input) <= 0;
+export function isEventExpired(
+  input?: string | { date?: string; activeUntil?: any; createdAt?: any; activeDays?: number; subscriptionStatus?: string } | null
+): boolean {
+  if (!input) return false;
+  const expiry = resolveEventActiveUntil(input);
+  if (expiry) {
+    return expiry.getTime() < Date.now();
+  }
+  if (typeof input === 'object' && input.subscriptionStatus === 'expired') return true;
+  return false;
+}
+
+export function isEventInactiveOrExpired(
+  event?: { status?: string; date?: string; activeUntil?: any; createdAt?: any; activeDays?: number; subscriptionStatus?: string } | null
+): boolean {
+  if (!event) return false;
+  if (event.status === 'draft') return true;
+  return isEventExpired(event);
 }
 
 export function isGreetingScreenUser(

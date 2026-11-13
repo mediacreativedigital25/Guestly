@@ -360,8 +360,74 @@ export interface ServiceInvoice {
   totalGuestQuota?: number;
   totalWaBlastQuota?: number;
   totalActivePeriodDays?: number;
+  targetEventId?: string;
+  targetEventTitle?: string;
   status: 'pending' | 'paid' | 'cancelled';
   paymentMethod?: string;
   createdAt: any;
   updatedAt: any;
 }
+
+export type PlannerChecklistPhase = 'H-6 Bulan' | 'H-3 Bulan' | 'H-1 Bulan' | 'H-7 Hari' | 'Hari-H';
+
+export interface PlannerChecklistItem {
+  id: string;
+  title: string;
+  phase: PlannerChecklistPhase;
+  pic: string;
+  dueDate?: string;
+  completed: boolean;
+}
+
+export type PlannerVendorCategory =
+  | 'Venue'
+  | 'Catering'
+  | 'Dekorasi'
+  | 'MUA & Busana'
+  | 'Dokumentasi'
+  | 'Entertainment & MC'
+  | 'WO & Lainnya';
+
+export type PlannerVendorStatus = 'Survey' | 'Booking' | 'DP Dibayar' | 'Lunas';
+
+export interface PlannerVendorItem {
+  id: string;
+  name: string;
+  category: PlannerVendorCategory;
+  picName?: string;
+  phone?: string;
+  contractValue: number;
+  paidAmount: number;
+  status: PlannerVendorStatus;
+  notes?: string;
+}
+
+export type PlannerRundownSegment = 'Persiapan' | 'Akad / Pemberkatan' | 'Resepsi' | 'Penutup';
+
+export interface PlannerRundownItem {
+  id: string;
+  startTime: string;
+  endTime: string;
+  segment: PlannerRundownSegment;
+  activity: string;
+  pic: string;
+  location?: string;
+  notes?: string;
+}
+
+export interface WeddingPlannerData {
+  id?: string;
+  eventId: string;
+  clientId?: string;
+  clientName?: string;
+  partnerId?: string;
+  partnerName?: string;
+  plannerStatus?: 'active' | 'archived';
+  totalBudget: number;
+  checklist: PlannerChecklistItem[];
+  vendors: PlannerVendorItem[];
+  rundown: PlannerRundownItem[];
+  createdAt?: any;
+  updatedAt?: any;
+}
+

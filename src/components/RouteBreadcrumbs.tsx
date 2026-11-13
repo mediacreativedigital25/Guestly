@@ -57,6 +57,12 @@ export default function RouteBreadcrumbs() {
           shortCode: 'View',
           isAction: true,
         });
+      } else if (second && third === 'send-access') {
+        segments.push({
+          label: 'Kirim Akses Client',
+          shortCode: 'Kirim',
+          isAction: true,
+        });
       }
     } else if (first === 'events') {
       segments.push({
@@ -81,6 +87,17 @@ export default function RouteBreadcrumbs() {
           segments.push({
             label: 'Manajemen Meja',
             shortCode: 'Tables',
+            isAction: true,
+          });
+        } else if (third === 'send-access') {
+          segments.push({
+            label: 'Detail Acara',
+            shortCode: 'Detail',
+            to: `/auth/login/events/${second}`,
+          });
+          segments.push({
+            label: 'Kirim Akses Client',
+            shortCode: 'Kirim',
             isAction: true,
           });
         } else if (third === 'scan') {
@@ -280,7 +297,19 @@ export default function RouteBreadcrumbs() {
       segments.push({
         label: 'Wedding Planner',
         shortCode: 'Wedding Planner',
+        to: second ? '/auth/login/wedding-planner' : undefined,
       });
+      if (second === 'checklist') {
+        segments.push({ label: 'Checklist & Tugas', shortCode: 'Checklist' });
+      } else if (second === 'vendors') {
+        segments.push({ label: 'Vendor & Kontrak', shortCode: 'Vendors' });
+      } else if (second === 'budget') {
+        segments.push({ label: 'Anggaran & Pembayaran', shortCode: 'Budget' });
+      } else if (second === 'rundown') {
+        segments.push({ label: 'Rundown Hari-H', shortCode: 'Rundown' });
+      } else if (second === 'seating') {
+        segments.push({ label: 'Denah Meja & Tamu', shortCode: 'Seating' });
+      }
     } else if (first === 'media') {
       segments.push({
         label: 'Media Library',

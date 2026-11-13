@@ -239,37 +239,6 @@ export default function ActiveSessions() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center shadow-sm">
-              <Radio className="w-5 h-5 animate-pulse" />
-            </div>
-            <div>
-              <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-                <span>Pemantau Sesi Aktif</span>
-                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                  1 Akun = 1 Device
-                </span>
-              </h1>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Kelola perangkat yang terhubung, amankan lisensi akun, dan lakukan logout paksa (*force logout*) secara instan.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <div className="text-right hidden sm:block">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Aturan Otomatis</span>
-            <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-block mt-0.5">
-              Auto-Reset jika 2 Jam Idle
-            </span>
-          </div>
-        </div>
-      </div>
-
       {/* Stats Overview */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-2xs flex items-center gap-3.5">

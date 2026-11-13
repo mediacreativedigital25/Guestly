@@ -356,14 +356,14 @@ export default function WhiteLabelSettings() {
                   }
                   showCancelAlert('Perubahan pengaturan White Label dibatalkan.');
                 }}
-                className="px-5 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 font-medium disabled:opacity-50 transition-colors"
+                className="px-5 py-2.5 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 font-semibold disabled:opacity-50 transition-colors cursor-pointer"
               >
                 Batal
               </button>
               <button
                 type="submit"
                 disabled={isSaving}
-                className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
+                className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-semibold shadow-xs disabled:opacity-50 flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
                 {isSaving ? (
                   <>

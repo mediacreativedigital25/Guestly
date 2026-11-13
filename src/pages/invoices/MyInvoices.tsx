@@ -189,14 +189,14 @@ export default function MyInvoices() {
                         <>
                           <Link
                             to={`/pay/${inv.id}`}
-                            className="text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-1 cursor-pointer"
+                            className="text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-colors inline-flex items-center gap-1 cursor-pointer"
                           >
                             <span>Bayar</span>
                             <ExternalLink className="w-3.5 h-3.5" />
                           </Link>
                           <button
                             onClick={() => handlePayNow(inv)}
-                            className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1.5 rounded-md text-sm font-medium transition-colors inline-block cursor-pointer"
+                            className="text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors inline-block cursor-pointer"
                             title="Rincian Instruksi"
                           >
                             Detail

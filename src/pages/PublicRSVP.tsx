@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { supabaseDb } from '../lib/supabaseDb';
 import { EventRecord, Guest } from '../types';
-import { CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
-import { parseFirestoreDate } from '../lib/utils';
+import { CheckCircle, AlertCircle, Loader2, Lock } from 'lucide-react';
+import { parseFirestoreDate, isEventExpired, isEventInactiveOrExpired } from '../lib/utils';
 
 const THEMES: Record<string, {
   bgApp: string;
@@ -163,6 +163,10 @@ export default function PublicRSVP() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isEventInactiveOrExpired(eventData)) {
+      setErrorObj('Halaman RSVP sedang dikunci karena masa aktif acara telah berakhir atau berstatus Draft.');
+      return;
+    }
     if (!name.trim()) {
       setErrorObj("Nama wajib diisi");
       return;
@@ -271,6 +275,32 @@ export default function PublicRSVP() {
          <AlertCircle className="w-16 h-16 text-red-500 mb-4" />
          <h1 className="text-2xl font-bold text-gray-900 mb-2">Acara Tidak Ditemukan</h1>
          <p className="text-gray-500 text-center">Maaf, tautan tidak valid atau acara telah dihapus.</p>
+       </div>
+     );
+  }
+
+  if (isEventInactiveOrExpired(eventData)) {
+     const expired = isEventExpired(eventData);
+     return (
+       <div className="min-h-screen bg-rose-50/40 flex flex-col justify-center items-center p-4">
+         <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-rose-100 p-8 text-center space-y-4">
+           <div className="w-14 h-14 rounded-2xl bg-rose-50 text-[#8C3A50] flex items-center justify-center mx-auto border border-rose-200/70">
+             <Lock className="w-7 h-7" />
+           </div>
+           <div className="space-y-1.5">
+             <p className="text-xs font-bold uppercase tracking-widest text-[#8C3A50]">
+               {expired ? 'Masa Aktif Berakhir' : 'Acara Sedang Nonaktif'}
+             </p>
+             <h1 className="text-xl font-bold text-slate-900">
+               {eventData.title || 'Buku Tamu Digital'}
+             </h1>
+           </div>
+           <p className="text-sm text-slate-600 leading-relaxed">
+             {expired
+               ? 'Masa aktif 30 hari layanan buku tamu digital untuk acara ini telah berakhir dan status otomatis menjadi Draft. Hubungi penyelenggara atau pemilik acara untuk memperpanjang paket.'
+               : 'Form RSVP & Buku Tamu Publik saat ini sedang dinonaktifkan sementara oleh penyelenggara (status Draft).'}
+           </p>
+         </div>
        </div>
      );
   }

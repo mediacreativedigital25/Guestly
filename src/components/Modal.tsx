@@ -13,18 +13,19 @@ export function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl'
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-gray-900/50 backdrop-blur-sm">
-      <div className={`bg-white rounded-xl shadow-xl w-full ${maxWidth} max-h-[92vh] flex flex-col overflow-hidden`}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
-          <button 
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/45 backdrop-blur-xs">
+      <div className={`bg-white rounded-2xl shadow-xl border border-slate-200/80 w-full ${maxWidth} max-h-[90vh] flex flex-col overflow-hidden`}>
+        <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-slate-100 shrink-0 bg-white">
+          <h2 className="text-lg sm:text-xl font-semibold text-slate-900">{title}</h2>
+          <button
+            type="button"
             onClick={onClose}
-            className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-colors"
+            className="p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="p-6 overflow-y-auto">
+        <div className="p-5 sm:p-6 overflow-y-auto modal-scroll flex-1 min-h-0">
           {children}
         </div>
       </div>

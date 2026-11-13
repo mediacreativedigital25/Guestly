@@ -110,13 +110,13 @@ export default function ServicesDashboard() {
         <div className="flex justify-end items-center gap-3">
           <Link
             to="/auth/login/services/my"
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium text-sm"
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-semibold text-sm transition-colors"
           >
             Layanan Saya
           </Link>
           <Link
             to="/auth/login/services/catalog"
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium text-sm"
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-semibold text-sm shadow-xs transition-colors"
           >
             Beli Layanan
           </Link>

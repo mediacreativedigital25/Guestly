@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, where } from 'firebase/firestore';
+import { collection, query, getDocs, where, doc, getDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
-import { GuestlyService } from '../../types';
+import { GuestlyService, EventRecord } from '../../types';
 import { useAuth } from '../../AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useCart } from '../../CartContext';
 import { Modal } from '../../components/Modal';
+import { isEventExpired, resolveEventActiveUntil } from '../../lib/utils';
 import {
   ShoppingBag,
   Sparkles,
@@ -37,6 +38,9 @@ export default function ServicesCatalog() {
   const [activeTab, setActiveTab] = useState<'all' | 'package' | 'addon'>('all');
   const [isCartModalOpen, setIsCartModalOpen] = useState(false);
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [renewEventData, setRenewEventData] = useState<EventRecord | null>(null);
+
   const { appUser } = useAuth();
   const navigate = useNavigate();
   const {
@@ -50,6 +54,8 @@ export default function ServicesCatalog() {
     clearCart,
     isAddonInCart,
     isPackageInCart,
+    renewEventId,
+    setRenewEventId,
     itemCount,
     totalPrice,
     totalNormalPrice,
@@ -60,6 +66,27 @@ export default function ServicesCatalog() {
     totalWaBlastQuota,
     totalActivePeriodDays,
   } = useCart();
+
+  useEffect(() => {
+    const param = searchParams.get('renewEvent');
+    if (param && param !== renewEventId) {
+      setRenewEventId(param);
+    }
+  }, [searchParams, renewEventId, setRenewEventId]);
+
+  useEffect(() => {
+    if (!renewEventId) {
+      setRenewEventData(null);
+      return;
+    }
+    getDoc(doc(db, 'events', renewEventId))
+      .then((snap) => {
+        if (snap.exists()) {
+          setRenewEventData({ id: snap.id, ...snap.data() } as EventRecord);
+        }
+      })
+      .catch(() => {});
+  }, [renewEventId]);
 
   useEffect(() => {
     const fetchServices = async () => {
@@ -115,40 +142,54 @@ export default function ServicesCatalog() {
   };
 
   return (
-    <div className="space-y-8 pb-32 max-w-7xl mx-auto">
-      {/* Guestly Signature Hero Header */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-[#4A1623] via-[#652435] to-[#8C3A50] text-white p-7 sm:p-9 rounded-3xl border border-rose-900/40 shadow-xl shadow-[#8C3A50]/15">
-        <div className="absolute top-0 right-0 -mr-16 -mt-16 w-80 h-80 rounded-full bg-gradient-to-bl from-rose-300/20 to-transparent blur-2xl pointer-events-none" />
-        <div className="absolute bottom-0 left-1/3 -mb-20 w-64 h-64 rounded-full bg-white/5 blur-3xl pointer-events-none" />
-
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-bold bg-white/10 backdrop-blur-md text-rose-200 border border-white/20 mb-3">
-              <Sparkles className="w-3.5 h-3.5 text-rose-200" />
-              <span>GUESTLY CLOUD MARKETPLACE</span>
+    <div className="space-y-6 pb-8 max-w-7xl mx-auto">
+      {/* Target Event Renewal Banner */}
+      {renewEventId && (
+        <div className="bg-rose-50/90 border border-rose-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#8C3A50] text-white flex items-center justify-center shrink-0">
+              <Calendar className="w-5 h-5" />
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-              Katalog Layanan &amp; Paket Kuota
-            </h1>
-            <p className="text-sm text-rose-100/90 mt-2 leading-relaxed">
-              Pilih paket fondasi buku tamu digital sesuai skala acara Anda, lalu gabungkan dengan add-on kuota tambahan dalam satu invoice resmi.
-            </p>
-          </div>
-
-          {/* Trust Badge / Header Info */}
-          <div className="hidden sm:flex items-center gap-3 shrink-0">
-            <div className="bg-black/20 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/15 text-xs text-rose-100 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center text-rose-200 shrink-0">
-                <ShieldCheck className="w-5 h-5" />
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#8C3A50]">
+                  Mode Perpanjangan Acara
+                </span>
+                {renewEventData && isEventExpired(renewEventData) && (
+                  <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200 text-[10px] font-bold">
+                    Kedaluwarsa (Draft)
+                  </span>
+                )}
               </div>
-              <div>
-                <span className="font-bold text-white block">Aktivasi Instan &amp; Resmi</span>
-                <span className="text-[11px] text-rose-200">Kuota &amp; lisensi bertambah otomatis</span>
-              </div>
+              <h2 className="text-sm sm:text-base font-bold text-slate-900 mt-0.5">
+                {renewEventData?.title || `Acara #${renewEventId}`}
+              </h2>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Pilih Paket Utama atau Add-on Perpanjangan Masa Aktif. Setelah invoice dibayar &amp; dikonfirmasi, masa aktif acara ini otomatis bertambah dan statusnya kembali <strong>Published</strong>.
+                {renewEventData && resolveEventActiveUntil(renewEventData) && (
+                  <span className="ml-1 text-slate-500">
+                    (Batas saat ini: {resolveEventActiveUntil(renewEventData)!.toLocaleDateString('id-ID')})
+                  </span>
+                )}
+              </p>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              setRenewEventId(null);
+              if (searchParams.has('renewEvent')) {
+                searchParams.delete('renewEvent');
+                setSearchParams(searchParams, { replace: true });
+              }
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-rose-200 hover:bg-rose-100 text-xs font-semibold text-[#8C3A50] self-start sm:self-center shrink-0 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+            <span>Batalkan Target Acara</span>
+          </button>
         </div>
-      </div>
+      )}
 
       {/* Filter Tabs Navigation */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-2.5 rounded-2xl border border-slate-200/90 shadow-2xs">
@@ -298,7 +339,7 @@ export default function ServicesCatalog() {
                             <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                               <span className="text-[10px] text-slate-400 uppercase font-bold block">WA Blast</span>
                               <span className="font-bold text-slate-800 flex items-center gap-1.5 mt-0.5">
-                                <Send className="w-3.5 h-3.5 text-purple-600" />
+                                <Send className="w-3.5 h-3.5 text-[#8C3A50]" />
                                 {service.waBlastQuota ? `${service.waBlastQuota.toLocaleString('id-ID')}` : 'Tersedia'}
                               </span>
                             </div>
@@ -460,7 +501,7 @@ export default function ServicesCatalog() {
                             </span>
                           ) : null}
                           {service.waBlastQuota ? (
-                            <span className="px-2 py-0.5 rounded-md bg-purple-50 text-purple-800 font-semibold border border-purple-100">
+                            <span className="px-2 py-0.5 rounded-md bg-rose-50 text-[#8C3A50] font-semibold border border-rose-200/70">
                               +{service.waBlastQuota.toLocaleString('id-ID')} WA Blast
                             </span>
                           ) : null}
@@ -558,7 +599,7 @@ export default function ServicesCatalog() {
             </div>
 
             <div className="bg-white p-4 rounded-2xl border border-slate-200/80 flex items-start gap-3 shadow-2xs">
-              <div className="p-2 bg-purple-50 text-purple-600 rounded-xl shrink-0">
+              <div className="p-2 bg-rose-50 text-[#8C3A50] rounded-xl shrink-0">
                 <ShieldCheck className="w-4 h-4" />
               </div>
               <div>
@@ -574,33 +615,33 @@ export default function ServicesCatalog() {
 
       {/* Floating Glassmorphic Cart Drawer Bar (Guestly Palette) */}
       {itemCount > 0 && (
-        <div className="fixed bottom-4 left-4 right-4 md:left-64 md:right-8 z-40">
-          <div className="bg-[#2D0F17]/95 backdrop-blur-xl text-white p-3.5 sm:p-4 rounded-2xl shadow-2xl border border-rose-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-3 duration-200">
+        <div className="sticky bottom-3 sm:bottom-4 z-40 mt-6">
+          <div className="bg-[#2D0F17]/95 backdrop-blur-xl text-white p-3 sm:p-4 rounded-2xl shadow-2xl border border-rose-900/40 flex flex-col lg:flex-row lg:items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-3 duration-200">
             {/* Left summary */}
-            <div className="flex items-center gap-3.5">
-              <div className="relative">
-                <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-[#8C3A50] to-[#A3435E] text-white flex items-center justify-center shadow-md">
-                  <ShoppingBag className="w-5 h-5" />
+            <div className="flex items-start sm:items-center gap-3 min-w-0">
+              <div className="relative shrink-0">
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-[#8C3A50] to-[#A3435E] text-white flex items-center justify-center shadow-md">
+                  <ShoppingBag className="w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
                 <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-400 text-[#2D0F17] text-[10px] font-black rounded-full flex items-center justify-center border-2 border-[#2D0F17]">
                   {itemCount}
                 </span>
               </div>
 
-              <div>
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-bold text-white">
+                  <span className="text-xs sm:text-sm font-bold text-white truncate max-w-full">
                     {mainPackage ? mainPackage.name : 'Paket Belum Dipilih'}
                   </span>
                   {addons.length > 0 && (
-                    <span className="text-[11px] font-bold bg-rose-500/20 text-rose-200 px-2.5 py-0.5 rounded-full border border-rose-400/30">
-                      +{addons.length} Booster Add-on
+                    <span className="text-[10px] sm:text-[11px] font-bold bg-rose-500/20 text-rose-200 px-2 py-0.5 rounded-full border border-rose-400/30 shrink-0">
+                      +{addons.length} Add-on
                     </span>
                   )}
                 </div>
 
                 {/* Cumulative Quotas Pills */}
-                <div className="flex items-center gap-1.5 text-[11px] text-rose-100/90 mt-1 flex-wrap">
+                <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] text-rose-100/90 mt-1 flex-wrap">
                   {totalGuestQuota > 0 && (
                     <span className="bg-white/10 px-2 py-0.5 rounded-md border border-white/10">
                       👥 {totalGuestQuota.toLocaleString('id-ID')} Tamu
@@ -621,19 +662,19 @@ export default function ServicesCatalog() {
             </div>
 
             {/* Right price and actions */}
-            <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/10">
-              <div className="text-right sm:pr-3">
-                <span className="text-[10px] text-rose-200/80 block uppercase tracking-wider font-semibold">Total Tagihan</span>
-                <span className="text-xl sm:text-2xl font-black font-mono text-white tracking-tight">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between lg:justify-end gap-2.5 sm:gap-3 pt-2.5 lg:pt-0 border-t lg:border-t-0 border-white/10 shrink-0">
+              <div className="flex items-baseline justify-between sm:block sm:text-right sm:pr-2">
+                <span className="text-[10px] text-rose-200/80 sm:block uppercase tracking-wider font-semibold">Total Tagihan</span>
+                <span className="text-lg sm:text-2xl font-black font-mono text-white tracking-tight">
                   Rp {totalPrice.toLocaleString('id-ID')}
                 </span>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="grid grid-cols-2 sm:flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setIsCartModalOpen(true)}
-                  className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-rose-100 text-xs font-bold transition-colors cursor-pointer border border-white/15"
+                  className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-rose-100 text-xs font-bold transition-colors cursor-pointer border border-white/15 text-center"
                 >
                   Rincian
                 </button>
@@ -641,10 +682,10 @@ export default function ServicesCatalog() {
                 <button
                   type="button"
                   onClick={() => navigate('/auth/login/services/checkout')}
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#8C3A50] to-[#A3435E] hover:from-[#722B3E] hover:to-[#8C3A50] text-white text-xs font-black transition-all shadow-md shadow-black/30 flex items-center gap-2 cursor-pointer hover:scale-[1.02]"
+                  className="px-4 sm:px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#8C3A50] to-[#A3435E] hover:from-[#722B3E] hover:to-[#8C3A50] text-white text-xs font-black transition-all shadow-md shadow-black/30 flex items-center justify-center gap-1.5 cursor-pointer hover:scale-[1.02]"
                 >
-                  <span>Checkout Sekarang</span>
-                  <ArrowRight className="w-4 h-4" />
+                  <span>Checkout</span>
+                  <ArrowRight className="w-4 h-4 shrink-0" />
                 </button>
               </div>
             </div>
@@ -688,21 +729,21 @@ export default function ServicesCatalog() {
                 </div>
 
                 {mainPackage ? (
-                  <div className="p-4 bg-slate-50 border border-slate-200/90 rounded-2xl flex justify-between items-center gap-3">
-                    <div>
-                      <div className="flex items-center gap-2">
+                  <div className="p-3.5 sm:p-4 bg-slate-50 border border-slate-200/90 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-2 sm:gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center flex-wrap gap-2">
                         <span className="font-bold text-slate-900 text-sm">{mainPackage.name}</span>
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-[#8C3A50]">
                           Paket Utama
                         </span>
                       </div>
-                      <div className="text-xs text-slate-500 mt-1 flex gap-2">
+                      <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
                         {mainPackage.activePeriodDays && <span>{mainPackage.activePeriodDays} Hari</span>}
                         {mainPackage.eventQuota && <span>• {mainPackage.eventQuota} Acara</span>}
                         {mainPackage.guestQuota && <span>• {mainPackage.guestQuota.toLocaleString('id-ID')} Tamu</span>}
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="sm:text-right shrink-0">
                       <span className="text-sm font-mono font-bold text-slate-900">
                         Rp {mainPackage.price.toLocaleString('id-ID')}
                       </span>
@@ -726,15 +767,15 @@ export default function ServicesCatalog() {
                 {addons.length > 0 ? (
                   <div className="border border-slate-200 rounded-2xl divide-y divide-slate-100 overflow-hidden">
                     {addons.map((item) => (
-                      <div key={item.service.id} className="p-3.5 flex justify-between items-center gap-3 bg-white">
-                        <div>
-                          <span className="font-semibold text-slate-900 text-xs block">{item.service.name}</span>
+                      <div key={item.service.id} className="p-3.5 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2.5 bg-white">
+                        <div className="min-w-0">
+                          <span className="font-semibold text-slate-900 text-xs block truncate">{item.service.name}</span>
                           <span className="text-[11px] text-slate-500 font-mono">
                             Rp {item.service.price.toLocaleString('id-ID')} x {item.quantity}
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center justify-between sm:justify-end gap-3">
                           <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg">
                             <button
                               type="button"
@@ -753,18 +794,20 @@ export default function ServicesCatalog() {
                             </button>
                           </div>
 
-                          <span className="font-bold font-mono text-xs text-slate-900 w-24 text-right">
-                            Rp {(item.service.price * item.quantity).toLocaleString('id-ID')}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold font-mono text-xs text-slate-900 sm:w-24 text-right">
+                              Rp {(item.service.price * item.quantity).toLocaleString('id-ID')}
+                            </span>
 
-                          <button
-                            type="button"
-                            onClick={() => removeAddon(item.service.id!)}
-                            className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
-                            title="Hapus"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => removeAddon(item.service.id!)}
+                              className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
+                              title="Hapus"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -780,29 +823,29 @@ export default function ServicesCatalog() {
                   <span>Total Item:</span>
                   <span className="font-bold text-white">{itemCount} Layanan</span>
                 </div>
-                <div className="flex justify-between items-baseline pt-2 border-t border-slate-800">
-                  <span className="text-sm font-bold uppercase tracking-wider text-slate-300">Total Pembayaran:</span>
-                  <span className="text-2xl font-black font-mono text-white">
+                <div className="flex justify-between items-baseline pt-2 border-t border-slate-800 gap-2">
+                  <span className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-300">Total Pembayaran:</span>
+                  <span className="text-xl sm:text-2xl font-black font-mono text-white">
                     Rp {totalPrice.toLocaleString('id-ID')}
                   </span>
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-between gap-3 pt-2">
+              <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-3 pt-2">
                 <button
                   type="button"
                   onClick={clearCart}
-                  className="text-xs font-semibold text-rose-600 hover:text-rose-700 cursor-pointer"
+                  className="text-xs font-semibold text-rose-600 hover:text-rose-700 cursor-pointer py-1 text-center sm:text-left"
                 >
                   Kosongkan Keranjang
                 </button>
 
-                <div className="flex gap-2">
+                <div className="grid grid-cols-2 sm:flex gap-2 w-full sm:w-auto">
                   <button
                     type="button"
                     onClick={() => setIsCartModalOpen(false)}
-                    className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold cursor-pointer"
+                    className="px-3 sm:px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold cursor-pointer text-center"
                   >
                     Lanjut Belanja
                   </button>
@@ -813,10 +856,10 @@ export default function ServicesCatalog() {
                       setIsCartModalOpen(false);
                       navigate('/auth/login/services/checkout');
                     }}
-                    className="px-5 py-2.5 rounded-xl bg-[#8C3A50] hover:bg-[#722b3e] text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                    className="px-4 sm:px-5 py-2.5 rounded-xl bg-[#8C3A50] hover:bg-[#722b3e] text-white text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    <span>Lanjut ke Checkout</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
+                    <span>Checkout</span>
+                    <ArrowRight className="w-3.5 h-3.5 shrink-0" />
                   </button>
                 </div>
               </div>
