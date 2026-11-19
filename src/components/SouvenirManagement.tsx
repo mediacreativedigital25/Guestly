@@ -20,7 +20,8 @@ import {
   ClipboardCheck,
   TrendingDown,
   PackageCheck,
-  Boxes
+  Boxes,
+  Lock
 } from 'lucide-react';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -40,6 +41,7 @@ interface SouvenirManagementProps {
   onGuestsUpdated?: () => void;
   currentUserEmail?: string;
   currentUserName?: string;
+  isLocked?: boolean;
 }
 
 export default function SouvenirManagement({
@@ -48,8 +50,16 @@ export default function SouvenirManagement({
   guests,
   onGuestsUpdated,
   currentUserEmail,
-  currentUserName
+  currentUserName,
+  isLocked = false
 }: SouvenirManagementProps) {
+  const showSouvenirLockedAlert = () => {
+    showAlert(
+      'Fitur Terkunci',
+      'Masa aktif acara telah berakhir / berstatus Draft. Seluruh operasional souvenir dan ekspor Berita Acara dikunci sementara hingga dilakukan Top-Up Paket.',
+      'warning'
+    );
+  };
   const [souvenirs, setSouvenirs] = useState<SouvenirItem[]>(() => 
     souvenirStorage.getSouvenirs(eventId, guests)
   );
@@ -174,6 +184,10 @@ export default function SouvenirManagement({
   // Create Souvenir Type
   const handleCreateSouvenir = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLocked) {
+      showSouvenirLockedAlert();
+      return;
+    }
     if (!formName.trim() || formInitialStock < 0) {
       showAlert('Perhatian', 'Mohon isi nama souvenir dan stok awal yang valid.', 'warning');
       return;
@@ -212,6 +226,10 @@ export default function SouvenirManagement({
 
   // Open Edit Modal
   const openEditModal = (item: SouvenirItem) => {
+    if (isLocked) {
+      showSouvenirLockedAlert();
+      return;
+    }
     setSelectedSouvenir(item);
     setFormName(item.name);
     setFormCategory(item.category || '');
@@ -223,6 +241,10 @@ export default function SouvenirManagement({
   // Update Souvenir Item
   const handleUpdateSouvenir = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLocked) {
+      showSouvenirLockedAlert();
+      return;
+    }
     if (!selectedSouvenir?.id) return;
 
     setIsSubmitting(true);
@@ -255,6 +277,10 @@ export default function SouvenirManagement({
 
   // Delete Souvenir Item
   const handleDeleteSouvenir = async (item: SouvenirItem) => {
+    if (isLocked) {
+      showSouvenirLockedAlert();
+      return;
+    }
     if (!item.id) return;
     if ((item.totalDistributed || 0) > 0) {
       const proceed = await showConfirm(
@@ -278,6 +304,10 @@ export default function SouvenirManagement({
 
   // Open Physical Stock Audit Modal
   const openAuditModal = (item: SouvenirItem) => {
+    if (isLocked) {
+      showSouvenirLockedAlert();
+      return;
+    }
     setSelectedSouvenir(item);
     setAuditPhysicalCount(item.physicalStockAudit ?? item.remainingStock);
     setAuditReason('Pemeriksaan Rutin / Sesuai');
@@ -289,6 +319,10 @@ export default function SouvenirManagement({
   // Submit Stock Opname / Physical Audit
   const handleSaveAudit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLocked) {
+      showSouvenirLockedAlert();
+      return;
+    }
     if (!selectedSouvenir?.id) return;
 
     setIsSubmitting(true);
@@ -371,6 +405,10 @@ export default function SouvenirManagement({
 
   // Hand out souvenir to a guest
   const handleHandoutSouvenir = async (guest: Guest, targetSouvenir?: SouvenirItem) => {
+    if (isLocked) {
+      showSouvenirLockedAlert();
+      return;
+    }
     if (!guest.id) return;
     
     // Auto-select souvenir if not provided
@@ -439,6 +477,10 @@ export default function SouvenirManagement({
 
   // Return / Cancel Souvenir Handout (Undo)
   const handleUndoSouvenir = async (guest: Guest) => {
+    if (isLocked) {
+      showSouvenirLockedAlert();
+      return;
+    }
     if (!guest.id || !guest.souvenirTaken) return;
 
     const confirmUndo = await showConfirm(
@@ -501,6 +543,10 @@ export default function SouvenirManagement({
 
   // Export Excel Berita Acara & Rekapitulasi Souvenir
   const handleExportExcel = () => {
+    if (isLocked) {
+      showSouvenirLockedAlert();
+      return;
+    }
     const wb = XLSX.utils.book_new();
 
     // Sheet 1: Rekapitulasi Stok Souvenir
@@ -581,6 +627,10 @@ export default function SouvenirManagement({
 
   // Export PDF Berita Acara Resmi
   const handleExportPDF = () => {
+    if (isLocked) {
+      showSouvenirLockedAlert();
+      return;
+    }
     const doc = new jsPDF();
     const eventTitle = event?.title || 'Acara';
     const eventDate = event?.date || '-';
@@ -693,27 +743,49 @@ export default function SouvenirManagement({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-          <Link
-            to={`/auth/login/events/${eventId}/scan`}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors"
-          >
-            <ScanLine className="w-4 h-4" />
-            <span>Buka Scanner Meja</span>
-          </Link>
+          {isLocked ? (
+            <button
+              type="button"
+              disabled
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3.5 py-2 bg-slate-100 border border-slate-200 text-slate-400 text-xs sm:text-sm font-medium rounded-lg cursor-not-allowed"
+              title="Scanner Meja dikunci — lakukan Top-Up Paket untuk membuka"
+            >
+              <Lock className="w-4 h-4" />
+              <span>Scanner Terkunci</span>
+            </button>
+          ) : (
+            <Link
+              to={`/auth/login/events/${eventId}/scan`}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors"
+            >
+              <ScanLine className="w-4 h-4" />
+              <span>Buka Scanner Meja</span>
+            </Link>
+          )}
           <button
             onClick={handleExportExcel}
-            className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors"
-            title="Download Rekapitulasi Excel"
+            disabled={isLocked}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors ${
+              isLocked
+                ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
+                : 'bg-white hover:bg-gray-50 border border-gray-300 text-gray-700'
+            }`}
+            title={isLocked ? 'Export Excel dikunci — lakukan Top-Up Paket untuk membuka' : 'Download Rekapitulasi Excel'}
           >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            {isLocked ? <Lock className="w-4 h-4 text-slate-400" /> : <FileSpreadsheet className="w-4 h-4 text-emerald-600" />}
             <span>Excel</span>
           </button>
           <button
             onClick={handleExportPDF}
-            className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors"
-            title="Cetak Berita Acara PDF"
+            disabled={isLocked}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors ${
+              isLocked
+                ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
+                : 'bg-white hover:bg-gray-50 border border-gray-300 text-gray-700'
+            }`}
+            title={isLocked ? 'Export Berita Acara PDF dikunci — lakukan Top-Up Paket untuk membuka' : 'Cetak Berita Acara PDF'}
           >
-            <FileText className="w-4 h-4 text-rose-600" />
+            {isLocked ? <Lock className="w-4 h-4 text-slate-400" /> : <FileText className="w-4 h-4 text-rose-600" />}
             <span>Berita Acara</span>
           </button>
         </div>
@@ -819,12 +891,22 @@ export default function SouvenirManagement({
         {viewTab === 'overview' && (
           <button
             onClick={() => {
+              if (isLocked) {
+                showSouvenirLockedAlert();
+                return;
+              }
               resetForm();
               setIsAddModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors mb-2"
+            disabled={isLocked}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors mb-2 ${
+              isLocked
+                ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
+                : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+            }`}
+            title={isLocked ? 'Tambah souvenir dikunci — lakukan Top-Up Paket untuk membuka' : undefined}
           >
-            <Plus className="w-4 h-4" />
+            {isLocked ? <Lock className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
             <span>Tambah Jenis Souvenir</span>
           </button>
         )}
@@ -849,12 +931,21 @@ export default function SouvenirManagement({
               </p>
               <button
                 onClick={() => {
+                  if (isLocked) {
+                    showSouvenirLockedAlert();
+                    return;
+                  }
                   resetForm();
                   setIsAddModalOpen(true);
                 }}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors"
+                disabled={isLocked}
+                className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg shadow-sm transition-colors ${
+                  isLocked
+                    ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
+                    : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                }`}
               >
-                <Plus className="w-4 h-4" />
+                {isLocked ? <Lock className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                 <span>Tambah Souvenir Pertama</span>
               </button>
             </div>
@@ -883,22 +974,24 @@ export default function SouvenirManagement({
                           )}
                         </div>
 
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => openEditModal(item)}
-                            className="p-1.5 text-gray-400 hover:text-indigo-600 rounded-md hover:bg-gray-50 transition-colors"
-                            title="Edit Data Souvenir"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteSouvenir(item)}
-                            className="p-1.5 text-gray-400 hover:text-rose-600 rounded-md hover:bg-gray-50 transition-colors"
-                            title="Hapus Souvenir"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
+                        {!isLocked && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => openEditModal(item)}
+                              className="p-1.5 text-gray-400 hover:text-indigo-600 rounded-md hover:bg-gray-50 transition-colors"
+                              title="Edit Data Souvenir"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteSouvenir(item)}
+                              className="p-1.5 text-gray-400 hover:text-rose-600 rounded-md hover:bg-gray-50 transition-colors"
+                              title="Hapus Souvenir"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       {/* Distribution Progress Bar */}
@@ -959,9 +1052,19 @@ export default function SouvenirManagement({
 
                       <button
                         onClick={() => openAuditModal(item)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700 text-xs font-medium rounded-lg transition-colors"
+                        disabled={isLocked}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                          isLocked
+                            ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
+                            : 'bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700'
+                        }`}
+                        title={isLocked ? 'Stock Opname dikunci — lakukan Top-Up Paket' : undefined}
                       >
-                        <ClipboardCheck className="w-3.5 h-3.5 text-indigo-600" />
+                        {isLocked ? (
+                          <Lock className="w-3.5 h-3.5 text-slate-400" />
+                        ) : (
+                          <ClipboardCheck className="w-3.5 h-3.5 text-indigo-600" />
+                        )}
                         <span>Hitung Fisik (Stock Opname)</span>
                       </button>
                     </div>
@@ -1100,7 +1203,15 @@ export default function SouvenirManagement({
                         </td>
 
                         <td className="px-4 py-3 whitespace-nowrap text-right">
-                          {isTaken ? (
+                          {isLocked ? (
+                            <span
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-slate-400 bg-slate-100 rounded-md border border-slate-200 cursor-not-allowed"
+                              title="Penyerahan souvenir dikunci — lakukan Top-Up Paket untuk membuka"
+                            >
+                              <Lock className="w-3 h-3" />
+                              <span>Terkunci</span>
+                            </span>
+                          ) : isTaken ? (
                             <button
                               onClick={() => handleUndoSouvenir(guest)}
                               disabled={isLoading}

@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v2.5.0] - 2026-11-19
+
+### Added
+- **Halaman Khusus Kirim Undangan WhatsApp & Tracking Status:** Halaman khusus `/events/:eventId/send-invitations` dengan tata letak ringkas (*collapsible composer*), statistik interaktif (*Belum Dikirim*, *Terkirim*, *Gagal*, *Tanpa No. HP*), pratinjau pesan WhatsApp per tamu, serta pengiriman satuan & massal dengan jeda aman.
+- **Token Fonnte Pribadi per Client & Fallback Otomatis:** Dukungan pengisian Token Fonnte pribadi di Profil Saya atau per Acara agar pengiriman WA tidak memotong kuota WA Blast Guestly, lengkap dengan cek status perangkat Fonnte, fallback otomatis ke Token Global, dan opsi kirim manual via `wa.me`.
+- **Lampiran Kartu E-Invitation (1200×675) pada WhatsApp:** Pengiriman undangan via Fonnte dapat menyertakan gambar Kartu E-Invitation lengkap dengan foto mempelai, nama tamu, dan QR tiket yang diselaraskan dengan katalog template E-Invitation.
+
+### Changed
+- **Pembatasan Ubah Status Khusus Super Admin:** Dropdown dan aksi ubah status acara (`Draft / Published / Completed`) kini hanya tersedia untuk **Super Admin**; seluruh role lain wajib melalui alur **Top-Up Paket / Perpanjang**.
+- **Penguncian Penuh Fitur Operasional & Export Saat Draft/Kedaluwarsa:** Seluruh role non-Super Admin otomatis masuk ke mode baca saja saat acara berstatus Draft atau melewati masa aktif 30 hari—mengunci tombol **Export (Excel/PDF)**, Import, Kelola Tamu, Kirim Undangan/WA, Kirim Akses Client, Check-In manual, Souvenir & Berita Acara, QR Scanner, Layar Sapa, serta Edit/Hapus Acara hingga dilakukan Top-Up Paket.
+
+### Fixed
+- **Keandalan Rendering Pratinjau & Gambar OG E-Invitation:** Validasi buffer gambar server (`resolveMediaBuffer`) kini mengabaikan berkas cache korup/0-byte dan memastikan pratinjau kartu E-Invitation selalu tampil sempurna sesuai template.
+- **Penutupan Celah Perpanjangan Otomatis via Edit Acara:** Menyimpan form Edit Acara oleh non-Super Admin kini tidak lagi mereset masa aktif 30 hari secara otomatis.
+
+## [v2.4.0] - 2026-11-13
+
+### Added
+- **Modul Wedding Planner Terpadu:** 6 modul terstruktur (*Overview*, *Checklist*, *Vendor*, *Anggaran*, *Rundown*, dan *Denah Meja*) dengan template 1-klik, pelacakan DP/pelunasan vendor, serta salin rundown ke WhatsApp.
+- **Pemisahan Client Khusus Planner & Hak Akses Kolaboratif:** Pengaktifan proyek planner secara selektif dengan kolaborasi langsung lintas peran.
+- **Otomatisasi Masa Aktif Acara 30 Hari:** Masa aktif acara otomatis 30 hari sejak dibuat dengan transisi otomatis ke status `Draft` saat kedaluwarsa dan tautan langsung ke Katalog Layanan untuk Top-Up Paket.
+
 ## [v2.3.0] - 2026-09-27
 
 ### Added

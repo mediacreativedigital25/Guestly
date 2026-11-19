@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../AuthContext';
 import { collection, query, getDocs, where, addDoc, serverTimestamp, doc, setDoc, deleteDoc, updateDoc, runTransaction, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, createAuthUserSilently } from '../lib/firebase';
 import { Client, User } from '../types';
 import { parseFirestoreDate, getUserBusinessId } from '../lib/utils';
 import { format } from 'date-fns';
-import { Plus, Trash2, Edit, Eye, Phone, MessageSquare, Send } from 'lucide-react';
+import { Plus, Trash2, Edit, Eye, Phone, MessageSquare, Send, Search, X } from 'lucide-react';
 import { Link, useNavigate, useLocation, useParams } from 'react-router-dom';
 import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 import { Modal } from '../components/Modal';
@@ -23,6 +23,12 @@ export default function ClientsList() {
   const [lastVisible, setLastVisible] = useState<any>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  // Table Search, Filter & Pagination State
+  const [searchTerm, setSearchTerm] = useState('');
+  const [clientFilter, setClientFilter] = useState<'all' | 'has_events' | 'no_events'>('all');
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   const [isAddingClient, setIsAddingClient] = useState(false);
   const [newClientName, setNewClientName] = useState('');
@@ -449,27 +455,119 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
     }
   };
 
+  const filteredClients = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return clients.filter((client) => {
+      const evCount = client.id ? (clientEventsCount[client.id] || 0) : 0;
+      if (clientFilter === 'has_events' && evCount <= 0) return false;
+      if (clientFilter === 'no_events' && evCount > 0) return false;
+
+      if (!q) return true;
+      const partnerName = client.partnerId ? getPartnerName(client.partnerId) : '';
+      const haystack = [
+        client.name,
+        client.contactEmail,
+        client.phone,
+        partnerName,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [clients, searchTerm, clientFilter, clientEventsCount, partners]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredClients.length / itemsPerPage));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, filteredClients.length);
+  const paginatedClients = useMemo(
+    () => filteredClients.slice(startIndex, endIndex),
+    [filteredClients, startIndex, endIndex]
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, clientFilter, itemsPerPage]);
+
+  const hasActiveFilter = searchTerm.trim() !== '' || clientFilter !== 'all';
+
   return (
-    <div className="space-y-6">
-      <div className="flex justify-end items-center">
-        <button 
-          onClick={() => {
-            const isFullManagement = appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'admin';
-            const userCredit = appUser?.clientCredit !== undefined ? appUser.clientCredit : (appUser?.clientQuota || 0);
-            if (!isFullManagement && userCredit <= 0) {
-               showAlert('Akses Ditolak', 'Anda tidak memiliki kuota klien. Silakan beli layanan terlebih dahulu.', 'warning');
-               navigate('/auth/login/clients');
-               return;
-            }
-            setError('');
-            setIsAddingClient(true);
-            navigate('/auth/login/clients/add');
-          }}
-          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-semibold text-sm shadow-xs transition-colors cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          Add Client
-        </button>
+    <div className="space-y-4">
+      {/* Unified Toolbar: Search | Filter | Tampilkan 10, 25, 50 | Add Client */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-2.5 sm:p-3">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-2">
+          {/* Search */}
+          <div className="relative flex-1 min-w-0">
+            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Cari nama client, email, atau no. WhatsApp..."
+              className="w-full h-8.5 pl-8.5 pr-7 text-xs sm:text-sm bg-gray-50/70 border border-gray-200 rounded-lg text-gray-800 placeholder:text-gray-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5 rounded transition-colors cursor-pointer"
+                title="Hapus pencarian"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 shrink-0">
+            {/* Filter Client */}
+            <select
+              value={clientFilter}
+              onChange={(e) => setClientFilter(e.target.value as 'all' | 'has_events' | 'no_events')}
+              className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none"
+              title="Filter status acara client"
+            >
+              <option value="all">Semua Client</option>
+              <option value="has_events">Memiliki Acara</option>
+              <option value="no_events">Belum Ada Acara</option>
+            </select>
+
+            {/* Tampilkan 10, 25, 50 */}
+            <div className="flex items-center gap-1.5 h-8.5 px-2.5 bg-white border border-gray-200 rounded-lg text-xs text-gray-600 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition">
+              <span className="text-xs text-gray-500 whitespace-nowrap">Tampilkan</span>
+              <select
+                value={itemsPerPage}
+                onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                className="bg-transparent text-xs sm:text-sm font-semibold text-gray-800 focus:outline-none cursor-pointer pr-0.5"
+                title="Jumlah baris per halaman"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+
+            {/* Add Client Button */}
+            <button
+              onClick={() => {
+                const isFullManagement = appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'admin';
+                const userCredit = appUser?.clientCredit !== undefined ? appUser.clientCredit : (appUser?.clientQuota || 0);
+                if (!isFullManagement && userCredit <= 0) {
+                   showAlert('Akses Ditolak', 'Anda tidak memiliki kuota klien. Silakan beli layanan terlebih dahulu.', 'warning');
+                   navigate('/auth/login/clients');
+                   return;
+                }
+                setError('');
+                setIsAddingClient(true);
+                navigate('/auth/login/clients/add');
+              }}
+              className="h-8.5 px-3 text-xs font-medium inline-flex items-center justify-center gap-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-xs transition-colors whitespace-nowrap cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Client</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Add Client Modal (Popup) */}
@@ -612,119 +710,214 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
       </Modal>
       
       {loading ? (
-        <p className="text-gray-500 text-sm">Memuat data clients...</p>
+        <div className="bg-white p-8 text-center rounded-xl shadow-xs border border-gray-200">
+          <p className="text-gray-500 text-sm">Memuat data clients...</p>
+        </div>
       ) : clients.length === 0 ? (
-        <div className="bg-white p-12 text-center rounded-lg shadow-sm border border-gray-200">
-          <p className="text-gray-500">Belum ada client yang ditambahkan. Silakan tambah client baru.</p>
+        <div className="bg-white p-12 text-center rounded-xl shadow-xs border border-gray-200">
+          <p className="text-gray-500 text-sm">Belum ada client yang ditambahkan. Silakan tambah client baru.</p>
         </div>
       ) : (
-        <div className="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">No</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama & Kontak</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No. WhatsApp</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acara</th>
-                  {(appUser?.role === 'superadmin' || appUser?.role === 'partner') && (
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Partner</th>
-                  )}
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal</th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {clients.map((client, index) => (
-                  <tr key={client.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                       {index + 1}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                       <div className="text-sm font-medium text-gray-900">{client.name}</div>
-                       <div className="text-sm text-gray-500">{client.contactEmail || '-'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                       {client.phone ? (
-                         <span className="inline-flex items-center gap-1.5 text-gray-700">
-                           <Phone className="w-3.5 h-3.5 text-emerald-600" />
-                           {client.phone}
-                         </span>
-                       ) : (
-                         <span className="text-gray-400">-</span>
-                       )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                       {clientEventsCount[client.id!] || 0} Acara
-                    </td>
-                    {(appUser?.role === 'superadmin' || appUser?.role === 'partner') && (
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                         {client.partnerId && partners.find(p => p.id === client.partnerId) ? (
-                           <div className="flex items-center gap-2">
-                             {partners.find(p => p.id === client.partnerId)?.logoUrl ? (
-                               <img src={partners.find(p => p.id === client.partnerId)?.logoUrl} alt="Logo" className="w-6 h-6 rounded-md object-contain bg-white border border-gray-200" />
-                             ) : (
-                               <div className="w-6 h-6 rounded-md bg-indigo-50 text-indigo-700 flex items-center justify-center text-xs font-bold border border-indigo-100">
-                                 {getPartnerName(client.partnerId).charAt(0).toUpperCase()}
-                               </div>
-                             )}
-                             <span>{getPartnerName(client.partnerId)}</span>
-                           </div>
-                         ) : '-'}
-                      </td>
-                    )}
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                       {client.createdAt && parseFirestoreDate(client.createdAt) ? format(parseFirestoreDate(client.createdAt)!, 'dd MMM yyyy') : '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                       <div className="flex justify-end gap-2">
-                         {appUser?.role !== 'client' && appUser?.role !== 'staff' && (
-                           <Link
-                             to={`/auth/login/clients/${client.id}/send-access`}
-                             className="text-[#8C3A50] hover:text-[#722B3E] bg-rose-50 hover:bg-rose-100 p-2 rounded-md transition-colors inline-block"
-                             title="Kirim Akses ke Client"
-                           >
-                             <Send className="w-4 h-4" />
-                           </Link>
-                         )}
-                         <button
-                           onClick={() => openViewModal(client)}
-                           className="text-gray-500 hover:text-gray-700 bg-gray-50 hover:bg-gray-200 p-2 rounded-md transition-colors inline-block"
-                           title="Detail Client"
-                         >
-                           <Eye className="w-4 h-4" />
-                         </button>
-                         <button
-                           onClick={() => openEditModal(client)}
-                           className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 p-2 rounded-md transition-colors inline-block"
-                           title="Edit Client"
-                         >
-                           <Edit className="w-4 h-4" />
-                         </button>
-                         <button
-                           onClick={() => handleDeleteClient(client.id!)}
-                           className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 p-2 rounded-md transition-colors inline-block"
-                           title="Hapus Client"
-                         >
-                           <Trash2 className="w-4 h-4" />
-                         </button>
-                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {hasMore && (
-            <div className="p-4 border-t border-gray-200 flex justify-center">
+        <div className="bg-white shadow-xs rounded-xl border border-gray-200 overflow-hidden">
+          {filteredClients.length === 0 ? (
+            <div className="p-12 text-center space-y-3">
+              <div className="w-11 h-11 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center mx-auto">
+                <Search className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-gray-800">Tidak ada client yang cocok</p>
+                <p className="text-xs text-gray-500">
+                  Coba ubah kata kunci pencarian atau filter client.
+                </p>
+              </div>
               <button
-                onClick={handleLoadMore}
-                disabled={loadingMore}
-                className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 font-medium disabled:opacity-50"
+                type="button"
+                onClick={() => {
+                  setSearchTerm('');
+                  setClientFilter('all');
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
               >
-                {loadingMore ? 'Memuat...' : 'Muat Lebih Banyak'}
+                Reset Pencarian &amp; Filter
               </button>
             </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-14">No</th>
+                      <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Nama &amp; Kontak</th>
+                      <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">No. WhatsApp</th>
+                      <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Acara</th>
+                      {(appUser?.role === 'superadmin' || appUser?.role === 'partner') && (
+                        <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Partner</th>
+                      )}
+                      <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tanggal</th>
+                      <th className="px-5 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {paginatedClients.map((client, index) => (
+                      <tr key={client.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500">
+                           {startIndex + index + 1}
+                        </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap">
+                           <div className="text-sm font-medium text-gray-900">{client.name}</div>
+                           <div className="text-sm text-gray-500">{client.contactEmail || '-'}</div>
+                        </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap text-sm text-gray-600">
+                           {client.phone ? (
+                             <span className="inline-flex items-center gap-1.5 text-gray-700">
+                               <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                               {client.phone}
+                             </span>
+                           ) : (
+                             <span className="text-gray-400">-</span>
+                           )}
+                        </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500">
+                           {clientEventsCount[client.id!] || 0} Acara
+                        </td>
+                        {(appUser?.role === 'superadmin' || appUser?.role === 'partner') && (
+                          <td className="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500">
+                             {client.partnerId && partners.find(p => p.id === client.partnerId) ? (
+                               <div className="flex items-center gap-2">
+                                 {partners.find(p => p.id === client.partnerId)?.logoUrl ? (
+                                   <img src={partners.find(p => p.id === client.partnerId)?.logoUrl} alt="Logo" className="w-6 h-6 rounded-md object-contain bg-white border border-gray-200" />
+                                 ) : (
+                                   <div className="w-6 h-6 rounded-md bg-indigo-50 text-indigo-700 flex items-center justify-center text-xs font-bold border border-indigo-100">
+                                     {getPartnerName(client.partnerId).charAt(0).toUpperCase()}
+                                   </div>
+                                 )}
+                                 <span>{getPartnerName(client.partnerId)}</span>
+                               </div>
+                             ) : '-'}
+                          </td>
+                        )}
+                        <td className="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500">
+                           {client.createdAt && parseFirestoreDate(client.createdAt) ? format(parseFirestoreDate(client.createdAt)!, 'dd MMM yyyy') : '-'}
+                        </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap text-right text-sm font-medium">
+                           <div className="flex justify-end gap-2">
+                             {appUser?.role !== 'client' && appUser?.role !== 'staff' && (
+                               <Link
+                                 to={`/auth/login/clients/${client.id}/send-access`}
+                                 className="text-[#8C3A50] hover:text-[#722B3E] bg-rose-50 hover:bg-rose-100 p-2 rounded-md transition-colors inline-block"
+                                 title="Kirim Akses ke Client"
+                               >
+                                 <Send className="w-4 h-4" />
+                               </Link>
+                             )}
+                             <button
+                               onClick={() => openViewModal(client)}
+                               className="text-gray-500 hover:text-gray-700 bg-gray-50 hover:bg-gray-200 p-2 rounded-md transition-colors inline-block"
+                               title="Detail Client"
+                             >
+                               <Eye className="w-4 h-4" />
+                             </button>
+                             <button
+                               onClick={() => openEditModal(client)}
+                               className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 p-2 rounded-md transition-colors inline-block"
+                               title="Edit Client"
+                             >
+                               <Edit className="w-4 h-4" />
+                             </button>
+                             <button
+                               onClick={() => handleDeleteClient(client.id!)}
+                               className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 p-2 rounded-md transition-colors inline-block"
+                               title="Hapus Client"
+                             >
+                               <Trash2 className="w-4 h-4" />
+                             </button>
+                           </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination Footer */}
+              <div className="px-4 py-3.5 flex flex-col sm:flex-row items-center justify-between border-t border-gray-200 sm:px-5 gap-3 bg-gray-50/50">
+                <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
+                  <span>
+                    Menampilkan <span className="font-semibold text-gray-900">{filteredClients.length === 0 ? 0 : startIndex + 1}</span> – <span className="font-semibold text-gray-900">{endIndex}</span> dari <span className="font-semibold text-indigo-600">{filteredClients.length}</span> client
+                  </span>
+                  {hasActiveFilter && (
+                    <>
+                      <span className="text-xs text-gray-400">({clients.length} total)</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchTerm('');
+                          setClientFilter('all');
+                        }}
+                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 underline cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {totalPages > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(1)}
+                        disabled={safeCurrentPage === 1}
+                        className="px-2.5 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                        title="Halaman Pertama"
+                      >
+                        «
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                        disabled={safeCurrentPage === 1}
+                        className="px-3 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      >
+                        Sebelumnya
+                      </button>
+                      <span className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg">
+                        Hal <span className="text-indigo-600 font-bold">{safeCurrentPage}</span> / {totalPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={safeCurrentPage === totalPages}
+                        className="px-3 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      >
+                        Selanjutnya
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(totalPages)}
+                        disabled={safeCurrentPage === totalPages}
+                        className="px-2.5 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                        title="Halaman Terakhir"
+                      >
+                        »
+                      </button>
+                    </>
+                  )}
+                  {hasMore && (
+                    <button
+                      type="button"
+                      onClick={handleLoadMore}
+                      disabled={loadingMore}
+                      className="px-3 py-1.5 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-lg hover:bg-indigo-100 text-xs font-semibold disabled:opacity-50 transition-colors cursor-pointer"
+                    >
+                      {loadingMore ? 'Memuat...' : 'Muat Lebih Banyak'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}

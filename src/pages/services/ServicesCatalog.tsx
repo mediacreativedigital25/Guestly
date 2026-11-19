@@ -363,6 +363,12 @@ export default function ServicesCatalog() {
                               <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
                               <span>Ekspor Rekap Kehadiran Realtime Excel</span>
                             </div>
+                            {service.includeWeddingPlanner && (
+                              <div className="flex items-center gap-2 text-[#8C3A50] font-semibold">
+                                <CheckCircle2 className="w-4 h-4 text-[#8C3A50] shrink-0" />
+                                <span>Termasuk Modul Wedding Planner Lengkap</span>
+                              </div>
+                            )}
                           </div>
                         </div>
 

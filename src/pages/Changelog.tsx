@@ -22,6 +22,9 @@ import {
   SlidersHorizontal,
   UserCheck,
   Tag,
+  Send,
+  KeyRound,
+  Lock,
 } from 'lucide-react';
 
 interface ChangeItem {
@@ -51,10 +54,100 @@ const CATEGORY_BADGE_STYLES: Record<ChangeItem['category'], string> = {
 
 export const VERSIONS: ReleaseVersion[] = [
   {
+    version: 'V2.5.1',
+    date: '19 November 2026',
+    badge: 'Feature Drop',
+    isLatest: true,
+    summary:
+      'Tema dashboard ramah mata (Pearl Rose White, Hybrid Contrast, dan Soft Dark Mode), pemisahan hak akses Client Mandiri vs Client Naungan Vendor, Wedding Planner berbasis Top-Up & paket, serta pengaturan paket Wedding Planner di Layanan & Invoice.',
+    changes: [
+      {
+        icon: Sparkles,
+        category: 'UI & UX',
+        title: 'Tema Dashboard Ramah Mata (Pearl Rose White, Hybrid Contrast & Soft Dark)',
+        description:
+          'Penambahan pengalih tema langsung di header dashboard dengan tampilan default Pearl Rose White yang nyaman untuk penggunaan lama, opsi Hybrid Contrast (sidebar gelap + kanvas terang), serta Soft Dark Mode yang tersimpan otomatis di perangkat pengguna.',
+        color: 'text-amber-700',
+        bgColor: 'bg-amber-50',
+      },
+      {
+        icon: UserCheck,
+        category: 'Akses & Sistem',
+        title: 'Skema 2 Kondisi Role Client: Client Mandiri vs Client Naungan Vendor',
+        description:
+          'Client yang mendaftar mandiri kini mulai dengan kuota 0, dapat membuat serta mengelola acara sendiri setelah Top-Up Paket, dan langsung menambah/mengedit/menghapus tamu tanpa alur Approval. Client di bawah naungan Vendor/Owner tetap menggunakan alur Approval dan dikelola oleh Vendor.',
+        color: 'text-emerald-700',
+        bgColor: 'bg-emerald-50',
+      },
+      {
+        icon: HeartHandshake,
+        category: 'Fitur Baru',
+        title: 'Wedding Planner Terkunci Hingga Top-Up & Aktivasi Berbasis Paket',
+        description:
+          'Client Mandiri melihat menu Wedding Planner dengan layar pratinjau 6 modul yang terkunci hingga melakukan Top-Up dan membuat acara aktif pertama, lalu otomatis terbuka. Bagi Client naungan Vendor/Owner, Wedding Planner hanya tampil bila paket mencakup fitur tersebut atau diaktifkan oleh Vendor.',
+        color: 'text-[#8C3A50]',
+        bgColor: 'bg-rose-50',
+      },
+      {
+        icon: Tag,
+        category: 'Fitur Baru',
+        title: 'Toggle "Termasuk Modul Wedding Planner" pada Paket Layanan & Invoice',
+        description:
+          'Super Admin dapat menandai layanan paket atau add-on yang menyertakan modul Wedding Planner. Penanda tampil jelas di Katalog Layanan dan otomatis membuka akses Wedding Planner pada akun maupun acara tujuan ketika pembayaran invoice dikonfirmasi.',
+        color: 'text-[#8C3A50]',
+        bgColor: 'bg-rose-50',
+      },
+    ],
+  },
+  {
+    version: 'V2.5.0',
+    date: '19 November 2026',
+    badge: 'Major Update',
+    summary:
+      'Halaman khusus Kirim Undangan WhatsApp dengan tracking status pengiriman, dukungan Token Fonnte pribadi tanpa potong kuota, sinkronisasi kartu E-Invitation WhatsApp, serta penguncian penuh fitur operasional & ekspor saat acara Draft atau kedaluwarsa.',
+    changes: [
+      {
+        icon: Send,
+        category: 'Fitur Baru',
+        title: 'Halaman Khusus Kirim Undangan WhatsApp & Tracking Status',
+        description:
+          'Tersedia tombol dan halaman khusus Kirim Undangan dengan tata letak ringkas yang terfokus pada daftar tamu. Pantau status pengiriman secara langsung (Belum Dikirim, Terkirim, Gagal, Tanpa No. HP), kirim satuan maupun massal dengan jeda aman, serta cek pratinjau tampilan WhatsApp per tamu.',
+        color: 'text-[#8C3A50]',
+        bgColor: 'bg-rose-50',
+      },
+      {
+        icon: KeyRound,
+        category: 'Fitur Baru',
+        title: 'Token Fonnte Pribadi (Tanpa Potong Kuota) & Fallback Otomatis',
+        description:
+          'Client dan Partner dapat mengisi Token Fonnte pribadi di halaman Profil Saya atau langsung di halaman Kirim Undangan agar pengiriman tidak memotong kuota WA Blast Guestly. Dilengkapi cek koneksi perangkat Fonnte, fallback otomatis ke Token Global Guestly, dan opsi kirim manual via WhatsApp.',
+        color: 'text-emerald-700',
+        bgColor: 'bg-emerald-50',
+      },
+      {
+        icon: ImageIcon,
+        category: 'UI & UX',
+        title: 'Pratinjau & Lampiran Kartu E-Invitation WhatsApp Selaras Template',
+        description:
+          'Pengiriman undangan via Fonnte mendukung lampiran langsung Kartu E-Invitation (1200×675) berisi foto mempelai, nama tamu, detail acara, dan QR Code yang selaras dengan katalog template E-Invitation, didukung validasi media server agar gambar selalu tampil tajam tanpa rusak.',
+        color: 'text-amber-700',
+        bgColor: 'bg-amber-50',
+      },
+      {
+        icon: Lock,
+        category: 'Akses & Sistem',
+        title: 'Ubah Status Khusus Super Admin & Kunci Penuh Operasional/Export Saat Kedaluwarsa',
+        description:
+          'Perubahan status acara secara manual (Draft/Published/Completed) kini dibatasi khusus untuk Super Admin—role lain wajib melalui proses Top-Up Paket. Saat acara berstatus Draft atau masa aktif habis, seluruh fitur operasional non-Super Admin (termasuk ekspor Excel/PDF, impor, kelola tamu, kirim undangan/WA, check-in, souvenir & Berita Acara, serta edit acara) dikunci otomatis dalam mode baca saja.',
+        color: 'text-[#8C3A50]',
+        bgColor: 'bg-rose-50',
+      },
+    ],
+  },
+  {
     version: 'V2.4.0',
     date: '13 November 2026',
     badge: 'Major Update',
-    isLatest: true,
     summary:
       'Peluncuran modul Wedding Planner terpadu, manajemen akses kolaboratif per peran, otomatisasi masa aktif acara 30 hari, serta penyempurnaan responsivitas multi-perangkat.',
     changes: [

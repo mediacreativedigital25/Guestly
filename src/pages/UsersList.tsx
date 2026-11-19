@@ -27,7 +27,7 @@ import { useNavigate, useLocation, useParams, Link } from 'react-router-dom';
 import { Modal } from '../components/Modal';
 import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 import { getRoleLabel, canUserAccessEvent, getUserBusinessId, shouldHideServiceInfo, isPartnerBusinessRegistered, isGreetingScreenUser } from '../lib/utils';
-import { isSessionExpired, formatRelativeActivity } from '../lib/deviceUtils';
+import { isSessionExpired, formatRelativeActivity, normalizeUserDevices, getMaxDevicesForRole } from '../lib/deviceUtils';
 
 export default function UsersList() {
   const [users, setUsers] = useState<User[]>([]);
@@ -288,21 +288,25 @@ export default function UsersList() {
 
   const handleResetUserSession = async (targetUser: User) => {
     if (!targetUser.id) return;
+    const devCount = normalizeUserDevices(targetUser).length;
     const confirmed = await showConfirm(
-      `Putus sesi perangkat untuk "${targetUser.name || targetUser.email}"?`,
-      'Perangkat yang sedang login akan otomatis dikeluarkan seketika.'
+      devCount > 1
+        ? `Putus semua (${devCount}) sesi perangkat untuk "${targetUser.name || targetUser.email}"?`
+        : `Putus sesi perangkat untuk "${targetUser.name || targetUser.email}"?`,
+      'Seluruh perangkat yang sedang login akan otomatis dikeluarkan seketika.'
     );
     if (!confirmed) return;
 
     try {
       await updateDoc(doc(db, 'users', targetUser.id), {
+        activeDevices: [],
         activeDeviceId: null,
         activeDeviceName: null,
         sessionRevoked: true,
         sessionRevokedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      setUsers(prev => prev.map(u => u.id === targetUser.id ? { ...u, activeDeviceId: null, activeDeviceName: null } : u));
+      setUsers(prev => prev.map(u => u.id === targetUser.id ? { ...u, activeDevices: [], activeDeviceId: null, activeDeviceName: null } : u));
       showAlert('Berhasil', `Sesi perangkat untuk ${targetUser.name || targetUser.email} berhasil direset.`, 'success');
     } catch (err: any) {
       console.error(err);
@@ -1837,12 +1841,24 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                                 Dibuat oleh: <span className="font-medium text-gray-600">{user.createdByName}</span>
                               </div>
                             )}
-                            {user.activeDeviceId && (
-                              <div className="mt-1 flex items-center gap-1 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded w-fit">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                <span className="font-semibold truncate max-w-[150px]">{user.activeDeviceName || 'Perangkat Aktif'}</span>
-                              </div>
-                            )}
+                            {(() => {
+                              const userDevices = normalizeUserDevices(user);
+                              if (userDevices.length === 0) return null;
+                              const maxDev = getMaxDevicesForRole(user.role);
+                              return (
+                                <div
+                                  className="mt-1 flex items-center gap-1 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded w-fit"
+                                  title={userDevices.map((d, i) => `${i + 1}. ${d.deviceName}`).join('\n')}
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  <span className="font-semibold truncate max-w-[165px]">
+                                    {maxDev > 1 && Number.isFinite(maxDev)
+                                      ? `${userDevices.length}/${maxDev} Device · ${userDevices[0].deviceName}`
+                                      : userDevices[0].deviceName || 'Perangkat Aktif'}
+                                  </span>
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
                       </td>
@@ -1958,11 +1974,11 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                       <td className="px-5 py-4 whitespace-nowrap text-sm font-medium">
                         {canModify ? (
                           <div className="flex items-center gap-2">
-                            {user.activeDeviceId && (
+                            {normalizeUserDevices(user).length > 0 && (
                               <button
                                 onClick={() => handleResetUserSession(user)}
                                 className="text-amber-700 hover:text-amber-900 flex items-center gap-1 bg-amber-50 px-2.5 py-1.5 rounded-md hover:bg-amber-100 transition-colors text-xs font-semibold cursor-pointer"
-                                title={`Putus sesi login di: ${user.activeDeviceName || 'Perangkat Aktif'}`}
+                                title={`Putus sesi login di: ${normalizeUserDevices(user).map((d) => d.deviceName).join(', ')}`}
                               >
                                 <LogOut className="w-3.5 h-3.5 text-amber-600" /> Reset Device
                               </button>

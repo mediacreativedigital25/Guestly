@@ -198,6 +198,23 @@ export function getUserBusinessId(
   return user.partnerId || null;
 }
 
+export function isVendorManagedClient(
+  user?: { role?: string; partnerId?: string | null; businessName?: string } | null
+): boolean {
+  if (!user || user.role !== 'client') return false;
+  return Boolean(
+    (user.partnerId && user.partnerId !== 'default-partner') ||
+    user.businessName
+  );
+}
+
+export function isSelfRegisteredClient(
+  user?: { role?: string; partnerId?: string | null; businessName?: string } | null
+): boolean {
+  if (!user || user.role !== 'client') return false;
+  return !isVendorManagedClient(user);
+}
+
 export function shouldHideServiceInfo(
   user?: { role?: string; partnerId?: string | null; businessName?: string; hideServiceInfo?: boolean } | null
 ): boolean {
@@ -205,20 +222,20 @@ export function shouldHideServiceInfo(
   if (user.role === 'superadmin') return false;
   if (user.role === 'staff' || user.role === 'greeting' || user.role === 'admin') return true;
   if (user.hideServiceInfo === true) return true;
-  if (
-    user.role === 'client' &&
-    (Boolean(user.partnerId && user.partnerId !== 'default-partner') || Boolean(user.businessName))
-  ) {
+  if (isVendorManagedClient(user)) {
     return true;
   }
   return false;
 }
 
 export function canUserCreateEvent(
-  user?: { role?: string } | null
+  user?: { role?: string; partnerId?: string | null; businessName?: string } | null
 ): boolean {
   if (!user) return false;
-  if (user.role === 'staff' || user.role === 'greeting' || user.role === 'client') return false;
+  if (user.role === 'staff' || user.role === 'greeting') return false;
+  if (user.role === 'client') {
+    return isSelfRegisteredClient(user);
+  }
   return ['superadmin', 'owner', 'admin', 'partner'].includes(user.role || '');
 }
 

@@ -359,17 +359,12 @@ export const EInvitationCard: React.FC<EInvitationCardProps> = ({
         height: `${Math.round(675 * scale)}px`,
       }}
     >
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,400;1,600&display=swap');
-        .einvite-serif { font-family: 'Playfair Display', Georgia, serif; }
-      `}</style>
-
       {/* Fixed 1200x675 (16:9) Precision Canvas */}
       <div
         ref={cardRef}
         data-export-width="1200"
         data-export-height="675"
-        className="relative bg-[#FAF6F2] text-left select-none overflow-hidden"
+        className="absolute top-0 left-0 bg-[#FAF6F2] text-left select-none overflow-hidden"
         style={{
           width: '1200px',
           height: '675px',

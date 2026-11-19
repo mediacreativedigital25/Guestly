@@ -1,11 +1,18 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, runTransaction, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
 import { User } from './types';
 import { showAlert } from './lib/alerts';
 import { resolveMediaUrl, isGreetingScreenUser } from './lib/utils';
-import { getDeviceId, getDeviceName, isSessionExpired } from './lib/deviceUtils';
+import {
+  getDeviceId,
+  getDeviceName,
+  normalizeUserDevices,
+  getNonExpiredDevices,
+  buildLegacyDeviceFields,
+  isLoginHandshakeActive,
+} from './lib/deviceUtils';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
@@ -27,6 +34,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [appUser, setAppUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const ensuredSessionUidRef = useRef<string | null>(null);
 
   useEffect(() => {
     let unsubscribeSnapshot: (() => void) | null = null;
@@ -47,12 +55,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           } else {
             // Bootstrap initial account only when user document does not exist yet
             const isFirst = ['64.iklas@gmail.com'].includes(user.email || '') || user.email?.includes('superadmin');
+            const myDeviceId = getDeviceId();
+            const myDeviceName = getDeviceName();
+            const now = Date.now();
+            const initialDevices = [
+              {
+                deviceId: myDeviceId,
+                deviceName: myDeviceName,
+                lastActiveAt: now,
+                loggedInAt: now,
+              },
+            ];
             const newUser: User = {
               role: isFirst ? 'superadmin' : 'client',
               name: user.displayName || 'Admin',
               email: user.email || '',
               partnerId: null,
               clientId: null,
+              activeDevices: initialDevices,
+              ...buildLegacyDeviceFields(initialDevices),
+              lastActiveAt: serverTimestamp(),
+              lastLoginAt: serverTimestamp(),
+              sessionRevoked: false,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             };
@@ -77,11 +101,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               if (liveData.brandingImageUrl) liveData.brandingImageUrl = resolveMediaUrl(liveData.brandingImageUrl);
               setAppUser({ id: snap.id, ...liveData });
 
+              // Skip guard while login/register flow is atomically verifying/claiming a device slot
+              if (isLoginHandshakeActive()) return;
+
+              const myDeviceId = getDeviceId();
+              const isUnlimitedRole = liveData.role === 'superadmin' || isGreetingScreenUser(liveData);
+              const devices = normalizeUserDevices(liveData);
+              const hasTrackedSession =
+                Array.isArray(liveData.activeDevices) || Boolean(liveData.activeDeviceId);
+              const isAuthorizedDevice = devices.some((d) => d.deviceId === myDeviceId);
+
               // Active Device Session Guard (Except superadmin & TV greeting screen)
-              if (liveData.role !== 'superadmin' && !isGreetingScreenUser(liveData)) {
-                const myDeviceId = getDeviceId();
-                // If session was revoked by Admin/Owner OR if activeDeviceId exists and doesn't match this device
-                if (liveData.sessionRevoked || (liveData.activeDeviceId && liveData.activeDeviceId !== myDeviceId)) {
+              if (!isUnlimitedRole) {
+                // Kick if all sessions were revoked OR this specific device is no longer in the authorized list
+                if (liveData.sessionRevoked || (hasTrackedSession && !isAuthorizedDevice)) {
                   auth.signOut();
                   showAlert(
                     'Sesi Terputus',
@@ -90,6 +123,52 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                   );
                   return;
                 }
+              }
+
+              // Self-register current device once per auth session when missing (e.g., Super Admin / Layar Sapa
+              // or legacy pre-tracking sessions that were never revoked) so Active Sessions accurately shows them.
+              if (
+                !liveData.sessionRevoked &&
+                ensuredSessionUidRef.current !== user.uid &&
+                ((isUnlimitedRole && !isAuthorizedDevice) || (!isUnlimitedRole && !hasTrackedSession))
+              ) {
+                ensuredSessionUidRef.current = user.uid;
+                const myDeviceName = getDeviceName();
+                const now = Date.now();
+                runTransaction(db, async (tx) => {
+                  const freshSnap = await tx.get(userDocRef);
+                  if (!freshSnap.exists()) return;
+                  const freshData = freshSnap.data();
+                  if (freshData.sessionRevoked) return;
+                  const freshDevices = getNonExpiredDevices(normalizeUserDevices(freshData));
+                  const alreadyIn = freshDevices.some((d) => d.deviceId === myDeviceId);
+                  let updated = alreadyIn
+                    ? freshDevices.map((d) =>
+                        d.deviceId === myDeviceId
+                          ? { ...d, deviceName: myDeviceName, lastActiveAt: now }
+                          : d
+                      )
+                    : [
+                        ...freshDevices,
+                        {
+                          deviceId: myDeviceId,
+                          deviceName: myDeviceName,
+                          lastActiveAt: now,
+                          loggedInAt: now,
+                        },
+                      ];
+                  if (isUnlimitedRole && updated.length > 5) {
+                    updated = [...updated]
+                      .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
+                      .slice(0, 5);
+                  }
+                  tx.update(userDocRef, {
+                    activeDevices: updated,
+                    ...buildLegacyDeviceFields(updated),
+                    lastActiveAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                  });
+                }).catch(() => {});
               }
             }
           });
@@ -102,6 +181,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
       } else {
         setAppUser(null);
+        ensuredSessionUidRef.current = null;
         if (unsubscribeSnapshot) {
           unsubscribeSnapshot();
           unsubscribeSnapshot = null;
@@ -121,26 +201,33 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (currentUser) {
         const myDeviceId = getDeviceId();
         const userDocRef = doc(db, 'users', currentUser.uid);
-        const userSnap = await getDoc(userDocRef);
-        if (userSnap.exists() && userSnap.data()?.activeDeviceId === myDeviceId) {
-          await updateDoc(userDocRef, {
-            activeDeviceId: null,
-            activeDeviceName: null,
-            sessionRevoked: false,
-            updatedAt: serverTimestamp()
-          });
-        }
+        // Atomically remove ONLY this device so any second active device (e.g. Client 2nd device) stays signed in
+        await runTransaction(db, async (tx) => {
+          const userSnap = await tx.get(userDocRef);
+          if (!userSnap.exists()) return;
+          const uData = userSnap.data();
+          const currentDevices = normalizeUserDevices(uData);
+          const remaining = currentDevices.filter((d) => d.deviceId !== myDeviceId);
+          if (remaining.length !== currentDevices.length || uData?.activeDeviceId === myDeviceId) {
+            tx.update(userDocRef, {
+              activeDevices: remaining,
+              ...buildLegacyDeviceFields(remaining),
+              sessionRevoked: false,
+              updatedAt: serverTimestamp(),
+            });
+          }
+        });
       }
     } catch (err) {
       console.error('Error clearing active device on logout:', err);
     }
+    ensuredSessionUidRef.current = null;
     auth.signOut();
   };
 
-  // Heartbeat to update lastActiveAt every 5 minutes while user is active
+  // Heartbeat to update ONLY this device's lastActiveAt every 5 minutes while user is active
   useEffect(() => {
     if (!currentUser || !appUser) return;
-    if (isGreetingScreenUser(appUser)) return;
 
     let lastHeartbeat = Date.now();
 
@@ -149,15 +236,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // Throttle to update at most once every 5 minutes (300,000 ms)
       if (now - lastHeartbeat >= 5 * 60 * 1000) {
         lastHeartbeat = now;
-        try {
-          const userDocRef = doc(db, 'users', currentUser.uid);
-          updateDoc(userDocRef, {
+        const myDeviceId = getDeviceId();
+        const myDeviceName = getDeviceName();
+        const userDocRef = doc(db, 'users', currentUser.uid);
+
+        runTransaction(db, async (tx) => {
+          const snap = await tx.get(userDocRef);
+          if (!snap.exists()) return;
+          const uData = snap.data();
+          const currentDevices = normalizeUserDevices(uData);
+          const idx = currentDevices.findIndex((d) => d.deviceId === myDeviceId);
+
+          const payload: Record<string, any> = {
             lastActiveAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          }).catch(() => {});
-        } catch {
-          // ignore
-        }
+            updatedAt: serverTimestamp(),
+          };
+
+          if (idx >= 0) {
+            const updatedDevices = currentDevices.map((d, i) =>
+              i === idx ? { ...d, deviceName: myDeviceName, lastActiveAt: now } : d
+            );
+            payload.activeDevices = updatedDevices;
+            Object.assign(payload, buildLegacyDeviceFields(updatedDevices));
+          }
+
+          tx.update(userDocRef, payload);
+        }).catch(() => {});
       }
     };
 
@@ -168,8 +272,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, [currentUser, appUser]);
 
+  // Auto-logout after 2 hours of inactivity (waits for appUser so TV Layar Sapa is reliably excluded)
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || !appUser) return;
     // Do not auto-logout TV Layar Sapa display accounts during long events
     if (isGreetingScreenUser(appUser)) return;
 
@@ -205,7 +310,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         window.removeEventListener(event, resetTimer);
       });
     };
-  }, [currentUser]);
+  }, [currentUser, appUser]);
 
   return (
     <AuthContext.Provider value={{ currentUser, appUser, loading, logout }}>

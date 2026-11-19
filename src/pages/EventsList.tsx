@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../AuthContext';
-import { collection, query, getDocs, where, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, deleteField, runTransaction, onSnapshot } from 'firebase/firestore';
+import { collection, query, getDocs, where, addDoc, setDoc, serverTimestamp, deleteDoc, doc, updateDoc, deleteField, runTransaction, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { EventRecord, Client, User, EInviteTemplate, GreetingScreenTemplate, GreetingPhotoStyle, SeatingTable, Guest } from '../types';
-import { parseFirestoreDate, canUserAccessEvent, canUserCreateEvent, getUserBusinessId, getRoleLabel, isPartnerBusinessRegistered, resolveMediaUrl, DEFAULT_EVENT_ACTIVE_DAYS, computeDefaultActiveUntil, resolveEventActiveUntil, getDaysRemaining, isEventExpired, formatDateInputYMD } from '../lib/utils';
+import { parseFirestoreDate, canUserAccessEvent, canUserCreateEvent, getUserBusinessId, getRoleLabel, isPartnerBusinessRegistered, isSelfRegisteredClient, isVendorManagedClient, resolveMediaUrl, DEFAULT_EVENT_ACTIVE_DAYS, computeDefaultActiveUntil, resolveEventActiveUntil, getDaysRemaining, isEventExpired, isEventInactiveOrExpired, formatDateInputYMD } from '../lib/utils';
 import { format } from 'date-fns';
 import { Link, useNavigate, useLocation, useParams } from 'react-router-dom';
-import { Plus, Image as ImageIcon, Trash2, Edit, ScanLine, Eye, ArrowUp, ArrowDown, Gift, Building2, Lock, Sparkles, Check, MapPin, ExternalLink, Crown, Users, Search, Armchair, Monitor, Send, Clock, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Plus, Image as ImageIcon, Trash2, Edit, ScanLine, Eye, ArrowUp, ArrowDown, Gift, Building2, Lock, Sparkles, Check, MapPin, ExternalLink, Crown, Users, Search, X, Armchair, Monitor, Send, Clock, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { MediaUploader } from '../components/media/MediaUploader';
 import { EInvitationCard, splitCoupleNames } from '../components/EInvitationCard';
@@ -24,6 +24,12 @@ export default function EventsList() {
   const [lastVisible, setLastVisible] = useState<any>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  // Table Search, Filter & Pagination State
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'draft' | 'expired'>('all');
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   const [isCreating, setIsCreating] = useState(false);
   const [isPartnerNoticeOpen, setIsPartnerNoticeOpen] = useState(false);
@@ -218,13 +224,21 @@ export default function EventsList() {
     }
 
     if (!hasAccess) {
-       showAlert('Akses Ditolak', 'Anda tidak memiliki kuota acara. Silakan hubungi Super Admin atau beli layanan terlebih dahulu.', 'warning');
+       showAlert(
+         'Kuota Acara Belum Tersedia',
+         isSelfRegisteredClient(appUser)
+           ? 'Untuk membuat acara pernikahan Anda sendiri, silakan lakukan Top-Up Paket layanan terlebih dahulu.'
+           : 'Anda tidak memiliki kuota acara. Silakan hubungi Super Admin atau beli layanan terlebih dahulu.',
+         'warning'
+       );
        navigate('/auth/login/services/catalog');
        return;
     }
 
     resetForm();
-    if (clients.length > 0) {
+    if (isSelfRegisteredClient(appUser)) {
+      setNewEventClientId(appUser?.clientId || appUser?.id || '');
+    } else if (clients.length > 0) {
       setNewEventClientId(clients[0].id!);
     }
     setIsCreating(true);
@@ -356,6 +370,14 @@ export default function EventsList() {
   };
 
   const openEditModal = (event: EventRecord, initialTab: 'info' | 'tables' = 'info') => {
+    if (appUser?.role !== 'superadmin' && isEventInactiveOrExpired(event)) {
+      showAlert(
+        'Acara Terkunci',
+        'Masa aktif acara telah berakhir / berstatus Draft. Silakan lakukan Top-Up Paket terlebih dahulu untuk mengedit acara ini.',
+        'warning'
+      );
+      return;
+    }
     populateEditModal(event, initialTab);
     if (event.id) {
       navigate(initialTab === 'tables' ? `/auth/login/events/${event.id}/tables` : `/auth/login/events/${event.id}/edit`);
@@ -371,9 +393,34 @@ export default function EventsList() {
     if (loading) return;
     const path = location.pathname;
     if (path.endsWith('/events/add')) {
+      if (!canUserCreateEvent(appUser)) {
+        navigate('/auth/login/events', { replace: true });
+        return;
+      }
+      const hasUnlimited =
+        appUser?.role === 'superadmin' ||
+        appUser?.role === 'owner' ||
+        appUser?.role === 'admin' ||
+        appUser?.allowManualEvent ||
+        appUser?.eventManual;
+      const userEventCredit =
+        appUser?.eventCredit !== undefined ? appUser.eventCredit : (appUser?.eventQuota || 0);
+      if (!hasUnlimited && userEventCredit <= 0) {
+        showAlert(
+          'Kuota Acara Belum Tersedia',
+          isSelfRegisteredClient(appUser)
+            ? 'Untuk membuat acara pernikahan Anda sendiri, silakan lakukan Top-Up Paket layanan terlebih dahulu.'
+            : 'Anda tidak memiliki kuota acara. Silakan beli layanan terlebih dahulu.',
+          'warning'
+        );
+        navigate('/auth/login/services/catalog', { replace: true });
+        return;
+      }
       if (!isCreating || editingEventId !== null) {
         resetForm();
-        if (clients.length > 0) {
+        if (isSelfRegisteredClient(appUser)) {
+          setNewEventClientId(appUser?.clientId || appUser?.id || '');
+        } else if (clients.length > 0) {
           setNewEventClientId(clients[0].id!);
         }
         setIsCreating(true);
@@ -382,6 +429,16 @@ export default function EventsList() {
       const targetTab = path.endsWith('/tables') ? 'tables' : 'info';
       const found = events.find(ev => ev.id === routeEventId);
       if (found) {
+        if (appUser?.role !== 'superadmin' && isEventInactiveOrExpired(found)) {
+          setIsCreating(false);
+          navigate('/auth/login/events', { replace: true });
+          showAlert(
+            'Acara Terkunci',
+            'Masa aktif acara telah berakhir / berstatus Draft. Silakan lakukan Top-Up Paket terlebih dahulu untuk mengedit acara ini.',
+            'warning'
+          );
+          return;
+        }
         if (!isCreating || editingEventId !== found.id) {
           populateEditModal(found, targetTab);
         } else if (path.endsWith('/tables') && activeTab !== 'tables') {
@@ -391,7 +448,7 @@ export default function EventsList() {
     } else if (path === '/auth/login/events' && isCreating) {
       setIsCreating(false);
     }
-  }, [location.pathname, routeEventId, events, loading]);
+  }, [location.pathname, routeEventId, events, loading, appUser?.role]);
 
   useEffect(() => {
     let unsubscribeEvents: () => void;
@@ -579,20 +636,49 @@ export default function EventsList() {
       setIsPartnerNoticeOpen(true);
       return;
     }
-    if (!newEventTitle || !newEventDate || !newEventClientId) {
-      showAlert('Peringatan', 'Nama acara, tanggal, dan client wajib diisi.', 'warning');
+    const isSelfClient = isSelfRegisteredClient(appUser);
+    const effectiveClientId = isSelfClient
+      ? (appUser.clientId || appUser.id || '')
+      : newEventClientId;
+
+    if (!newEventTitle || !newEventDate || !effectiveClientId) {
+      showAlert('Peringatan', isSelfClient ? 'Nama acara dan tanggal wajib diisi.' : 'Nama acara, tanggal, dan client wajib diisi.', 'warning');
       return;
     }
+
+    if (!editingEventId) {
+      const hasUnlimited =
+        appUser.role === 'superadmin' ||
+        appUser.role === 'owner' ||
+        appUser.role === 'admin' ||
+        appUser.allowManualEvent ||
+        appUser.eventManual;
+      const currentCredit = appUser.eventCredit !== undefined ? appUser.eventCredit : (appUser.eventQuota || 0);
+      if (!hasUnlimited && currentCredit <= 0) {
+        showAlert('Kuota Acara Habis', 'Kuota acara Anda sudah habis. Silakan lakukan Top-Up Paket terlebih dahulu.', 'warning');
+        navigate('/auth/login/services/catalog');
+        return;
+      }
+    }
     
-    const selectedClient = clients.find(c => c.id === newEventClientId);
-    const partnerId = selectedClient?.partnerId || getUserBusinessId(appUser) || appUser.id || 'default-partner';
+    const selectedClient = clients.find(c => c.id === effectiveClientId);
+    const partnerId = isSelfClient
+      ? null
+      : (selectedClient?.partnerId || getUserBusinessId(appUser) || appUser.id || 'default-partner');
     
     try {
       const payload: any = {
         title: newEventTitle,
         coupleName: newEventCoupleName,
         date: newEventDate,
-        clientId: newEventClientId,
+        clientId: effectiveClientId,
+        ...(isSelfClient
+          ? {
+              clientUid: appUser.id,
+              clientEmail: appUser.email || '',
+              includeWeddingPlanner: true,
+            }
+          : {}),
         updatedAt: serverTimestamp()
       };
       
@@ -605,8 +691,24 @@ export default function EventsList() {
       if (newEventDigitalInviteLink) payload.digitalInviteLink = newEventDigitalInviteLink;
       else if (editingEventId) payload.digitalInviteLink = deleteField();
       
+      const currentEv = editingEventId ? events.find((e) => e.id === editingEventId) : undefined;
+      if (editingEventId && currentEv && appUser?.role !== 'superadmin' && isEventInactiveOrExpired(currentEv)) {
+        showAlert(
+          'Acara Terkunci',
+          'Masa aktif acara telah berakhir / berstatus Draft. Silakan lakukan Top-Up Paket terlebih dahulu untuk memperbarui acara ini.',
+          'warning'
+        );
+        return;
+      }
+
       const resolvedActiveUntil = editingEventId
-        ? (newEventActiveUntil || computeDefaultActiveUntil(new Date(), DEFAULT_EVENT_ACTIVE_DAYS))
+        ? appUser?.role === 'superadmin'
+          ? (newEventActiveUntil ||
+              (currentEv ? formatDateInputYMD(resolveEventActiveUntil(currentEv)) : '') ||
+              computeDefaultActiveUntil(new Date(), DEFAULT_EVENT_ACTIVE_DAYS))
+          : (currentEv?.activeUntil ||
+              (currentEv ? formatDateInputYMD(resolveEventActiveUntil(currentEv)) : '') ||
+              computeDefaultActiveUntil(new Date(), DEFAULT_EVENT_ACTIVE_DAYS))
         : (appUser?.role === 'superadmin' && newEventActiveUntil
             ? newEventActiveUntil
             : computeDefaultActiveUntil(new Date(), DEFAULT_EVENT_ACTIVE_DAYS));
@@ -618,8 +720,7 @@ export default function EventsList() {
         payload.subscriptionStatus = nextExpired ? 'expired' : 'active';
         if (nextExpired) {
           payload.status = 'draft';
-        } else {
-          const currentEv = events.find((e) => e.id === editingEventId);
+        } else if (appUser?.role === 'superadmin') {
           if (currentEv?.status === 'draft' && currentEv?.subscriptionStatus === 'expired') {
             payload.status = 'published';
           }
@@ -721,6 +822,28 @@ export default function EventsList() {
         const docRef = await addDoc(collection(db, 'events'), payload);
         newDocId = docRef.id;
 
+        // Auto-unlock Wedding Planner project for Client Mandiri upon creating an event
+        if (isSelfClient) {
+          try {
+            await setDoc(doc(db, 'wedding_planners', newDocId), {
+              eventId: newDocId,
+              plannerStatus: 'active',
+              clientId: effectiveClientId,
+              clientName: appUser.name || newEventCoupleName || newEventTitle,
+              partnerId: null,
+              totalBudget: 100000000,
+              checklist: [],
+              vendors: [],
+              rundown: [],
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            }, { merge: true });
+            window.dispatchEvent(new Event('guestly-planner-updated'));
+          } catch (wpErr) {
+            console.error('Failed to initialize wedding planner for self client:', wpErr);
+          }
+        }
+
         // Deduct quota if not superadmin/owner/admin and manual event is not enabled
         if (appUser?.role !== 'superadmin' && appUser?.role !== 'owner' && appUser?.role !== 'admin' && !appUser?.allowManualEvent && !appUser?.eventManual) {
            const currentCredit = appUser?.eventCredit !== undefined ? appUser.eventCredit : (appUser?.eventQuota || 0);
@@ -736,7 +859,13 @@ export default function EventsList() {
            }
         }
         
-        showAlert('Berhasil', 'Acara berhasil dibuat!', 'success');
+        showAlert(
+          'Berhasil',
+          isSelfClient
+            ? 'Acara berhasil dibuat dan fitur Wedding Planner telah otomatis terbuka!'
+            : 'Acara berhasil dibuat!',
+          'success'
+        );
         navigate(`/auth/login/events/${newDocId}`);
       }
     } catch (error) {
@@ -926,28 +1055,141 @@ export default function EventsList() {
   const promptDeleteEvent = (id: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    const targetEv = events.find((ev) => ev.id === id);
+    if (appUser?.role !== 'superadmin' && targetEv && isEventInactiveOrExpired(targetEv)) {
+      showAlert(
+        'Acara Terkunci',
+        'Masa aktif acara telah berakhir / berstatus Draft. Fitur pengelolaan dikunci hingga dilakukan Top-Up Paket.',
+        'warning'
+      );
+      return;
+    }
     setEventToDelete(id);
   };
 
+  const clientNameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    clients.forEach((c) => {
+      if (c.id) map[c.id] = c.name || '';
+    });
+    return map;
+  }, [clients]);
+
+  const filteredEvents = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return events.filter((ev) => {
+      const expired = isEventExpired(ev);
+      const isDraft = ev.status === 'draft';
+      if (statusFilter === 'active' && (expired || isDraft)) return false;
+      if (statusFilter === 'draft' && !isDraft) return false;
+      if (statusFilter === 'expired' && !expired) return false;
+
+      if (!q) return true;
+      const clientName = ev.clientId ? (clientNameById[ev.clientId] || '') : '';
+      const haystack = [
+        ev.title,
+        ev.coupleName,
+        ev.location,
+        ev.eInviteVenueName,
+        ev.status,
+        clientName,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [events, searchTerm, statusFilter, clientNameById]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredEvents.length / itemsPerPage));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, filteredEvents.length);
+  const paginatedEvents = useMemo(
+    () => filteredEvents.slice(startIndex, endIndex),
+    [filteredEvents, startIndex, endIndex]
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter, itemsPerPage]);
+
+  const hasActiveFilter = searchTerm.trim() !== '' || statusFilter !== 'all';
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-        <div>
-          {appUser?.role === 'staff' && (
-            <p className="text-sm text-gray-500">
-              Anda masuk sebagai <span className="font-semibold text-indigo-600">{getRoleLabel(appUser.role, appUser.staffType)}</span>. Hanya menampilkan acara yang ditugaskan kepada Anda.
-            </p>
-          )}
+    <div className="space-y-4">
+      {appUser?.role === 'staff' && (
+        <p className="text-sm text-gray-500">
+          Anda masuk sebagai <span className="font-semibold text-indigo-600">{getRoleLabel(appUser.role, appUser.staffType)}</span>. Hanya menampilkan acara yang ditugaskan kepada Anda.
+        </p>
+      )}
+
+      {/* Unified Toolbar: Search | Filter | Tampilkan 10, 25, 50 | Create Event */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-2.5 sm:p-3">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-2">
+          {/* Search */}
+          <div className="relative flex-1 min-w-0">
+            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Cari nama acara, mempelai, atau lokasi..."
+              className="w-full h-8.5 pl-8.5 pr-7 text-xs sm:text-sm bg-gray-50/70 border border-gray-200 rounded-lg text-gray-800 placeholder:text-gray-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5 rounded transition-colors cursor-pointer"
+                title="Hapus pencarian"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 shrink-0">
+            {/* Filter Status */}
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'draft' | 'expired')}
+              className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none"
+              title="Filter status acara"
+            >
+              <option value="all">Semua Status</option>
+              <option value="active">Aktif (Published)</option>
+              <option value="draft">Draft</option>
+              <option value="expired">Kedaluwarsa</option>
+            </select>
+
+            {/* Tampilkan 10, 25, 50 */}
+            <div className="flex items-center gap-1.5 h-8.5 px-2.5 bg-white border border-gray-200 rounded-lg text-xs text-gray-600 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition">
+              <span className="text-xs text-gray-500 whitespace-nowrap">Tampilkan</span>
+              <select
+                value={itemsPerPage}
+                onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                className="bg-transparent text-xs sm:text-sm font-semibold text-gray-800 focus:outline-none cursor-pointer pr-0.5"
+                title="Jumlah baris per halaman"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+
+            {/* Create Event Button */}
+            {canUserCreateEvent(appUser) && (
+              <button
+                onClick={openCreateModal}
+                className="h-8.5 px-3 text-xs font-medium inline-flex items-center justify-center gap-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-xs transition-colors whitespace-nowrap cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Create Event</span>
+              </button>
+            )}
+          </div>
         </div>
-        {canUserCreateEvent(appUser) && (
-          <button 
-            onClick={openCreateModal}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-semibold text-sm shadow-xs transition-colors self-start sm:self-auto cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            Create Event
-          </button>
-        )}
       </div>
 
       {/* Warning banner if Owner / Partner / Admin business has not yet been registered with Name & Address by Super Admin */}
@@ -2774,95 +3016,145 @@ export default function EventsList() {
       </Modal>
       
       {loading ? (
-        <p>Loading events...</p>
+        <div className="bg-white p-8 text-center rounded-xl shadow-xs border border-gray-200">
+          <p className="text-gray-500 text-sm">Memuat data acara...</p>
+        </div>
       ) : events.length === 0 ? (
-        <div className="bg-white p-12 text-center rounded-lg shadow-sm border border-gray-200">
-          <p className="text-gray-500">
+        <div className="bg-white p-12 text-center rounded-xl shadow-xs border border-gray-200 space-y-4">
+          <p className="text-gray-600 text-sm max-w-lg mx-auto">
             {appUser?.role === 'staff'
               ? 'Belum ada acara yang ditugaskan kepada akun Anda. Silakan hubungi Admin atau Owner untuk penugasan acara.'
-              : appUser?.role === 'client'
+              : isVendorManagedClient(appUser)
               ? 'Belum ada acara yang terdaftar untuk akun Anda. Acara Anda akan disiapkan oleh penyelenggara (Owner / Admin).'
+              : isSelfRegisteredClient(appUser)
+              ? ((appUser?.eventCredit !== undefined ? appUser.eventCredit : (appUser?.eventQuota || 0)) > 0
+                  ? 'Kuota acara Anda sudah aktif! Klik tombol "Create Event" di atas untuk mulai membuat acara pernikahan dan membuka Wedding Planner.'
+                  : 'Anda belum memiliki acara. Silakan lakukan Top-Up Paket terlebih dahulu untuk mendapatkan kuota pembuatan acara dan membuka Wedding Planner.')
               : 'Belum ada acara yang dibuat. Silakan klik tombol "Create Event" untuk membuat acara baru.'}
           </p>
+          {isSelfRegisteredClient(appUser) && (
+            <div>
+              {(appUser?.eventCredit !== undefined ? appUser.eventCredit : (appUser?.eventQuota || 0)) > 0 ? (
+                <button
+                  type="button"
+                  onClick={openCreateModal}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-sm font-semibold transition-colors shadow-xs cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Buat Acara Pertama</span>
+                </button>
+              ) : (
+                <Link
+                  to="/auth/login/services/catalog"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-sm font-semibold transition-colors shadow-xs"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Top-Up Paket Sekarang</span>
+                </Link>
+              )}
+            </div>
+          )}
         </div>
       ) : (
-        
-        <div className="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">No</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Thumbnail</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Tanggal Dibuat</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Nama Acara</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Tanggal Acara</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Masa Aktif</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Aksi</th>
-                  <th className="px-6 py-3 text-center text-sm font-medium text-gray-500 tracking-wider">Scanner</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {events.map((event, index) => (
-                  <tr key={event.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{index + 1}</td>
-                    <td className="px-6 py-3 whitespace-nowrap">
-                      <Link to={`/auth/login/events/${event.id}`} className="block w-fit group">
-                        {event.thumbnailUrl ? (
-                          <img
-                            src={event.thumbnailUrl}
-                            alt={event.title}
-                            className="w-14 h-10 rounded-lg object-cover border border-gray-200 shadow-2xs bg-gray-50 group-hover:ring-2 group-hover:ring-indigo-500/40 transition-all"
-                          />
-                        ) : (
-                          <div
-                            className="w-14 h-10 rounded-lg border border-dashed border-gray-300 bg-gray-50 flex flex-col items-center justify-center text-gray-400 group-hover:border-indigo-300 group-hover:text-indigo-500 transition-colors"
-                            title="Belum ada thumbnail kustom"
-                          >
-                            <ImageIcon className="w-4 h-4" />
-                          </div>
-                        )}
-                      </Link>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {event.createdAt && parseFirestoreDate(event.createdAt) ? format(parseFirestoreDate(event.createdAt)!, 'dd MMM yyyy') : '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <Link to={`/auth/login/events/${event.id}`} className="text-sm font-medium text-gray-900 hover:text-[#8C3A50] transition-colors">
-                        {event.title}
-                      </Link>
-                      {isEventExpired(event) || event.status === 'draft' ? (
-                        <div className="mt-0.5 flex items-center gap-1.5">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 capitalize">
-                            {event.status === 'draft' ? 'Draft' : 'Expired'}
-                          </span>
-                          {isEventExpired(event) && (
-                            <span className="text-[11px] font-medium text-rose-600">
-                              • Masa Aktif Habis
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="text-xs font-medium text-emerald-700 capitalize mt-0.5">
-                          {event.status || 'Published'}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {parseFirestoreDate(event.date) ? format(parseFirestoreDate(event.date)!, 'dd MMM yyyy') : '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      {(() => {
-                        const resolvedExpiry = resolveEventActiveUntil(event);
-                        if (!resolvedExpiry) return <span className="text-gray-400">-</span>;
-                        const expired = isEventExpired(event);
-                        const daysLeft = getDaysRemaining(event);
-                        return (
-                          <div className="space-y-1">
-                            <div className="text-gray-800 font-medium text-xs">
-                              {format(resolvedExpiry, 'dd MMM yyyy')}
+        <div className="bg-white shadow-xs rounded-xl border border-gray-200 overflow-hidden">
+          {filteredEvents.length === 0 ? (
+            <div className="p-12 text-center space-y-3">
+              <div className="w-11 h-11 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center mx-auto">
+                <Search className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-gray-800">Tidak ada acara yang cocok</p>
+                <p className="text-xs text-gray-500">
+                  Coba ubah kata kunci pencarian atau filter status acara.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchTerm('');
+                  setStatusFilter('all');
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
+              >
+                Reset Pencarian &amp; Filter
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-12">No</th>
+                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Thumbnail</th>
+                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tgl Dibuat</th>
+                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Nama Acara</th>
+                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tgl Acara</th>
+                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Masa Aktif</th>
+                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Aksi</th>
+                      <th className="px-4 py-3.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Scanner</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {paginatedEvents.map((event, index) => (
+                      <tr key={event.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500">{startIndex + index + 1}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <Link to={`/auth/login/events/${event.id}`} className="block w-fit group">
+                            {event.thumbnailUrl ? (
+                              <img
+                                src={event.thumbnailUrl}
+                                alt={event.title}
+                                className="w-14 h-10 rounded-lg object-cover border border-gray-200 shadow-2xs bg-gray-50 group-hover:ring-2 group-hover:ring-indigo-500/40 transition-all"
+                              />
+                            ) : (
+                              <div
+                                className="w-14 h-10 rounded-lg border border-dashed border-gray-300 bg-gray-50 flex flex-col items-center justify-center text-gray-400 group-hover:border-indigo-300 group-hover:text-indigo-500 transition-colors"
+                                title="Belum ada thumbnail kustom"
+                              >
+                                <ImageIcon className="w-4 h-4" />
+                              </div>
+                            )}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500">
+                          {event.createdAt && parseFirestoreDate(event.createdAt) ? format(parseFirestoreDate(event.createdAt)!, 'dd MMM yyyy') : '-'}
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <Link to={`/auth/login/events/${event.id}`} className="text-sm font-medium text-gray-900 hover:text-[#8C3A50] transition-colors">
+                            {event.title}
+                          </Link>
+                          {isEventExpired(event) || event.status === 'draft' ? (
+                            <div className="mt-0.5 flex items-center gap-1.5">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 capitalize">
+                                {event.status === 'draft' ? 'Draft' : 'Expired'}
+                              </span>
+                              {isEventExpired(event) && (
+                                <span className="text-[11px] font-medium text-rose-600">
+                                  • Masa Aktif Habis
+                                </span>
+                              )}
                             </div>
+                          ) : (
+                            <div className="text-xs font-medium text-emerald-700 capitalize mt-0.5">
+                              {event.status || 'Published'}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500">
+                          {parseFirestoreDate(event.date) ? format(parseFirestoreDate(event.date)!, 'dd MMM yyyy') : '-'}
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-sm">
+                          {(() => {
+                            const resolvedExpiry = resolveEventActiveUntil(event);
+                            if (!resolvedExpiry) return <span className="text-gray-400">-</span>;
+                            const expired = isEventExpired(event);
+                            const daysLeft = getDaysRemaining(event);
+                            return (
+                              <div className="space-y-1">
+                                <div className="text-gray-800 font-medium text-xs">
+                                  {format(resolvedExpiry, 'dd MMM yyyy')}
+                                </div>
                             {expired ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
                                 <AlertTriangle className="w-2.5 h-2.5" />
@@ -2882,8 +3174,8 @@ export default function EventsList() {
                         );
                       })()}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <div className="flex space-x-3">
+                    <td className="px-4 py-3.5 whitespace-nowrap text-sm font-medium">
+                      <div className="flex items-center space-x-2">
                          {appUser?.role === 'staff' && appUser?.staffType === 'souvenir' ? (
                            <Link to={`/auth/login/events/${event.id}?tab=souvenir`} className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-full text-xs font-semibold transition-colors" title="Kelola Souvenir">
                              <Gift className="w-3.5 h-3.5" /> Kelola Souvenir
@@ -2893,34 +3185,71 @@ export default function EventsList() {
                              <Eye className="w-4 h-4" />
                            </Link>
                          )}
-                         {appUser?.role !== 'client' && appUser?.role !== 'staff' && (
-                           <>
-                             <Link
-                               to={`/auth/login/events/${event.id}/send-access`}
-                               className="text-[#8C3A50] hover:text-[#722B3E] flex items-center justify-center p-1 rounded-full hover:bg-rose-50 transition-colors"
-                               title="Kirim Akses ke Client"
-                             >
-                               <Send className="w-4 h-4" />
-                             </Link>
-                             <button 
-                                 onClick={() => openEditModal(event)} 
-                                 className="text-blue-600 hover:text-blue-900 flex items-center justify-center p-1 rounded-full hover:bg-blue-50 transition-colors" 
-                                 title="Edit Acara"
-                             >
-                               <Edit className="w-4 h-4" />
-                             </button>
-                             <button 
-                                 onClick={(e) => promptDeleteEvent(event.id!, e)} 
-                                 className="text-red-600 hover:text-red-900 flex items-center justify-center p-1 rounded-full hover:bg-red-50 transition-colors" 
-                                 title="Hapus Acara"
-                             >
-                               <Trash2 className="w-4 h-4" />
-                             </button>
-                           </>
-                         )}
+                         {canUserCreateEvent(appUser) && (() => {
+                           const isRowLocked = appUser?.role !== 'superadmin' && isEventInactiveOrExpired(event);
+                           if (isRowLocked) {
+                             return (
+                               <>
+                                 {appUser?.role !== 'client' && (
+                                   <button
+                                     type="button"
+                                     disabled
+                                     className="text-slate-300 flex items-center justify-center p-1 rounded-full cursor-not-allowed"
+                                     title="Kirim Akses dikunci — lakukan Top-Up Paket terlebih dahulu"
+                                   >
+                                     <Send className="w-4 h-4" />
+                                   </button>
+                                 )}
+                                 <button
+                                   type="button"
+                                   disabled
+                                   className="text-slate-300 flex items-center justify-center p-1 rounded-full cursor-not-allowed"
+                                   title="Edit Acara dikunci — lakukan Top-Up Paket terlebih dahulu"
+                                 >
+                                   <Edit className="w-4 h-4" />
+                                 </button>
+                                 <button
+                                   type="button"
+                                   disabled
+                                   className="text-slate-300 flex items-center justify-center p-1 rounded-full cursor-not-allowed"
+                                   title="Hapus Acara dikunci — lakukan Top-Up Paket terlebih dahulu"
+                                 >
+                                   <Trash2 className="w-4 h-4" />
+                                 </button>
+                               </>
+                             );
+                           }
+                           return (
+                             <>
+                               {appUser?.role !== 'client' && (
+                                 <Link
+                                   to={`/auth/login/events/${event.id}/send-access`}
+                                   className="text-[#8C3A50] hover:text-[#722B3E] flex items-center justify-center p-1 rounded-full hover:bg-rose-50 transition-colors"
+                                   title="Kirim Akses ke Client"
+                                 >
+                                   <Send className="w-4 h-4" />
+                                 </Link>
+                               )}
+                               <button 
+                                   onClick={() => openEditModal(event)} 
+                                   className="text-blue-600 hover:text-blue-900 flex items-center justify-center p-1 rounded-full hover:bg-blue-50 transition-colors" 
+                                   title="Edit Acara"
+                               >
+                                 <Edit className="w-4 h-4" />
+                               </button>
+                               <button 
+                                   onClick={(e) => promptDeleteEvent(event.id!, e)} 
+                                   className="text-red-600 hover:text-red-900 flex items-center justify-center p-1 rounded-full hover:bg-red-50 transition-colors" 
+                                   title="Hapus Acara"
+                               >
+                                 <Trash2 className="w-4 h-4" />
+                               </button>
+                             </>
+                           );
+                         })()}
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
+                    <td className="px-4 py-3.5 whitespace-nowrap text-center text-sm font-medium">
                        <div className="flex items-center justify-center gap-2">
                          {isEventExpired(event) || event.status === 'draft' ? (
                            appUser?.role === 'staff' ? (
@@ -2965,16 +3294,85 @@ export default function EventsList() {
               </tbody>
             </table>
           </div>
-          {hasMore && (
-            <div className="p-4 border-t border-gray-200 flex justify-center">
-              <button
-                onClick={handleLoadMore}
-                disabled={loadingMore}
-                className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 font-medium disabled:opacity-50"
-              >
-                {loadingMore ? 'Memuat...' : 'Muat Lebih Banyak'}
-              </button>
+
+          {/* Pagination Footer */}
+          <div className="px-4 py-3.5 flex flex-col sm:flex-row items-center justify-between border-t border-gray-200 sm:px-5 gap-3 bg-gray-50/50">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
+              <span>
+                Menampilkan <span className="font-semibold text-gray-900">{filteredEvents.length === 0 ? 0 : startIndex + 1}</span> – <span className="font-semibold text-gray-900">{endIndex}</span> dari <span className="font-semibold text-indigo-600">{filteredEvents.length}</span> acara
+              </span>
+              {hasActiveFilter && (
+                <>
+                  <span className="text-xs text-gray-400">({events.length} total)</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setStatusFilter('all');
+                    }}
+                    className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 underline cursor-pointer"
+                  >
+                    Reset
+                  </button>
+                </>
+              )}
             </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {totalPages > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(1)}
+                    disabled={safeCurrentPage === 1}
+                    className="px-2.5 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Halaman Pertama"
+                  >
+                    «
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={safeCurrentPage === 1}
+                    className="px-3 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  >
+                    Sebelumnya
+                  </button>
+                  <span className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg">
+                    Hal <span className="text-indigo-600 font-bold">{safeCurrentPage}</span> / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={safeCurrentPage === totalPages}
+                    className="px-3 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  >
+                    Selanjutnya
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(totalPages)}
+                    disabled={safeCurrentPage === totalPages}
+                    className="px-2.5 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Halaman Terakhir"
+                  >
+                    »
+                  </button>
+                </>
+              )}
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                  className="px-3 py-1.5 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-lg hover:bg-indigo-100 text-xs font-semibold disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  {loadingMore ? 'Memuat...' : 'Muat Lebih Banyak'}
+                </button>
+              )}
+            </div>
+          </div>
+          </>
           )}
         </div>
       )}

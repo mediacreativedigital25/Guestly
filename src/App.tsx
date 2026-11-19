@@ -41,6 +41,7 @@ import PublicPayment from './pages/public/PublicPayment';
 import ActiveSessions from './pages/admin/ActiveSessions';
 import WeddingPlannerWorkspace from './pages/wedding-planner/WeddingPlannerWorkspace';
 import SendClientAccess from './pages/SendClientAccess';
+import SendInvitations from './pages/SendInvitations';
 
 import ServicesDashboard from './pages/services/ServicesDashboard';
 import { CartProvider } from './CartContext';
@@ -62,6 +63,7 @@ export default function App() {
             <Route path="events/:eventId/edit" element={<EventsList />} />
             <Route path="events/:eventId/tables" element={<EventsList />} />
             <Route path="events/:eventId/send-access" element={<SendClientAccess />} />
+            <Route path="events/:eventId/send-invitations" element={<SendInvitations />} />
             <Route path="events/:eventId" element={<EventDetails />} />
             <Route path="events/:eventId/guests/add" element={<EventDetails />} />
             <Route path="events/:eventId/guests/:guestId/edit" element={<EventDetails />} />

@@ -2,6 +2,13 @@ export type Role = 'superadmin' | 'owner' | 'admin' | 'partner' | 'client' | 're
 
 export type StaffType = 'checkin' | 'souvenir' | 'all' | 'greeting';
 
+export interface ActiveDeviceSession {
+  deviceId: string;
+  deviceName: string;
+  lastActiveAt: number;
+  loggedInAt: number;
+}
+
 export interface User {
   id?: string;
   uid?: string;
@@ -35,11 +42,13 @@ export interface User {
   allowManualEvent?: boolean;
   eventManual?: boolean;
   hideServiceInfo?: boolean;
+  includeWeddingPlanner?: boolean;
   createdBy?: string;
   createdByName?: string;
   activeUntil?: any;
   activeDeviceId?: string | null;
   activeDeviceName?: string | null;
+  activeDevices?: ActiveDeviceSession[] | null;
   activeSessionToken?: string | null;
   lastActiveAt?: any;
   lastLoginAt?: any;
@@ -117,6 +126,7 @@ export interface EventRecord {
   guestQuota?: number;
   waTemplateId?: string;
   waBlastCount?: number;
+  includeWeddingPlanner?: boolean;
   disableTicketRsvpForm?: boolean;
   eInviteTheme?: 'rose' | 'gold' | 'sage';
   eInviteMode?: 'full' | 'compact';
@@ -149,8 +159,24 @@ export interface EventRecord {
   greetingFooterText?: string;
   greetingShowLogo?: boolean;
   greetingShowFooterStrip?: boolean;
+  fonnteToken?: string;
   createdAt: any;
   updatedAt: any;
+}
+
+export type WaSendStatus = 'pending' | 'sent' | 'failed';
+export type WaSendMethod = 'fonnte' | 'manual';
+export type WaMediaMode = 'einvite' | 'thumbnail' | 'text';
+export type WaTokenSource = 'event' | 'client' | 'global' | 'manual';
+
+export interface WaGuestDispatchEntry {
+  status: WaSendStatus;
+  sentAt?: string;
+  method?: WaSendMethod;
+  tokenSource?: WaTokenSource;
+  lastError?: string;
+  count?: number;
+  mediaMode?: WaMediaMode;
 }
 
 export interface EInviteTemplate {
@@ -296,6 +322,7 @@ export interface GuestlyService {
   waBlastQuota?: number;
   price: number;
   normalPrice?: number;
+  includeWeddingPlanner?: boolean;
   isActive: boolean;
   createdAt: any;
   updatedAt: any;
@@ -343,6 +370,7 @@ export interface InvoiceItem {
   clientQuota?: number;
   guestQuota?: number;
   waBlastQuota?: number;
+  includeWeddingPlanner?: boolean;
   quantity: number;
 }
 
@@ -360,6 +388,7 @@ export interface ServiceInvoice {
   totalGuestQuota?: number;
   totalWaBlastQuota?: number;
   totalActivePeriodDays?: number;
+  includeWeddingPlanner?: boolean;
   targetEventId?: string;
   targetEventTitle?: string;
   status: 'pending' | 'paid' | 'cancelled';

@@ -26,6 +26,7 @@ export default function AdminServices() {
   const [price, setPrice] = useState<number>(0);
   const [normalPrice, setNormalPrice] = useState<number>(0);
   const [isActive, setIsActive] = useState(true);
+  const [includeWeddingPlanner, setIncludeWeddingPlanner] = useState(false);
   const [targetRole, setTargetRole] = useState<'client' | 'partner' | 'all'>('all');
 
   useEffect(() => {
@@ -58,6 +59,7 @@ export default function AdminServices() {
     setPrice(0);
     setNormalPrice(0);
     setIsActive(true);
+    setIncludeWeddingPlanner(false);
     setEditingServiceId(null);
   };
 
@@ -79,6 +81,7 @@ export default function AdminServices() {
     setPrice(service.price);
     setNormalPrice(service.normalPrice || 0);
     setIsActive(service.isActive);
+    setIncludeWeddingPlanner(Boolean(service.includeWeddingPlanner));
     setEditingServiceId(service.id!);
     setIsCreating(true);
   };
@@ -104,6 +107,7 @@ export default function AdminServices() {
         waBlastQuota: Number(waBlastQuota),
         price: Number(price),
         normalPrice: Number(normalPrice),
+        includeWeddingPlanner,
         isActive,
         updatedAt: serverTimestamp()
       };
@@ -314,7 +318,14 @@ export default function AdminServices() {
                 {services.map((service) => (
                   <tr key={service.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{service.name}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-900">{service.name}</span>
+                        {service.includeWeddingPlanner && (
+                          <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 text-[#8C3A50] border border-rose-200">
+                            + Wedding Planner
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs text-gray-500 truncate max-w-xs">{service.description}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -494,6 +505,30 @@ export default function AdminServices() {
                        aria-hidden="true"
                        className={`${
                          isActive ? 'translate-x-5' : 'translate-x-0'
+                       } pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
+                     />
+                   </button>
+                </div>
+
+                {/* Wedding Planner module toggle */}
+                <div className="flex items-center justify-between p-4 border border-rose-200/80 rounded-lg bg-rose-50/40 shadow-2xs">
+                   <div>
+                     <h4 className="text-sm font-semibold text-gray-900">Termasuk Modul Wedding Planner</h4>
+                     <p className="text-xs text-gray-500 mt-0.5">Paket ini otomatis mengaktifkan fitur Wedding Planner untuk Client / acara.</p>
+                   </div>
+                   <button
+                     type="button"
+                     role="switch"
+                     aria-checked={includeWeddingPlanner}
+                     onClick={() => setIncludeWeddingPlanner(!includeWeddingPlanner)}
+                     className={`${
+                       includeWeddingPlanner ? 'bg-[#8C3A50]' : 'bg-gray-200'
+                     } relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#8C3A50] focus:ring-offset-2`}
+                   >
+                     <span
+                       aria-hidden="true"
+                       className={`${
+                         includeWeddingPlanner ? 'translate-x-5' : 'translate-x-0'
                        } pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
                      />
                    </button>

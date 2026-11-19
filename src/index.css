@@ -1,7 +1,12 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,400;1,600&display=swap');
 @import "tailwindcss";
+
+.einvite-serif {
+  font-family: 'Playfair Display', Georgia, serif;
+}
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
@@ -9,8 +14,8 @@
   --font-darling: "Darling", cursive;
   --font-poppins: "Poppins", sans-serif;
   
-  /* Brand Theme Overrides -> Guestly Burgundy Rose & Crisp Neutral Slate */
-  --color-indigo-50: #FFF5F7; /* Soft Rose Blush */
+  /* Brand Theme Overrides -> Guestly Burgundy Rose & Pearl Rose White */
+  --color-indigo-50: #FCF0F3; /* Pearl Rose Blush */
   --color-indigo-100: #FCE7EC; /* Light Rose Tint */
   --color-indigo-200: #F8CED8;
   --color-indigo-300: #F0A8B9;
@@ -21,22 +26,22 @@
   --color-indigo-800: #5E2232; /* Deep Burgundy Text/Badge */
   --color-indigo-900: #4A1826;
 
-  --color-gray-50: #F8FAFC; /* Slate 50 */
-  --color-gray-100: #F1F5F9; /* Slate 100 */
-  --color-gray-200: #E2E8F0; /* Slate 200 */
-  --color-gray-300: #CBD5E1; /* Slate 300 */
-  --color-gray-400: #94A3B8; /* Slate 400 */
-  --color-gray-500: #64748B; /* Slate 500 */
-  --color-gray-600: #475569; /* Slate 600 */
-  --color-gray-700: #334155; /* Slate 700 */
-  --color-gray-800: #1E293B; /* Slate 800 */
-  --color-gray-900: #0F172A; /* Slate 900 */
+  --color-gray-50: #F7F5F6; /* Pearl Light Fill */
+  --color-gray-100: #F0ECEE; /* Soft Pearl Hover */
+  --color-gray-200: #E7E3E5; /* Pearl Border */
+  --color-gray-300: #D5CFD2; /* Soft Divider */
+  --color-gray-400: #9E969A; /* Muted Pearl Icon */
+  --color-gray-500: #6F686C; /* Secondary Ink */
+  --color-gray-600: #524B4F; /* Body Ink */
+  --color-gray-700: #3D373B; /* Strong Ink */
+  --color-gray-800: #2B2629; /* Deep Plum Charcoal */
+  --color-gray-900: #201C1E; /* Soft Plum-Obsidian Ink */
 }
 
 @layer base {
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+    scrollbar-color: rgba(158, 150, 154, 0.45) transparent;
   }
 
   *::-webkit-scrollbar {
@@ -57,7 +62,7 @@
   }
 
   *::-webkit-scrollbar-thumb {
-    background-color: rgba(148, 163, 184, 0.42);
+    background-color: rgba(158, 150, 154, 0.42);
     border-radius: 9999px;
     border: 1px solid transparent;
     background-clip: content-box;
@@ -113,6 +118,185 @@
   }
 }
 
+/* ==========================================================================
+   Eye-Comfort Dashboard Themes:
+   - Opsi 1 (soft): Pearl Rose White (#F5F3F4 canvas, #FBFAFB chrome, #FEFEFE cards)
+   - Opsi 2 (hybrid): Dark Sidebar + Pearl Rose White Content
+   - Opsi 3 (dark): Soft Charcoal Dark Mode
+   Preserves pure white for #print-area, E-Invitation artwork, & Layar Sapa TV
+   ========================================================================== */
+.dashboard-shell {
+  --color-slate-50: #F7F5F6;
+  --color-slate-100: #F0ECEE;
+  --color-slate-200: #E7E3E5;
+  --color-slate-300: #D5CFD2;
+  --color-slate-400: #9E969A;
+  --color-slate-500: #6F686C;
+  --color-slate-600: #524B4F;
+  --color-slate-700: #3D373B;
+  --color-slate-800: #2B2629;
+  --color-slate-900: #201C1E;
+  --color-rose-50: #FCF0F3;
+}
+
+.dashboard-shell .bg-white:not(.preserve-pure-white) {
+  background-color: #FEFEFE;
+}
+
+.dashboard-shell .bg-white\/95:not(.preserve-pure-white) {
+  background-color: rgba(254, 254, 254, 0.95);
+}
+
+.dashboard-shell .bg-white\/90:not(.preserve-pure-white) {
+  background-color: rgba(254, 254, 254, 0.9);
+}
+
+.dashboard-shell .bg-white\/80:not(.preserve-pure-white) {
+  background-color: rgba(254, 254, 254, 0.8);
+}
+
+.dashboard-shell .focus\:bg-white:focus:not(.preserve-pure-white) {
+  background-color: #FEFEFE;
+}
+
+/* Opsi 3: Soft Dark Mode (Warm Charcoal / Obsidian, anti-glare) */
+.dashboard-shell[data-theme="dark"] {
+  color-scheme: dark;
+  color: #ECE9E4;
+
+  /* Warm Charcoal Neutral Scale (inverted cleanly for dark surfaces) */
+  --color-gray-50: #28252B;
+  --color-gray-100: #312D35;
+  --color-gray-200: #36323B;
+  --color-gray-300: #47424D;
+  --color-gray-400: #8D878E;
+  --color-gray-500: #A59FA6;
+  --color-gray-600: #BEB8BE;
+  --color-gray-700: #D6D1D5;
+  --color-gray-800: #E7E3E0;
+  --color-gray-900: #F4F1EC;
+
+  --color-slate-50: #28252B;
+  --color-slate-100: #312D35;
+  --color-slate-200: #36323B;
+  --color-slate-300: #47424D;
+  --color-slate-400: #8D878E;
+  --color-slate-500: #A59FA6;
+  --color-slate-600: #BEB8BE;
+  --color-slate-700: #D6D1D5;
+  --color-slate-800: #E7E3E0;
+  --color-slate-900: #F4F1EC;
+
+  /* Harmonized Dark-Surface Semantic Tints (badges, pills, alert banners) */
+  --color-indigo-50: #321C23;
+  --color-indigo-100: #43232E;
+  --color-indigo-200: #5E3140;
+  --color-indigo-800: #F3B8C8;
+  --color-indigo-900: #FCE0E8;
+
+  --color-rose-50: #321C23;
+  --color-rose-100: #43232E;
+  --color-rose-200: #5E3140;
+  --color-rose-700: #F6A8BC;
+  --color-rose-800: #FCD0DC;
+
+  --color-emerald-50: #142A23;
+  --color-emerald-100: #1B3B31;
+  --color-emerald-200: #265244;
+  --color-emerald-700: #6EE7B7;
+  --color-emerald-800: #A7F3D0;
+
+  --color-green-50: #152B1F;
+  --color-green-100: #1D3B2A;
+  --color-green-200: #28523A;
+  --color-green-700: #86EFAC;
+  --color-green-800: #BBF7D0;
+
+  --color-amber-50: #2E2414;
+  --color-amber-100: #3E3019;
+  --color-amber-200: #574221;
+  --color-amber-700: #FCD34D;
+  --color-amber-800: #FDE68A;
+
+  --color-yellow-50: #2E2814;
+  --color-yellow-100: #3E351A;
+  --color-yellow-200: #574A22;
+  --color-yellow-700: #FDE047;
+  --color-yellow-800: #FEF08A;
+
+  --color-blue-50: #162336;
+  --color-blue-100: #1E304A;
+  --color-blue-200: #294366;
+  --color-blue-700: #93C5FD;
+  --color-blue-800: #BFDBFE;
+
+  --color-sky-50: #152633;
+  --color-sky-100: #1D3446;
+  --color-sky-200: #274861;
+  --color-sky-700: #7DD3FC;
+  --color-sky-800: #BAE6FD;
+
+  --color-red-50: #31191D;
+  --color-red-100: #442126;
+  --color-red-200: #602D34;
+  --color-red-700: #FCA5A5;
+  --color-red-800: #FECACA;
+
+  --color-purple-50: #251B33;
+  --color-purple-100: #332447;
+  --color-purple-200: #483363;
+  --color-purple-700: #D8B4FE;
+  --color-purple-800: #E9D5FF;
+}
+
+.dashboard-shell[data-theme="dark"] .bg-white:not(.preserve-pure-white) {
+  background-color: #211F24;
+}
+
+.dashboard-shell[data-theme="dark"] .bg-white\/95:not(.preserve-pure-white) {
+  background-color: rgba(33, 31, 36, 0.96);
+}
+
+.dashboard-shell[data-theme="dark"] .bg-white\/90:not(.preserve-pure-white) {
+  background-color: rgba(33, 31, 36, 0.92);
+}
+
+.dashboard-shell[data-theme="dark"] .bg-white\/80:not(.preserve-pure-white) {
+  background-color: rgba(33, 31, 36, 0.85);
+}
+
+.dashboard-shell[data-theme="dark"] .focus\:bg-white:focus:not(.preserve-pure-white) {
+  background-color: #28252C;
+}
+
+/* Lift Burgundy Rose text accents for high readability on dark cards */
+.dashboard-shell[data-theme="dark"] .text-\[\#8C3A50\]:not(.keep-burgundy-ink) {
+  color: #EB9BB1;
+}
+
+.dashboard-shell[data-theme="dark"] .hover\:text-\[\#8C3A50\]:hover {
+  color: #F5B6C7;
+}
+
+.dashboard-shell[data-theme="dark"] input,
+.dashboard-shell[data-theme="dark"] select,
+.dashboard-shell[data-theme="dark"] textarea {
+  color: #F2EFEA;
+}
+
+.dashboard-shell[data-theme="dark"] option {
+  background-color: #211F24;
+  color: #F2EFEA;
+}
+
+.dashboard-shell[data-theme="dark"] *::-webkit-scrollbar-thumb {
+  background-color: rgba(165, 159, 166, 0.32);
+}
+
+.dashboard-shell[data-theme="dark"] *::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(235, 155, 177, 0.5);
+}
+
 /* Guestly SweetAlert2 Theme Overrides */
 .swal2-container {
   z-index: 99999 !important;
@@ -120,19 +304,45 @@
 
 .guestly-swal-popup {
   font-family: var(--font-sans) !important;
-  background: #ffffff !important;
+  background: #FEFEFE !important;
   border-radius: 16px !important;
-  border: 1px solid #E2E8F0 !important;
-  box-shadow: 0 20px 45px -12px rgba(15, 23, 42, 0.18), 0 4px 16px -4px rgba(140, 58, 80, 0.1) !important;
+  border: 1px solid #E7E3E5 !important;
+  box-shadow: 0 20px 45px -12px rgba(32, 28, 30, 0.14), 0 4px 16px -4px rgba(140, 58, 80, 0.08) !important;
   padding: 1.75rem 1.5rem 1.5rem !important;
-  color: #0F172A !important;
+  color: #201C1E !important;
+}
+
+html[data-dashboard-theme="dark"] .guestly-swal-popup {
+  background: #211F24 !important;
+  border-color: #36323B !important;
+  color: #F4F1EC !important;
+  box-shadow: 0 24px 50px -12px rgba(0, 0, 0, 0.55) !important;
+}
+
+html[data-dashboard-theme="dark"] .guestly-swal-title {
+  color: #F4F1EC !important;
+}
+
+html[data-dashboard-theme="dark"] .guestly-swal-html {
+  color: #BEB8BE !important;
+}
+
+html[data-dashboard-theme="dark"] .guestly-swal-cancel {
+  background-color: #2C2930 !important;
+  color: #E7E3E0 !important;
+  border-color: #443F4A !important;
+}
+
+html[data-dashboard-theme="dark"] .guestly-swal-cancel:hover {
+  background-color: #37333C !important;
+  color: #FFFFFF !important;
 }
 
 .guestly-swal-title {
   font-family: var(--font-sans) !important;
   font-size: 1.15rem !important;
   font-weight: 700 !important;
-  color: #0F172A !important;
+  color: #201C1E !important;
   padding-top: 0.25rem !important;
 }
 
@@ -140,7 +350,7 @@
   font-family: var(--font-sans) !important;
   font-size: 0.875rem !important;
   line-height: 1.55 !important;
-  color: #475569 !important;
+  color: #524B4F !important;
   margin-top: 0.5rem !important;
 }
 
@@ -176,20 +386,20 @@
 
 .guestly-swal-cancel {
   font-family: var(--font-sans) !important;
-  background-color: #F8FAFC !important;
-  color: #334155 !important;
+  background-color: #F7F5F6 !important;
+  color: #3D373B !important;
   font-size: 0.875rem !important;
   font-weight: 600 !important;
   padding: 0.625rem 1.5rem !important;
   border-radius: 12px !important;
-  border: 1px solid #E2E8F0 !important;
+  border: 1px solid #E7E3E5 !important;
   transition: all 0.2s ease !important;
   cursor: pointer !important;
 }
 
 .guestly-swal-cancel:hover {
-  background-color: #F1F5F9 !important;
-  color: #0F172A !important;
+  background-color: #F0ECEE !important;
+  color: #201C1E !important;
 }
 
 .swal2-icon.swal2-success {
@@ -220,6 +430,23 @@
   font-display: swap;
 }
 
+/* Screen-only hiding for portaled print root */
+#print-area {
+  display: none;
+}
+
+/* Keep print-area rendered off-screen while preloading images before window.print() */
+#print-area.print-area-preloading {
+  display: block;
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 194mm;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+
 @media print {
   @page {
     size: A4 portrait;
@@ -228,71 +455,99 @@
   html, body {
     margin: 0 !important;
     padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
     background: #ffffff !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  body * {
-    visibility: hidden;
-  }
-  #print-area, #print-area * {
-    visibility: visible;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
-  #print-area {
-    display: block !important;
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    margin: 0 !important;
-    padding: 0 !important;
-    background-color: white;
+  /* Completely remove app shell (#root, sidebar, modals, loading overlay) from print layout flow */
+  body > *:not(#print-area) {
+    display: none !important;
   }
+  #print-area,
+  #print-area.print-area-preloading {
+    display: block !important;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: 194mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    overflow: visible !important;
+    background-color: #ffffff !important;
+    z-index: auto !important;
+  }
+  #print-area * {
+    visibility: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  /* Mode 1: Standard QR Labels (20 per A4 page: 4 cols x 5 rows) */
   .a4-qr-page {
-    width: 100%;
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    grid-template-rows: repeat(5, 52mm);
-    gap: 3mm;
-    page-break-after: always;
-    break-after: page;
+    width: 194mm !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    grid-template-rows: repeat(5, 52mm) !important;
+    gap: 3mm !important;
+    box-sizing: border-box !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
   .a4-qr-page:last-child {
-    page-break-after: auto;
-    break-after: auto;
+    page-break-after: auto !important;
+    break-after: auto !important;
   }
+  /* Mode 2: Card E-Invitation Large (4 per A4 page: 1 col x 4 rows) */
   .a4-card-page-4 {
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 3.5mm;
-    page-break-after: always;
-    break-after: page;
+    width: 194mm !important;
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    grid-auto-rows: max-content !important;
+    justify-items: center !important;
+    align-content: start !important;
+    row-gap: 4.5mm !important;
+    box-sizing: border-box !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
   .a4-card-page-4:last-child {
-    page-break-after: auto;
-    break-after: auto;
+    page-break-after: auto !important;
+    break-after: auto !important;
   }
+  /* Mode 3: Card E-Invitation Compact (8 per A4 page: 2 cols x 4 rows) */
   .a4-card-page-8 {
-    width: 100%;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    justify-items: center;
-    align-items: center;
-    gap: 3.5mm;
-    page-break-after: always;
-    break-after: page;
+    width: 194mm !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, 93mm) !important;
+    grid-auto-rows: max-content !important;
+    justify-content: center !important;
+    justify-items: center !important;
+    align-content: start !important;
+    column-gap: 4mm !important;
+    row-gap: 5mm !important;
+    box-sizing: border-box !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
   .a4-card-page-8:last-child {
-    page-break-after: auto;
-    break-after: auto;
+    page-break-after: auto !important;
+    break-after: auto !important;
   }
   .a4-qr-card {
-    page-break-inside: avoid;
-    break-inside: avoid;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 }

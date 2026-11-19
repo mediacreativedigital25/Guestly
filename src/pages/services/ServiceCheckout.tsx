@@ -147,9 +147,20 @@ export default function ServiceCheckout() {
         if (appUser) {
           try {
             const evSnap = await getDocs(collection(db, 'events'));
+            const targetClientId = appUser.clientId || appUser.id || '';
+            const assignedIds = Array.isArray(appUser.assignedEventIds) ? appUser.assignedEventIds : [];
             loadedEvents = evSnap.docs
               .map((d) => ({ id: d.id, ...d.data() } as EventRecord))
-              .filter((ev) => canUserAccessEvent(appUser, ev.id, ev.partnerId));
+              .filter((ev) => {
+                if (appUser.role === 'client') {
+                  return Boolean(
+                    (targetClientId && ev.clientId === targetClientId) ||
+                    ev.clientUid === appUser.id ||
+                    (ev.id && assignedIds.includes(ev.id))
+                  );
+                }
+                return canUserAccessEvent(appUser, ev.id, ev.partnerId);
+              });
             loadedEvents.sort((a, b) => {
               const expA = isEventExpired(a) ? 0 : 1;
               const expB = isEventExpired(b) ? 0 : 1;
@@ -218,6 +229,7 @@ export default function ServiceCheckout() {
           clientQuota: mainPackage.clientQuota || 0,
           guestQuota: mainPackage.guestQuota || 0,
           waBlastQuota: mainPackage.waBlastQuota || 0,
+          includeWeddingPlanner: Boolean(mainPackage.includeWeddingPlanner),
           quantity: 1,
         });
       }
@@ -234,9 +246,12 @@ export default function ServiceCheckout() {
           clientQuota: it.service.clientQuota || 0,
           guestQuota: it.service.guestQuota || 0,
           waBlastQuota: it.service.waBlastQuota || 0,
+          includeWeddingPlanner: Boolean(it.service.includeWeddingPlanner),
           quantity: it.quantity,
         });
       });
+
+      const invoiceIncludesWeddingPlanner = itemsPayload.some((it) => Boolean(it.includeWeddingPlanner));
 
       const primaryServiceId = mainPackage?.id || addons[0]?.service.id || '';
       let compositeServiceName = mainPackage ? mainPackage.name : addons[0]?.service.name || 'Layanan';
@@ -279,6 +294,7 @@ export default function ServiceCheckout() {
           totalGuestQuota,
           totalWaBlastQuota,
           totalActivePeriodDays,
+          includeWeddingPlanner: invoiceIncludesWeddingPlanner,
           ...(selectedTargetEvent
             ? {
                 targetEventId: selectedTargetEvent.id,

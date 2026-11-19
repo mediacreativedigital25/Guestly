@@ -343,23 +343,97 @@ async function startServer() {
     }
   });
 
+  // Check Fonnte device connection status safely from server-side
+  app.post('/api/fonnte/check-device', async (req, res) => {
+    try {
+      const { token: customToken, useGlobal } = req.body || {};
+      const cleanCustom = customToken ? String(customToken).trim() : '';
+      const resolvedToken = cleanCustom
+        ? cleanCustom
+        : useGlobal
+        ? await resolveServerFonnteToken()
+        : '';
+
+      if (!resolvedToken) {
+        return res.json({
+          success: false,
+          configured: false,
+          connected: false,
+          error: 'Token Fonnte belum diisi.',
+        });
+      }
+
+      const response = await fetch('https://api.fonnte.com/device', {
+        method: 'POST',
+        headers: {
+          Authorization: resolvedToken,
+        },
+      });
+
+      const result = await response.json();
+      const rawStatus = String(result?.device_status || '').toLowerCase();
+      const isConnected =
+        Boolean(result?.status) &&
+        (rawStatus === 'connect' || rawStatus === 'connected' || (!rawStatus && Boolean(result?.device)));
+
+      if (result?.status) {
+        return res.json({
+          success: true,
+          configured: true,
+          connected: isConnected,
+          device: result.device || '',
+          name: result.name || '',
+          quota: result.quota ?? '',
+          expired: result.expired || '',
+          deviceStatus: result.device_status || (isConnected ? 'connect' : 'unknown'),
+          reason: result.reason || '',
+        });
+      }
+
+      return res.json({
+        success: false,
+        configured: true,
+        connected: false,
+        deviceStatus: result?.device_status || 'disconnect',
+        error: result?.reason || 'Token tidak valid atau device WhatsApp belum terhubung di Fonnte.',
+      });
+    } catch (error: any) {
+      console.error('Error checking Fonnte device:', error);
+      res.status(500).json({
+        success: false,
+        configured: true,
+        connected: false,
+        error: error?.message || 'Gagal menghubungi server Fonnte.',
+      });
+    }
+  });
+
   // Proxy endpoint for sending WhatsApp messages via Fonnte securely
   app.post('/api/send-whatsapp', async (req, res) => {
     try {
-      const { target, message, url, token: customToken } = req.body;
+      const { target, message, url, token: customToken, strictToken } = req.body;
       const normalizedTarget = normalizePhoneTarget(target);
       if (!normalizedTarget) {
         return res.status(400).json({ success: false, error: 'Nomor WhatsApp tujuan tidak valid atau kosong.' });
       }
 
-      const token = await resolveServerFonnteToken(customToken);
+      const cleanCustomToken = customToken ? String(customToken).trim() : '';
+      const token = strictToken
+        ? cleanCustomToken
+        : await resolveServerFonnteToken(cleanCustomToken);
       
       if (!token) {
         return res.json({ 
           success: false, 
           notConfigured: true, 
-          error: 'Token Fonnte belum diatur. Silakan isi API Token Fonnte di menu Pengaturan > Token Fonnte.' 
+          error: 'Token Fonnte belum diatur. Silakan isi API Token Fonnte terlebih dahulu.' 
         });
+      }
+
+      let resolvedMediaUrl = url ? String(url).trim() : '';
+      if (resolvedMediaUrl.startsWith('/')) {
+        const origin = getPublicOrigin(req);
+        resolvedMediaUrl = `${origin}${resolvedMediaUrl}`;
       }
 
       const body = new URLSearchParams({
@@ -367,8 +441,8 @@ async function startServer() {
         "message": message,
         "countryCode": "62"
       });
-      if (url) {
-        body.append("url", url);
+      if (resolvedMediaUrl) {
+        body.append("url", resolvedMediaUrl);
       }
 
       const response = await fetch("https://api.fonnte.com/send", {
@@ -384,7 +458,9 @@ async function startServer() {
       if (result.status) {
         return res.json({ success: true, result });
       } else {
-        return res.status(400).json({ success: false, error: result.reason || 'Fonnte API error' });
+        const reasonStr = String(result.reason || 'Fonnte API error');
+        const isMediaError = /url|media|file|image|attachment|package|plan|upgrade/i.test(reasonStr);
+        return res.status(400).json({ success: false, error: reasonStr, isMediaError });
       }
     } catch (error: any) {
       console.error('Error proxying wa message:', error);
@@ -432,6 +508,22 @@ async function startServer() {
       }
     }
 
+    const isRasterImageType = (ct: string) =>
+      /^image\/(png|jpe?g|webp|gif)$/i.test(ct.split(';')[0].trim());
+
+    const verifyBufferUsable = async (buf: Buffer, ct: string): Promise<boolean> => {
+      if (!buf || buf.length === 0) return false;
+      if (isRasterImageType(ct)) {
+        try {
+          const meta = await sharp(buf).metadata();
+          return Boolean(meta && meta.width && meta.height);
+        } catch {
+          return false;
+        }
+      }
+      return true;
+    };
+
     if (candidateKey) {
       const baseName = path.basename(candidateKey);
       const localPaths = [
@@ -439,11 +531,16 @@ async function startServer() {
         path.join(uploadsBaseDir, baseName),
       ];
       for (const p of localPaths) {
-        if (fs.existsSync(p) && fs.statSync(p).isFile()) {
-          return {
-            buffer: fs.readFileSync(p),
-            contentType: guessMimeType(p),
-          };
+        try {
+          if (fs.existsSync(p) && fs.statSync(p).isFile() && fs.statSync(p).size > 0) {
+            const buf = fs.readFileSync(p);
+            const contentType = guessMimeType(p);
+            if (await verifyBufferUsable(buf, contentType)) {
+              return { buffer: buf, contentType };
+            }
+          }
+        } catch {
+          // ignore unreadable/corrupt local cache file and continue to R2/HTTP
         }
       }
 
@@ -462,12 +559,14 @@ async function startServer() {
               const bytes = await r2Obj.Body.transformToByteArray();
               const buf = Buffer.from(bytes);
               const contentType = r2Obj.ContentType || guessMimeType(k);
-              try {
-                fs.writeFileSync(path.join(uploadsBaseDir, baseName), buf);
-              } catch {
-                // ignore cache write error
+              if (await verifyBufferUsable(buf, contentType)) {
+                try {
+                  fs.writeFileSync(path.join(uploadsBaseDir, baseName), buf);
+                } catch {
+                  // ignore cache write error
+                }
+                return { buffer: buf, contentType };
               }
-              return { buffer: buf, contentType };
             }
           } catch {
             // continue to next candidate
@@ -488,10 +587,20 @@ async function startServer() {
         const contentType = response.headers.get('content-type') || guessMimeType(input);
         if (!contentType.includes('text/html')) {
           const arrayBuffer = await response.arrayBuffer();
-          return {
-            buffer: Buffer.from(arrayBuffer),
-            contentType,
-          };
+          const buf = Buffer.from(arrayBuffer);
+          if (await verifyBufferUsable(buf, contentType)) {
+            if (candidateKey) {
+              try {
+                fs.writeFileSync(path.join(uploadsBaseDir, path.basename(candidateKey)), buf);
+              } catch {
+                // ignore cache write error
+              }
+            }
+            return {
+              buffer: buf,
+              contentType,
+            };
+          }
         }
       }
     }
@@ -667,8 +776,10 @@ async function startServer() {
     return clean.slice(0, Math.max(0, maxLen - 1)).trim() + '…';
   }
 
-  function formatIndonesianDateOg(dateInput?: any): string {
-    if (!dateInput) return '';
+  function formatIndonesianDateOgParts(dateInput?: any): { dayName: string; dateText: string } {
+    if (!dateInput) {
+      return { dayName: 'MINGGU', dateText: '15 DESEMBER 2026' };
+    }
     const days = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT', 'SABTU'];
     const months = [
       'JANUARI', 'FEBRUARI', 'MARET', 'APRIL', 'MEI', 'JUNI',
@@ -676,9 +787,64 @@ async function startServer() {
     ];
     const dt = new Date(dateInput);
     if (!isNaN(dt.getTime())) {
-      return `${days[dt.getDay()]}, ${dt.getDate()} ${months[dt.getMonth()]} ${dt.getFullYear()}`;
+      return {
+        dayName: days[dt.getDay()] || '',
+        dateText: `${dt.getDate()} ${months[dt.getMonth()] || ''} ${dt.getFullYear()}`,
+      };
     }
-    return String(dateInput).trim();
+    const rawStr = String(dateInput).trim();
+    const parts = rawStr.split(/[-/]/);
+    if (parts.length === 3) {
+      const y = parseInt(parts[0], 10) > 31 ? parseInt(parts[0], 10) : parseInt(parts[2], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const d = parseInt(parts[0], 10) > 31 ? parseInt(parts[2], 10) : parseInt(parts[0], 10);
+      const parsed = new Date(y, m, d);
+      if (!isNaN(parsed.getTime())) {
+        return {
+          dayName: days[parsed.getDay()] || '',
+          dateText: `${parsed.getDate()} ${months[parsed.getMonth()] || ''} ${parsed.getFullYear()}`,
+        };
+      }
+    }
+    return { dayName: '', dateText: rawStr.toUpperCase() };
+  }
+
+  function wrapSvgText(text: string, maxChars: number, maxLines: number): string[] {
+    const clean = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!clean) return [];
+    const words = clean.split(' ');
+    const lines: string[] = [];
+    let current = '';
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length <= maxChars) {
+        current = candidate;
+      } else {
+        if (current) {
+          lines.push(current);
+          current = word;
+        } else {
+          lines.push(word.slice(0, maxChars - 1) + '…');
+          current = '';
+        }
+        if (lines.length >= maxLines) {
+          const lastIdx = lines.length - 1;
+          if (!lines[lastIdx].endsWith('…') && i < words.length) {
+            lines[lastIdx] = truncateText(lines[lastIdx], maxChars);
+          }
+          return lines.slice(0, maxLines);
+        }
+      }
+    }
+    if (current) {
+      if (lines.length >= maxLines) {
+        lines[maxLines - 1] = truncateText(`${lines[maxLines - 1]} ${current}`, maxChars);
+      } else {
+        lines.push(truncateText(current, maxChars));
+      }
+    }
+    return lines.slice(0, maxLines);
   }
 
   function splitCoupleOg(coupleName?: string, groomOverride?: string, brideOverride?: string, fallbackTitle?: string) {
@@ -719,62 +885,149 @@ async function startServer() {
   ): Promise<Buffer> {
     const extra = eventRow.settings && typeof eventRow.settings === 'object' ? eventRow.settings : {};
     const ticketCode = guestRow?.ticket_code ? String(guestRow.ticket_code).trim() : '';
-    const versionKey = `${eventRow.updated_at || ''}_${guestRow?.updated_at || ''}_${guestRow?.name || ''}`;
-    const cacheKey = `${eventRow.id}_${ticketCode || 'public'}_${Buffer.from(versionKey).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 20)}`;
+
+    // Lookup admin E-Invitation templates catalog & global/partner branding
+    let catalogTemplates: any[] = [];
+    let globalBrand: any = {};
+    let partnerLogoUrl = '';
+    try {
+      const { data: settingsRows } = await supabase
+        .from('settings')
+        .select('id, data')
+        .in('id', [
+          'eInviteTemplates',
+          'doc:settings:eInviteTemplates',
+          'global',
+          'doc:settings:global',
+          ...(eventRow.partner_id && eventRow.partner_id !== 'default-partner'
+            ? [`doc:users:${eventRow.partner_id}`]
+            : []),
+        ]);
+      if (settingsRows) {
+        for (const row of settingsRows) {
+          if (row.id === 'eInviteTemplates' || row.id === 'doc:settings:eInviteTemplates') {
+            if (Array.isArray(row.data?.templates) && row.data.templates.length > 0) {
+              catalogTemplates = row.data.templates;
+            }
+          } else if (row.id === 'global' || row.id === 'doc:settings:global') {
+            if (row.data && typeof row.data === 'object') {
+              globalBrand = { ...globalBrand, ...row.data };
+            }
+          } else if (eventRow.partner_id && row.id === `doc:users:${eventRow.partner_id}`) {
+            partnerLogoUrl = String(row.data?.logoUrl || row.data?.brandLogo || '').trim();
+          }
+        }
+      }
+      if (!partnerLogoUrl && eventRow.partner_id && eventRow.partner_id !== 'default-partner') {
+        const { data: partnerUser } = await supabase
+          .from('users')
+          .select('logo_url')
+          .eq('id', eventRow.partner_id)
+          .maybeSingle();
+        if (partnerUser?.logo_url) partnerLogoUrl = String(partnerUser.logo_url).trim();
+      }
+    } catch {
+      // ignore catalog lookup error and fall back gracefully
+    }
+
+    const tplId = String(extra.eInviteTemplateId || 'default-blush-arch');
+    const matchedTemplate =
+      catalogTemplates.find((t: any) => t.id === tplId) ||
+      catalogTemplates.find((t: any) => t.isDefault) ||
+      null;
+
+    const theme = String(extra.eInviteTheme || '').trim();
+    const defaultPalette =
+      tplId === 'default-royal-gold' || theme === 'gold'
+        ? {
+            primaryColor: '#4A3519',
+            accentColor: '#B38748',
+            guestBoxBg: '#F5EFE4',
+            footerColor: '#9E7840',
+          }
+        : tplId === 'default-emerald-sage' || theme === 'sage'
+        ? {
+            primaryColor: '#16382C',
+            accentColor: '#4F7A65',
+            guestBoxBg: '#E6F0EB',
+            footerColor: '#3B6652',
+          }
+        : {
+            primaryColor: '#153B31',
+            accentColor: '#C98583',
+            guestBoxBg: '#F3E4E2',
+            footerColor: '#C27D7A',
+          };
+
+    const primaryColor = String(matchedTemplate?.primaryColor || defaultPalette.primaryColor);
+    const accentColor = String(matchedTemplate?.accentColor || defaultPalette.accentColor);
+    const guestBoxBg = String(matchedTemplate?.guestBoxBg || defaultPalette.guestBoxBg);
+    const footerColor = String(matchedTemplate?.footerColor || defaultPalette.footerColor);
+    const tplImgUrl = String(extra.eInviteTemplateUrl || matchedTemplate?.imageUrl || '').trim();
+
+    const versionKey = `v3-16x9_${eventRow.updated_at || ''}_${guestRow?.updated_at || ''}_${guestRow?.name || ''}_${guestRow?.category || ''}_${tplId}_${tplImgUrl}`;
+    const cacheKey = `${eventRow.id}_${ticketCode || 'public'}_${Buffer.from(versionKey).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 24)}`;
 
     const memHit = ogMemoryCache.get(cacheKey);
-    if (memHit) return memHit;
+    if (memHit && memHit.length > 0) return memHit;
 
     const diskPath = path.join(ogCacheDir, `${cacheKey}.jpg`);
     if (fs.existsSync(diskPath)) {
       const buf = fs.readFileSync(diskPath);
-      ogMemoryCache.set(cacheKey, buf);
-      return buf;
-    }
-
-    const tplId = String(extra.eInviteTemplateId || 'default-blush-arch');
-    let primaryColor = '#153B31';
-    let accentColor = '#8C3A50';
-    let cardBg = '#FFF9FA';
-    let guestBoxBg = '#F6E6EA';
-    if (tplId === 'default-royal-gold') {
-      primaryColor = '#4A3519';
-      accentColor = '#B38748';
-      cardBg = '#FDF9F2';
-      guestBoxBg = '#F4ECDD';
-    } else if (tplId === 'default-emerald-sage') {
-      primaryColor = '#16382C';
-      accentColor = '#4F7A65';
-      cardBg = '#F6FBF8';
-      guestBoxBg = '#E4F0EA';
+      if (buf.length > 0) {
+        ogMemoryCache.set(cacheKey, buf);
+        return buf;
+      }
     }
 
     const WIDTH = 1200;
-    const HEIGHT = 630;
+    const HEIGHT = 675;
+    const ARCH_PATH = 'M 0,0 L 242,0 C 362,54 432,198 432,340 C 432,428 410,498 386,543 L 0,543 Z';
 
-    // Base background (either custom eInviteTemplateUrl or soft luxury gradient)
-    let baseLayer: ReturnType<typeof sharp>;
-    const tplImgUrl = String(extra.eInviteTemplateUrl || '').trim();
+    // LAYER 0 & 1: Template background image (or exact vector EInvitationCard fallback)
+    let baseLayer: ReturnType<typeof sharp> | null = null;
     const tplMedia = tplImgUrl ? await resolveMediaBuffer(tplImgUrl).catch(() => null) : null;
-    if (tplMedia?.buffer) {
-      baseLayer = sharp(tplMedia.buffer).resize(WIDTH, HEIGHT, { fit: 'cover' });
-    } else {
+    if (tplMedia?.buffer && tplMedia.buffer.length > 0) {
+      try {
+        const renderedTplBg = await sharp(tplMedia.buffer)
+          .rotate()
+          .resize(WIDTH, HEIGHT, { fit: 'cover' })
+          .png()
+          .toBuffer();
+        baseLayer = sharp(renderedTplBg);
+      } catch {
+        baseLayer = null;
+      }
+    }
+    if (!baseLayer) {
       const bgSvg = `<svg width="${WIDTH}" height="${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="${cardBg}" />
-            <stop offset="100%" stop-color="${guestBoxBg}" />
-          </linearGradient>
-        </defs>
-        <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#bgGrad)" />
-        <rect x="20" y="20" width="${WIDTH - 40}" height="${HEIGHT - 40}" rx="28" fill="none" stroke="${accentColor}" stroke-opacity="0.35" stroke-width="2" />
+        <rect width="${WIDTH}" height="${HEIGHT}" fill="#FAF6F2" />
+        <path d="${ARCH_PATH}" fill="#F6ECE8" />
+        <path d="M 242,0 C 362,54 432,198 432,340 C 432,428 410,498 386,543" fill="none" stroke="${accentColor}" stroke-width="4" stroke-opacity="0.55" />
+        <path d="M 254,0 C 374,54 444,198 444,340 C 444,428 422,498 398,543" fill="none" stroke="#C5A678" stroke-width="2" stroke-opacity="0.7" />
+        <g opacity="0.45" stroke="#B7837A" stroke-width="1.4" fill="none">
+          <path d="M 1200,18 C 1150,32 1110,75 1085,135" />
+          <path d="M 1140,42 C 1125,28 1105,26 1090,36 C 1104,48 1124,50 1140,42 Z" fill="#F3DDD8" />
+          <path d="M 1118,74 C 1100,62 1080,64 1068,76 C 1082,86 1102,84 1118,74 Z" fill="#E3E6DF" />
+          <path d="M 1165,88 C 1152,106 1154,126 1166,138 C 1176,124 1174,104 1165,88 Z" fill="#F3DDD8" />
+        </g>
+        <rect x="0" y="543" width="${WIDTH}" height="132" fill="${footerColor}" />
+        <g stroke="#FFF5F3" stroke-opacity="0.55" stroke-width="1.3" fill="none">
+          <path d="M 18,668 C 55,625 105,589 175,567" />
+          <path d="M 62,631 C 48,611 50,589 65,573 C 78,589 76,613 62,631 Z" fill="#FFFFFF" fill-opacity="0.12" />
+          <path d="M 98,607 C 86,589 90,569 106,557 C 116,573 112,593 98,607 Z" fill="#FFFFFF" fill-opacity="0.12" />
+          <path d="M 1182,668 C 1145,625 1095,589 1025,567" />
+          <path d="M 1138,631 C 1152,611 1150,589 1135,573 C 1122,589 1124,613 1138,631 Z" fill="#FFFFFF" fill-opacity="0.12" />
+          <circle cx="1095" cy="628" r="36" stroke="#FFF5F3" stroke-opacity="0.4" fill="#FFFFFF" fill-opacity="0.08" />
+          <circle cx="1095" cy="628" r="12" stroke="#FFF5F3" stroke-opacity="0.5" />
+        </g>
       </svg>`;
       baseLayer = sharp(Buffer.from(bgSvg));
     }
 
     const composites: Parameters<ReturnType<typeof sharp>['composite']>[0] = [];
 
-    // Left panel: Couple photo inside rounded arch frame
+    // LAYER 2: Left Arch Couple Photo (432x543 clipped to exact EInvitationCard arch curve)
     const photoUrl = String(
       extra.eInvitePhotoUrl ||
         eventRow.thumbnail_url ||
@@ -792,114 +1045,308 @@ async function startServer() {
       eventRow.title || extra.title
     );
 
-    if (photoMedia?.buffer) {
+    let hasPhoto = false;
+    if (photoMedia?.buffer && photoMedia.buffer.length > 0) {
       try {
-        const photoW = 370;
-        const photoH = 510;
-        const maskSvg = Buffer.from(
+        const photoW = 432;
+        const photoH = 543;
+        const archMaskSvg = Buffer.from(
           `<svg width="${photoW}" height="${photoH}" xmlns="http://www.w3.org/2000/svg">
-            <rect x="0" y="0" width="${photoW}" height="${photoH}" rx="185" ry="185" fill="#fff"/>
+            <path d="${ARCH_PATH}" fill="#ffffff" />
           </svg>`
         );
         const maskedPhoto = await sharp(photoMedia.buffer)
-          .resize(photoW, photoH, { fit: 'cover', position: 'attention' })
-          .composite([{ input: maskSvg, blend: 'dest-in' }])
+          .rotate()
+          .resize(photoW, photoH, { fit: 'cover', position: 'top' })
+          .composite([{ input: archMaskSvg, blend: 'dest-in' }])
           .png()
           .toBuffer();
-        composites.push({ input: maskedPhoto, left: 60, top: 60 });
+        composites.push({ input: maskedPhoto, left: 0, top: 0 });
+        hasPhoto = true;
       } catch {
-        // ignore bad image
+        hasPhoto = false;
       }
     }
 
-    // Right panel: Invitation Card & Typography SVG
-    const headerLabel = escapeHtml(truncateText(extra.eInviteHeaderText || 'THE WEDDING OF', 32).toUpperCase());
-    const coupleLine = couple.bride
-      ? `${couple.groom} &amp; ${couple.bride}`
-      : escapeHtml(couple.groom);
-    const coupleDisplay = truncateText(coupleLine.replace(/&amp;/g, '&'), 34);
-    const dateLabel = escapeHtml(truncateText(formatIndonesianDateOg(eventRow.date || extra.date), 38));
-    const timeLabel = escapeHtml(truncateText(eventRow.time || extra.time || '', 28));
-    const dateTimeStr = [dateLabel, timeLabel].filter(Boolean).join(' • ');
-    const venueLabel = escapeHtml(truncateText(extra.eInviteVenueName || eventRow.location || extra.location || '', 48));
-    const guestName = guestRow?.name ? escapeHtml(truncateText(guestRow.name, 28)) : '';
-    const guestSession = guestRow?.session ? escapeHtml(truncateText(guestRow.session, 24)) : '';
+    // Resolve Logo & QR Favicon Emblem
+    const logoUrlCandidate = partnerLogoUrl || String(globalBrand?.logoUrl || '').trim();
+    const faviconUrlCandidate = String(globalBrand?.faviconUrl || logoUrlCandidate || '').trim();
 
-    const initials = `${(couple.groom || 'G').charAt(0).toUpperCase()}${couple.bride ? ' & ' + couple.bride.charAt(0).toUpperCase() : ''}`;
-    const noPhotoArch = !photoMedia?.buffer
-      ? `<rect x="60" y="60" width="370" height="510" rx="185" fill="${guestBoxBg}" stroke="${accentColor}" stroke-width="3" />
-         <text x="245" y="330" text-anchor="middle" font-family="Georgia, serif" font-size="68" font-weight="bold" fill="${accentColor}">${escapeHtml(initials)}</text>`
-      : `<rect x="56" y="56" width="378" height="518" rx="189" fill="none" stroke="${accentColor}" stroke-width="3" stroke-opacity="0.7" />`;
+    let logoPngBuf: Buffer | null = null;
+    let logoDims = { width: 0, height: 0 };
+    if (logoUrlCandidate) {
+      try {
+        const logoMedia = await resolveMediaBuffer(logoUrlCandidate).catch(() => null);
+        if (logoMedia?.buffer && logoMedia.buffer.length > 0) {
+          const { data, info } = await sharp(logoMedia.buffer)
+            .resize(244, 58, { fit: 'inside', withoutEnlargement: false })
+            .png()
+            .toBuffer({ resolveWithObject: true });
+          logoPngBuf = data;
+          logoDims = { width: info.width, height: info.height };
+        }
+      } catch {
+        logoPngBuf = null;
+      }
+    }
 
-    const qrLink = ticketCode
-      ? `${origin}/rsvp/${encodeURIComponent(eventRow.id)}/${encodeURIComponent(ticketCode)}`
-      : `${origin}/public/rsvp/${encodeURIComponent(eventRow.id)}`;
+    let emblemPngBuf: Buffer | null = null;
+    if (faviconUrlCandidate) {
+      try {
+        const embMedia = await resolveMediaBuffer(faviconUrlCandidate).catch(() => null);
+        if (embMedia?.buffer && embMedia.buffer.length > 0) {
+          emblemPngBuf = await sharp(embMedia.buffer)
+            .resize(34, 34, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 0 } })
+            .png()
+            .toBuffer();
+        }
+      } catch {
+        emblemPngBuf = null;
+      }
+    }
 
+    // Prepare Dynamic Text Values matching EInvitationCard.tsx
+    const headerLabel = escapeHtml(String(extra.eInviteHeaderText || 'THE WEDDING OF').toUpperCase());
+    const maxCoupleLen = Math.max(couple.groom.length, couple.bride.length);
+    const coupleFontSize = maxCoupleLen > 24 ? 26 : maxCoupleLen > 18 ? 34 : maxCoupleLen > 13 ? 40 : 46;
+
+    const guestNameRaw = String(guestRow?.name || 'Nama Tamu Undangan').trim();
+    const guestCategoryRaw = String(guestRow?.category || '').trim();
+    const guestCodeRaw = ticketCode || 'GUEST123456';
+    const greetingRaw = String(
+      extra.eInviteGreetingText ||
+        'Dengan hormat, kami mengundang Bapak/Ibu/Saudara/i untuk hadir dalam acara pernikahan kami.'
+    ).trim();
+
+    const guestNameFontSize =
+      guestNameRaw.length > 42 ? 18 : guestNameRaw.length > 26 ? 21 : guestNameRaw.length > 18 ? 24 : 26;
+    const guestNameLines = wrapSvgText(guestNameRaw, guestNameFontSize <= 21 ? 30 : 24, 2);
+    const greetingLines = wrapSvgText(greetingRaw, 50, guestNameLines.length > 1 ? 2 : 3);
+
+    const { dayName, dateText } = formatIndonesianDateOgParts(eventRow.date || extra.date);
+    const rawTime = String(guestRow?.session || eventRow.time || extra.time || '09.00 - 14.00').trim();
+    const timeDisplay = /wib|wita|wit/i.test(rawTime) ? rawTime : `${rawTime} WIB`;
+
+    const rawLocation = String(eventRow.location || extra.location || '').trim();
+    const venueNameRaw =
+      (rawLocation ? rawLocation.split(',')[0].trim() : '') ||
+      String(extra.eInviteVenueName || '').trim() ||
+      'Lokasi Acara';
+    const venueAddrRaw =
+      String(extra.eInviteVenueAddress || extra.greetingVenueSubtitle || '').trim() ||
+      (rawLocation.includes(',') ? rawLocation.split(',').slice(1).join(',').trim() : rawLocation);
+
+    const venueNameLines = wrapSvgText(venueNameRaw, 34, 1);
+    const venueAddrLines = wrapSvgText(venueAddrRaw, 46, 2);
+
+    const footerSubText = escapeHtml(
+      String(extra.eInviteFooterText || 'ATAS KEHADIRAN DAN DOA RESTUNYA').toUpperCase()
+    );
+    const initials = `${(couple.groom || 'G').charAt(0).toUpperCase()}${
+      couple.bride ? ' & ' + couple.bride.charAt(0).toUpperCase() : ''
+    }`;
+
+    // QR Code (matching EInvitationCard.tsx: value={guestCode}, level="H")
+    const qrValue = ticketCode || `${origin}/public/rsvp/${encodeURIComponent(eventRow.id)}`;
     let qrPngBuf: Buffer | null = null;
     try {
-      const qrSvg = await QRCode.toString(qrLink, {
+      const qrSvg = await QRCode.toString(qrValue, {
         type: 'svg',
+        errorCorrectionLevel: 'H',
         margin: 1,
-        width: 132,
+        width: 188,
         color: { dark: '#111827', light: '#FFFFFF' },
       });
-      qrPngBuf = await sharp(Buffer.from(qrSvg)).resize(132, 132).png().toBuffer();
+      qrPngBuf = await sharp(Buffer.from(qrSvg)).resize(188, 188).png().toBuffer();
     } catch {
       qrPngBuf = null;
     }
 
+    // Dynamic Couple Header Vertical Layout (x center = 654, range y=24..190)
+    const coupleHeaderSvg = couple.bride
+      ? `
+        <text x="654" y="42" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12.5" font-weight="600" letter-spacing="4.2" fill="${primaryColor}">${headerLabel}</text>
+        <text x="654" y="88" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="${coupleFontSize}" font-weight="500" fill="${primaryColor}">${escapeHtml(truncateText(couple.groom, 26))}</text>
+        <text x="654" y="120" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="30" font-style="italic" fill="${accentColor}">&amp;</text>
+        <text x="654" y="164" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="${coupleFontSize}" font-weight="500" fill="${primaryColor}">${escapeHtml(truncateText(couple.bride, 26))}</text>
+        <line x1="538" y1="184" x2="634" y2="184" stroke="${accentColor}" stroke-opacity="0.65" stroke-width="1.5" />
+        <g transform="translate(654, 185)">
+          <path d="M 0,5.5 C -4.5,0 -9,-2.8 -9,-5.8 C -9,-8.5 -6.2,-10.2 -3.4,-10.2 C -1.6,-10.2 -0.5,-9.2 0,-8 C 0.5,-9.2 1.6,-10.2 3.4,-10.2 C 6.2,-10.2 9,-8.5 9,-5.8 C 9,-2.8 4.5,0 0,5.5 Z" fill="${accentColor}" />
+        </g>
+        <line x1="674" y1="184" x2="770" y2="184" stroke="${accentColor}" stroke-opacity="0.65" stroke-width="1.5" />
+      `
+      : `
+        <text x="654" y="48" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12.5" font-weight="600" letter-spacing="4.2" fill="${primaryColor}">${headerLabel}</text>
+        <text x="654" y="118" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="${coupleFontSize}" font-weight="500" fill="${primaryColor}">${escapeHtml(truncateText(couple.groom, 28))}</text>
+        <line x1="538" y1="168" x2="634" y2="168" stroke="${accentColor}" stroke-opacity="0.65" stroke-width="1.5" />
+        <g transform="translate(654, 169)">
+          <path d="M 0,5.5 C -4.5,0 -9,-2.8 -9,-5.8 C -9,-8.5 -6.2,-10.2 -3.4,-10.2 C -1.6,-10.2 -0.5,-9.2 0,-8 C 0.5,-9.2 1.6,-10.2 3.4,-10.2 C 6.2,-10.2 9,-8.5 9,-5.8 C 9,-2.8 4.5,0 0,5.5 Z" fill="${accentColor}" />
+        </g>
+        <line x1="674" y1="168" x2="770" y2="168" stroke="${accentColor}" stroke-opacity="0.65" stroke-width="1.5" />
+      `;
+
+    // Guest Box SVG (x=456, y=200, w=396, h=154, rx=18)
+    const guestNameStartY = 258;
+    const guestNameLineStep = guestNameFontSize + 4;
+    const greetingStartY = guestNameStartY + guestNameLines.length * guestNameLineStep + 2;
+    const categoryWidth = guestCategoryRaw ? Math.min(110, Math.max(54, guestCategoryRaw.length * 8 + 20)) : 0;
+
+    const guestNameTspans = guestNameLines
+      .map(
+        (line, i) =>
+          `<text x="476" y="${guestNameStartY + i * guestNameLineStep}" font-family="Georgia, 'Times New Roman', serif" font-size="${guestNameFontSize}" font-weight="bold" fill="${primaryColor}">${escapeHtml(line)}</text>`
+      )
+      .join('');
+
+    const greetingTspans = greetingLines
+      .map(
+        (line, i) =>
+          `<text x="476" y="${greetingStartY + i * 16}" font-family="Georgia, 'Times New Roman', serif" font-size="12" fill="#2E2E2E">${escapeHtml(line)}</text>`
+      )
+      .join('');
+
+    const categoryBadgeSvg = guestCategoryRaw
+      ? `<rect x="${832 - categoryWidth}" y="212" width="${categoryWidth}" height="20" rx="10" fill="#FFFFFF" fill-opacity="0.88" stroke="${accentColor}" stroke-width="1" />
+         <text x="${832 - categoryWidth / 2}" y="225.5" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="bold" letter-spacing="0.8" fill="${primaryColor}">${escapeHtml(truncateText(guestCategoryRaw.toUpperCase(), 14))}</text>`
+      : '';
+
+    const brandNameText = escapeHtml(String(globalBrand?.appName || 'Guestly'));
+    const brandTaglineText = escapeHtml(String(globalBrand?.tagline || 'Buku Tamu Digital'));
+
     const cardOverlaySvg = `<svg width="${WIDTH}" height="${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
-      <rect x="464" y="48" width="684" height="534" rx="28" fill="#FFFFFF" fill-opacity="0.93" stroke="${accentColor}" stroke-opacity="0.28" stroke-width="2" />
-      ${noPhotoArch}
+      <!-- Fallback Arch Avatar if photo missing -->
+      ${
+        !hasPhoto
+          ? `<path d="${ARCH_PATH}" fill="#F6ECE8" />
+             <path d="M 242,0 C 362,54 432,198 432,340 C 432,428 410,498 386,543" fill="none" stroke="${accentColor}" stroke-width="3" stroke-opacity="0.6" />
+             <text x="200" y="290" text-anchor="middle" font-family="Georgia, serif" font-size="72" font-weight="bold" fill="${accentColor}">${escapeHtml(initials)}</text>`
+          : ''
+      }
 
-      <text x="510" y="114" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="bold" letter-spacing="4" fill="${accentColor}">
-        ${headerLabel}
-      </text>
+      <!-- Subtle top-left delicate botanical leaf overlay on photo corner -->
+      <g stroke="#C67D73" stroke-width="1.5" opacity="0.7" fill="none">
+        <path d="M 8,165 C 28,115 62,65 115,22" />
+        <path d="M 32,120 C 18,104 20,84 34,70 C 46,86 44,106 32,120 Z" fill="#FBEAE7" fill-opacity="0.55" />
+        <path d="M 56,86 C 42,70 44,50 58,36 C 70,52 68,72 56,86 Z" fill="#FBEAE7" fill-opacity="0.55" />
+        <path d="M 48,112 C 66,104 86,108 98,120 C 82,130 62,126 48,112 Z" fill="#FBEAE7" fill-opacity="0.55" />
+        <path d="M 74,76 C 92,68 112,72 124,84 C 108,94 88,90 74,76 Z" fill="#FBEAE7" fill-opacity="0.55" />
+      </g>
 
-      <text x="510" y="182" font-family="Georgia, 'Times New Roman', serif" font-size="${coupleDisplay.length > 24 ? 38 : 48}" font-weight="bold" fill="${primaryColor}">
-        ${escapeHtml(coupleDisplay)}
-      </text>
+      <!-- LAYER 3: Center Column -->
+      ${coupleHeaderSvg}
 
-      <line x1="510" y1="210" x2="660" y2="210" stroke="${accentColor}" stroke-width="3" stroke-linecap="round" />
+      <!-- Guest Invitation Box -->
+      <rect x="456" y="200" width="396" height="154" rx="18" fill="${guestBoxBg}" stroke="#E5CECA" stroke-opacity="0.75" stroke-width="1.2" />
+      <text x="476" y="226" font-family="Georgia, 'Times New Roman', serif" font-size="14" fill="#262626">Kepada Yth.</text>
+      ${categoryBadgeSvg}
+      ${guestNameTspans}
+      ${greetingTspans}
 
-      ${dateTimeStr ? `<text x="510" y="256" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="600" fill="#334155">${dateTimeStr}</text>` : ''}
-      ${venueLabel ? `<text x="510" y="292" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#64748B">${venueLabel}</text>` : ''}
+      <!-- Schedule & Venue Info -->
+      <circle cx="478" cy="396" r="22" fill="#F6DCDD" />
+      <g transform="translate(478, 396)" stroke="#C9444B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <rect x="-8" y="-6.5" width="16" height="14.5" rx="2" />
+        <line x1="-4" y1="-9" x2="-4" y2="-4.5" />
+        <line x1="4" y1="-9" x2="4" y2="-4.5" />
+        <line x1="-8" y1="-1.5" x2="8" y2="-1.5" />
+      </g>
+      ${dayName ? `<text x="514" y="382" font-family="Arial, Helvetica, sans-serif" font-size="11.5" font-weight="600" letter-spacing="0.8" fill="#263642">${escapeHtml(dayName)}</text>` : ''}
+      <text x="514" y="402" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="bold" fill="#152836">${escapeHtml(dateText)}</text>
+      <text x="514" y="420" font-family="Arial, Helvetica, sans-serif" font-size="12.5" fill="#354652">${escapeHtml(truncateText(timeDisplay, 38))}</text>
 
-      <rect x="510" y="346" width="${qrPngBuf ? 430 : 590}" height="184" rx="18" fill="${guestBoxBg}" stroke="${accentColor}" stroke-opacity="0.3" stroke-width="1.5" />
-      <text x="536" y="388" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" letter-spacing="1.5" fill="${accentColor}">
-        ${guestName ? 'KEPADA YTH. BAPAK / IBU / SAUDARA/I' : 'UNDANGAN DIGITAL &amp; RSVP'}
-      </text>
-      <text x="536" y="438" font-family="Georgia, 'Times New Roman', serif" font-size="${guestName && guestName.length > 20 ? 28 : 34}" font-weight="bold" fill="${primaryColor}">
-        ${guestName || 'Buka Tautan Untuk Konfirmasi RSVP'}
-      </text>
-      <text x="536" y="484" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="#475569">
-        ${guestSession ? `Sesi: ${guestSession}` : 'Mohon tunjukkan QR Code saat tiba di lokasi'}
-      </text>
-      ${qrPngBuf ? `
-        <rect x="962" y="346" width="152" height="184" rx="18" fill="#FFFFFF" stroke="${accentColor}" stroke-opacity="0.35" stroke-width="1.5" />
-        <text x="1038" y="514" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="bold" fill="${accentColor}">SCAN QR</text>
-      ` : ''}
+      <line x1="456" y1="436" x2="852" y2="436" stroke="${accentColor}" stroke-opacity="0.55" stroke-width="1" />
+
+      <circle cx="478" cy="476" r="22" fill="#F6DCDD" />
+      <g transform="translate(478, 476)" stroke="#C9444B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <path d="M 0,8.5 C 0,8.5 6.5,2.2 6.5,-2.5 A 6.5,6.5 0 1 0 -6.5,-2.5 C -6.5,2.2 0,8.5 0,8.5 Z" />
+        <circle cx="0" cy="-2.5" r="2.2" />
+      </g>
+      ${venueNameLines.map((line, i) => `<text x="514" y="${466 + i * 18}" font-family="Arial, Helvetica, sans-serif" font-size="15.5" font-weight="bold" fill="#152836">${escapeHtml(line)}</text>`).join('')}
+      ${venueAddrLines.map((line, i) => `<text x="514" y="${486 + i * 16}" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#354652">${escapeHtml(line)}</text>`).join('')}
+
+      <!-- LAYER 4: Right Column (Logo Box & White QR Card) -->
+      <rect x="874" y="22" width="288" height="78" rx="20" fill="#FFFFFF" fill-opacity="0.72" stroke="#FFFFFF" stroke-opacity="0.95" stroke-width="1.5" />
+      ${
+        !logoPngBuf
+          ? `<circle cx="944" cy="61" r="21" fill="#E92E63" />
+             <g transform="translate(944, 63)">
+               <path d="M 0,6 C -5,0 -10,-3 -10,-6.5 C -10,-9.5 -7,-11.5 -3.8,-11.5 C -1.8,-11.5 -0.5,-10.2 0,-9 C 0.5,-10.2 1.8,-11.5 3.8,-11.5 C 7,-11.5 10,-9.5 10,-6.5 C 10,-3 5,0 0,6 Z" fill="#FFFFFF" />
+             </g>
+             <text x="976" y="61" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="bold" fill="#E92E63">${brandNameText}</text>
+             <text x="976" y="79" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" fill="#1E2E3B">${brandTaglineText}</text>`
+          : ''
+      }
+
+      <!-- White QR Card -->
+      <rect x="874" y="112" width="288" height="416" rx="24" fill="#FFFFFF" stroke="#EFE6E0" stroke-width="1.5" />
+      ${
+        qrPngBuf
+          ? ''
+          : `<rect x="924" y="130" width="188" height="188" rx="12" fill="#F8FAFC" stroke="#E2E8F0" />`
+      }
+      <text x="1018" y="346" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="bold" letter-spacing="2" fill="${primaryColor}">${escapeHtml(truncateText(guestCodeRaw, 18))}</text>
+      <rect x="896" y="362" width="244" height="36" rx="18" fill="${primaryColor}" />
+      <text x="1018" y="384.5" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="bold" letter-spacing="1.6" fill="#FFFFFF">SCAN UNTUK CHECK-IN</text>
+      <line x1="896" y1="414" x2="1140" y2="414" stroke="#E5E7EB" stroke-width="1" />
+      <text x="1018" y="438" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11.5" fill="#3B4A54">Tunjukkan QR Code ini</text>
+      <text x="1018" y="455" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11.5" fill="#3B4A54">saat kedatangan di area registrasi.</text>
+
+      <!-- LAYER 5: Footer Strip Text -->
+      <text x="600" y="592" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="400" letter-spacing="6" fill="#FFFFFF">TERIMA KASIH</text>
+      <text x="600" y="618" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" letter-spacing="3.2" fill="#FFFFFF" fill-opacity="0.95">${footerSubText}</text>
+      <line x1="474" y1="638" x2="580" y2="638" stroke="#FFFFFF" stroke-opacity="0.8" stroke-width="1.2" />
+      <g transform="translate(600, 640)">
+        <path d="M 0,4.5 C -4,0 -7.5,-2.5 -7.5,-5 C -7.5,-7.2 -5.2,-8.8 -2.8,-8.8 C -1.4,-8.8 -0.4,-7.9 0,-6.8 C 0.4,-7.9 1.4,-8.8 2.8,-8.8 C 5.2,-8.8 7.5,-7.2 7.5,-5 C 7.5,-2.5 4,0 0,4.5 Z" fill="#FFFFFF" />
+      </g>
+      <line x1="620" y1="638" x2="726" y2="638" stroke="#FFFFFF" stroke-opacity="0.8" stroke-width="1.2" />
     </svg>`;
 
     composites.push({ input: Buffer.from(cardOverlaySvg), left: 0, top: 0 });
+
+    if (logoPngBuf && logoDims.width > 0 && logoDims.height > 0) {
+      composites.push({
+        input: logoPngBuf,
+        left: Math.round(874 + (288 - logoDims.width) / 2),
+        top: Math.round(22 + (78 - logoDims.height) / 2),
+      });
+    }
+
     if (qrPngBuf) {
-      composites.push({ input: qrPngBuf, left: 972, top: 356 });
+      composites.push({ input: qrPngBuf, left: 924, top: 130 });
+      // Center QR Emblem Badge (44x44px rounded box matching EInvitationCard.tsx)
+      const emblemBoxSvg = Buffer.from(
+        `<svg width="44" height="44" xmlns="http://www.w3.org/2000/svg">
+          <rect x="0.5" y="0.5" width="43" height="43" rx="10" fill="#FFFFFF" stroke="#E5E7EB" stroke-width="1" />
+          ${
+            !emblemPngBuf
+              ? `<rect x="4" y="4" width="36" height="36" rx="7" fill="${primaryColor}" />
+                 <text x="22" y="29" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="bold" fill="#FFFFFF">G</text>`
+              : ''
+          }
+        </svg>`
+      );
+      composites.push({ input: emblemBoxSvg, left: 996, top: 202 });
+      if (emblemPngBuf) {
+        composites.push({ input: emblemPngBuf, left: 1001, top: 207 });
+      }
     }
 
     const finalBuf = await baseLayer
       .composite(composites)
-      .jpeg({ quality: 84, mozjpeg: true })
+      .jpeg({ quality: 86, mozjpeg: true })
       .toBuffer();
 
-    if (ogMemoryCache.size > 200) {
-      const oldestKey = ogMemoryCache.keys().next().value;
-      if (oldestKey) ogMemoryCache.delete(oldestKey);
-    }
-    ogMemoryCache.set(cacheKey, finalBuf);
-    try {
-      fs.writeFileSync(diskPath, finalBuf);
-    } catch {
-      // ignore disk cache error
+    if (finalBuf.length > 0) {
+      if (ogMemoryCache.size > 200) {
+        const oldestKey = ogMemoryCache.keys().next().value;
+        if (oldestKey) ogMemoryCache.delete(oldestKey);
+      }
+      ogMemoryCache.set(cacheKey, finalBuf);
+      try {
+        fs.writeFileSync(diskPath, finalBuf);
+      } catch {
+        // ignore disk cache error
+      }
     }
     return finalBuf;
   }
@@ -925,7 +1372,7 @@ async function startServer() {
           <meta property="og:image" content="${safeImage}" />
           <meta property="og:image:secure_url" content="${safeImage}" />
           <meta property="og:image:width" content="1200" />
-          <meta property="og:image:height" content="630" />
+          <meta property="og:image:height" content="675" />
           <meta name="twitter:image" content="${safeImage}" />
           <meta itemprop="image" content="${safeImage}" />
           <link rel="image_src" href="${safeImage}" />`
@@ -961,6 +1408,15 @@ async function startServer() {
     const protocol = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() || req.protocol || 'https';
     const host = req.get('host') || 'localhost:3000';
     return `${protocol}://${host}`;
+  }
+
+  function getPublicOrigin(req: express.Request): string {
+    const reqOrigin = getRequestOrigin(req);
+    const appUrl = (process.env.APP_URL || '').trim().replace(/\/+$/, '');
+    if (appUrl && /^https?:\/\//i.test(appUrl) && /localhost|127\.0\.0\.1/i.test(reqOrigin)) {
+      return appUrl;
+    }
+    return reqOrigin;
   }
 
   function getIndexHtmlPath(): string {
@@ -1012,6 +1468,68 @@ async function startServer() {
     } catch (err: any) {
       console.error('Error generating E-Card OG image:', err);
       return res.status(500).send(err?.message || 'Error rendering OG image');
+    }
+  });
+
+  // Normalized JPEG Event Thumbnail endpoint for WhatsApp / Fonnte media delivery
+  app.get(['/api/media/wa-thumbnail/:eventId', '/api/media/wa-thumbnail/:eventId.jpg'], async (req, res) => {
+    try {
+      const rawEventId = String(req.params.eventId || '').replace(/\.(jpg|jpeg|png|webp)$/i, '');
+      if (!rawEventId) {
+        return res.status(400).send('Missing eventId');
+      }
+
+      const { data: eventRow } = await supabase
+        .from('events')
+        .select('*')
+        .eq('id', rawEventId)
+        .maybeSingle();
+
+      if (!eventRow) {
+        return res.status(404).send('Event not found');
+      }
+
+      const extra = eventRow.settings && typeof eventRow.settings === 'object' ? eventRow.settings : {};
+      const candidateUrl = String(
+        eventRow.thumbnail_url ||
+          extra.thumbnailUrl ||
+          eventRow.cover_image ||
+          extra.coverImage ||
+          eventRow.frame_overlay_url ||
+          extra.frameOverlayUrl ||
+          extra.eInvitePhotoUrl ||
+          ''
+      ).trim();
+
+      if (candidateUrl) {
+        const media = await resolveMediaBuffer(candidateUrl).catch(() => null);
+        if (media?.buffer && media.buffer.length > 0) {
+          try {
+            const jpgBuf = await sharp(media.buffer)
+              .rotate()
+              .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 86, mozjpeg: true })
+              .toBuffer();
+            res.setHeader('Content-Type', 'image/jpeg');
+            res.setHeader('Cache-Control', 'public, max-age=1800');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            return res.send(jpgBuf);
+          } catch {
+            // fall through to dynamic E-Card OG image fallback
+          }
+        }
+      }
+
+      // Fallback to dynamic E-Card OG image if no standalone thumbnail image is available
+      const origin = getRequestOrigin(req);
+      const fallbackBuf = await renderEInvitationOgImage(eventRow, null, origin);
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=1800');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      return res.send(fallbackBuf);
+    } catch (err: any) {
+      console.error('Error serving WhatsApp JPEG thumbnail:', err);
+      return res.status(500).send(err?.message || 'Error rendering thumbnail');
     }
   });
 

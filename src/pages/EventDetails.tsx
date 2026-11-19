@@ -1,12 +1,13 @@
 import { useParams, Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { QrCode, Printer, ScanLine, Plus, Trash2, Edit, Search, CheckCircle, XCircle, FileSpreadsheet, FileText, Upload, Download, Copy, Share2, Download as DownloadIcon, Monitor, Code, MessageCircle, RefreshCcw, Users, Loader2, Gift, ArrowUpDown, AlertCircle, ArrowLeft, Image as ImageIcon, Calendar, MapPin, Clock, ChevronDown, ChevronUp, MoreHorizontal, X, Check, ChevronRight, Send, Lock, CreditCard } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import QRCode from 'react-qr-code';
 import { collection, query, getDocs, addDoc, serverTimestamp, doc, getDoc, deleteDoc, updateDoc, deleteField, onSnapshot, writeBatch } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { supabaseDb } from '../lib/supabaseDb';
 import { Guest, EventRecord, WATemplate, EInviteTemplate } from '../types';
-import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel, exportCardToPng, resolveMediaUrl, getGuestBaseName, formatGuestFullName, isEventExpired, isEventInactiveOrExpired, getDaysRemaining, resolveEventActiveUntil, computeDefaultActiveUntil, DEFAULT_EVENT_ACTIVE_DAYS, shouldHideServiceInfo } from '../lib/utils';
+import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel, exportCardToPng, resolveMediaUrl, getGuestBaseName, formatGuestFullName, isEventExpired, isEventInactiveOrExpired, getDaysRemaining, resolveEventActiveUntil, computeDefaultActiveUntil, DEFAULT_EVENT_ACTIVE_DAYS, shouldHideServiceInfo, isVendorManagedClient, isSelfRegisteredClient } from '../lib/utils';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -20,6 +21,8 @@ import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 import { useSettings } from '../SettingsContext';
 import SouvenirManagement from '../components/SouvenirManagement';
 import { souvenirStorage } from '../services/souvenirStorage';
+import { subscribeWaDispatch, saveGuestWaStatus, clearWaDispatchMap, WaDispatchMap } from '../services/waDispatchService';
+import { toWhatsAppInternational } from '../lib/fonnte';
 
 export default function EventDetails() {
   const { eventId, guestId: routeGuestId } = useParams<{ eventId: string; guestId?: string }>();
@@ -28,14 +31,29 @@ export default function EventDetails() {
   const [searchParams] = useSearchParams();
   const { appUser } = useAuth();
   const currentOperator = getOperatorLabel(appUser);
+  const isSuperAdmin = appUser?.role === 'superadmin';
   const isStaff = appUser?.role === 'staff';
   const isStaffCheckinOnly = isStaff && appUser?.staffType === 'checkin';
   const isStaffSouvenirOnly = isStaff && appUser?.staffType === 'souvenir';
+  const isManagedClient = isVendorManagedClient(appUser);
+  const isSelfClient = isSelfRegisteredClient(appUser);
   const canDirectEditRank =
     appUser?.role === 'superadmin' ||
     appUser?.role === 'owner' ||
     appUser?.role === 'partner';
   const [event, setEvent] = useState<EventRecord | null>(null);
+  const eventExpired = isEventExpired(event);
+  const eventInactive = isEventInactiveOrExpired(event);
+  const isEventLocked = Boolean(event && eventInactive && !isSuperAdmin);
+  const showEventLockedAlert = () => {
+    showAlert(
+      'Fitur Terkunci',
+      eventExpired
+        ? 'Masa aktif acara ini telah berakhir dan status otomatis menjadi Draft. Silakan lakukan Top-Up Paket terlebih dahulu untuk membuka kembali fitur ini.'
+        : 'Acara ini berstatus Draft sehingga seluruh fitur operasional & ekspor dikunci sementara. Silakan lakukan Top-Up Paket atau hubungi Super Admin.',
+      'warning'
+    );
+  };
   const [clientName, setClientName] = useState<string>('');
   const [clientPartnerId, setClientPartnerId] = useState<string | null>(null);
   const [teamPartnerIds, setTeamPartnerIds] = useState<string[]>([]);
@@ -54,6 +72,9 @@ export default function EventDetails() {
   const [searchTerm, setSearchTerm] = useState('');
   const [rsvpFilter, setRsvpFilter] = useState('all');
   const [attendanceFilter, setAttendanceFilter] = useState('all');
+  const [waSendFilter, setWaSendFilter] = useState<'all' | 'pending' | 'sent' | 'failed'>('all');
+  const [waDispatchMap, setWaDispatchMap] = useState<WaDispatchMap>({});
+  const [clientFonnteToken, setClientFonnteToken] = useState<string>('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [invitationTypeFilter, setInvitationTypeFilter] = useState('all');
   const [sortBy, setSortBy] = useState<'category_setting' | 'category_desc' | 'newest' | 'name_asc'>('category_setting');
@@ -80,6 +101,10 @@ export default function EventDetails() {
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [printFormat, setPrintFormat] = useState<'standard' | 'card-4' | 'card-8'>('standard');
   const [singlePrintGuest, setSinglePrintGuest] = useState<Guest | null>(null);
+  const [isPreparingPrint, setIsPreparingPrint] = useState(false);
+  const [printPrepStatus, setPrintPrepStatus] = useState('');
+  const [printRenderGuests, setPrintRenderGuests] = useState<Guest[] | null>(null);
+  const [printRenderFormat, setPrintRenderFormat] = useState<'standard' | 'card-4' | 'card-8'>('standard');
   const { settings } = useSettings();
   const [isBlasting, setIsBlasting] = useState(false);
   const [isBlastModalOpen, setIsBlastModalOpen] = useState(false);
@@ -133,6 +158,10 @@ export default function EventDetails() {
   }, []);
 
   const openThumbnailModal = () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     setThumbnailInput(event?.thumbnailUrl || '');
     setIsThumbnailModalOpen(true);
   };
@@ -140,6 +169,10 @@ export default function EventDetails() {
   const handleSaveThumbnail = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!eventId || !event) return;
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     setIsSavingThumbnail(true);
     try {
       const cleanedThumb = thumbnailInput.trim();
@@ -177,6 +210,10 @@ export default function EventDetails() {
     eInviteTemplateUrl?: string;
   }) => {
     if (!eventId || !event) return;
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     try {
       await updateDoc(doc(db, 'events', eventId), {
         ...updates,
@@ -221,6 +258,7 @@ export default function EventDetails() {
 
     let unsubscribeEvent: () => void;
     let unsubscribeGuestsRealtime: () => void;
+    let unsubscribeWaDispatch: () => void;
     let intervalId: NodeJS.Timeout;
 
     const setupListeners = async () => {
@@ -285,6 +323,16 @@ export default function EventDetails() {
                 // ignore
               }
             }
+            if (eventData.clientUid) {
+              try {
+                const cUserDoc = await getDoc(doc(db, 'users', eventData.clientUid));
+                if (cUserDoc.exists()) {
+                  setClientFonnteToken(String((cUserDoc.data() as any)?.fonnteToken || '').trim());
+                }
+              } catch {
+                // ignore
+              }
+            }
           }
         }, (error) => {
           handleFirestoreError(error, OperationType.GET, `events/${eventId}`);
@@ -292,6 +340,11 @@ export default function EventDetails() {
 
         // Initial fetch for guests
         await fetchGuests();
+
+        // Subscribe to WA dispatch statuses
+        unsubscribeWaDispatch = subscribeWaDispatch(eventId, (statuses) => {
+          setWaDispatchMap(statuses);
+        });
 
         // Realtime subscription to Supabase Broadcast & Postgres Changes
         unsubscribeGuestsRealtime = supabaseDb.subscribeToGuests(eventId, () => {
@@ -357,6 +410,7 @@ export default function EventDetails() {
     return () => {
       if (unsubscribeEvent) unsubscribeEvent();
       if (unsubscribeGuestsRealtime) unsubscribeGuestsRealtime();
+      if (unsubscribeWaDispatch) unsubscribeWaDispatch();
       if (intervalId) clearInterval(intervalId);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('supabase-compat-change', handleCompatChange);
@@ -367,6 +421,13 @@ export default function EventDetails() {
   // Sync URL sub-routes (/events/:eventId/guests/add, /events/:eventId/guests/:guestId/edit)
   useEffect(() => {
     const path = location.pathname;
+    if (isEventLocked && (path.endsWith('/guests/add') || (routeGuestId && path.endsWith('/edit')))) {
+      setIsAddingGuest(false);
+      setIsEditingGuest(false);
+      setEditingGuestId(null);
+      if (eventId) navigate(`/auth/login/events/${eventId}`, { replace: true });
+      return;
+    }
     if (path.endsWith('/guests/add')) {
       setIsAddingGuest(true);
     } else if (routeGuestId && path.endsWith('/edit')) {
@@ -395,10 +456,14 @@ export default function EventDetails() {
         setIsAddingGuest(false);
       }
     }
-  }, [location.pathname, routeGuestId, guests.length]);
+  }, [location.pathname, routeGuestId, guests.length, isEventLocked]);
 
   const handleAddGuest = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     
     if (
       appUser &&
@@ -440,7 +505,7 @@ export default function EventDetails() {
       if (newGuestInvitationType) payload.invitationType = newGuestInvitationType;
       if (newGuestSession) payload.session = newGuestSession;
       
-      if (appUser?.role === 'client') {
+      if (isManagedClient) {
         await addDoc(collection(db, 'guest_edit_requests'), {
           eventId: eventId!,
           eventTitle: event?.title || 'Unknown Event',
@@ -505,6 +570,10 @@ export default function EventDetails() {
   const STICKERS = ['❤️', '🎉', '🙏', '✨', '🔥', '🌸', '💍', '🕊️'];
 
   const handleEditWishesClick = (guest: Guest) => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     setEditingWishesGuestId(guest.id!);
     setEditWishesText(guest.wishes || '');
     setEditStickerUrl(guest.stickerUrl || '');
@@ -514,6 +583,10 @@ export default function EventDetails() {
   const handleSaveEditWishes = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingWishesGuestId || !event) return;
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
 
     try {
       await updateDoc(doc(db, 'events', eventId!, 'guests', editingWishesGuestId), {
@@ -538,6 +611,10 @@ export default function EventDetails() {
   };
 
   const handleDeleteWishes = (guestId: string) => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     const found = guests.find(g => g.id === guestId);
     if (found) {
       setRsvpGuestToDelete(found);
@@ -545,6 +622,10 @@ export default function EventDetails() {
   };
 
   const handleConfirmResetRsvpAndWishes = async () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     if (!rsvpGuestToDelete?.id) return;
     const targetId = rsvpGuestToDelete.id;
     setIsDeletingRsvpAction(true);
@@ -576,6 +657,10 @@ export default function EventDetails() {
   };
 
   const handleConfirmPermanentDeleteFromRsvp = async () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     if (!rsvpGuestToDelete?.id) return;
     const targetId = rsvpGuestToDelete.id;
     setIsDeletingRsvpAction(true);
@@ -595,6 +680,10 @@ export default function EventDetails() {
   };
 
   const handleBulkResetRsvpAndWishes = async () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     if (selectedGuestIds.length === 0) return;
     const confirmed = await showConfirm(
       `Apakah Anda yakin ingin menghapus ucapan dan mengeluarkan ${selectedGuestIds.length} tamu terpilih dari daftar RSVP & Ucapan?\n\n(Data tamu tetap tersimpan di Daftar Tamu utama)`
@@ -632,10 +721,18 @@ export default function EventDetails() {
   };
 
   const promptDeleteGuest = (guestId: string) => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     setGuestToDelete(guestId);
   };
 
   const handleDeleteGuest = async () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     if (!guestToDelete) return;
     try {
       await deleteDoc(doc(db, 'events', eventId!, 'guests', guestToDelete));
@@ -650,9 +747,13 @@ export default function EventDetails() {
   };
 
   const handleBulkDeleteGuests = async () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     if (selectedGuestIds.length === 0) return;
-    if (appUser?.role !== 'superadmin' && appUser?.role !== 'owner' && appUser?.role !== 'admin' && appUser?.role !== 'partner') {
-      showAlert("Ditolak", "Hanya Super Admin, Owner, Admin, dan Partner yang dapat menghapus massal.", "error");
+    if (appUser?.role !== 'superadmin' && appUser?.role !== 'owner' && appUser?.role !== 'admin' && appUser?.role !== 'partner' && !isSelfClient) {
+      showAlert("Ditolak", "Hanya Super Admin, Owner, Admin, Partner, dan Client Mandiri yang dapat menghapus massal.", "error");
       return;
     }
     
@@ -678,20 +779,21 @@ export default function EventDetails() {
   const handleStatusChange = async (newStatus: string) => {
     if (!eventId || !event) return;
 
+    if (!isSuperAdmin) {
+      showAlert(
+        'Akses Terbatas',
+        'Perubahan status acara secara manual hanya dapat dilakukan oleh Super Admin. Silakan gunakan menu Top-Up Paket untuk memperpanjang atau mengaktifkan acara.',
+        'warning'
+      );
+      return;
+    }
+
     if (newStatus === 'published' && isEventExpired(event)) {
-      if (appUser?.role === 'superadmin') {
-        showAlert(
-          'Masa Aktif Berakhir',
-          'Masa aktif acara ini telah habis. Silakan perpanjang melalui Top-Up Paket atau ubah tanggal Masa Aktif Acara di menu Edit Events terlebih dahulu.',
-          'warning'
-        );
-      } else {
-        showAlert(
-          'Masa Aktif Berakhir',
-          'Acara ini sudah melewati masa aktif 30 hari dan otomatis menjadi Draft. Silakan Top-Up Paket terlebih dahulu untuk mengaktifkan kembali acara ini.',
-          'warning'
-        );
-      }
+      showAlert(
+        'Masa Aktif Berakhir',
+        'Masa aktif acara ini telah habis. Silakan perpanjang melalui Top-Up Paket atau ubah tanggal Masa Aktif Acara di menu Edit Events terlebih dahulu.',
+        'warning'
+      );
       return;
     }
 
@@ -717,6 +819,10 @@ export default function EventDetails() {
   };
 
   const handleToggleAttendance = async (guestId: string, currentStatus: boolean) => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     const confirmed = await showConfirm(`Apakah Anda yakin ingin ${currentStatus ? 'membatalkan' : 'mengonfirmasi'} kehadiran tamu ini?`);
     if (!confirmed) return;
 
@@ -823,7 +929,13 @@ export default function EventDetails() {
       }
     }
     
-    return matchesSearch && matchesStatus && matchesCategory && matchesInvitationType;
+    let matchesWaSend = true;
+    if (activeTab === 'guest-list' && waSendFilter !== 'all') {
+      const dispatchStatus = guest.id ? (waDispatchMap[guest.id]?.status || 'pending') : 'pending';
+      matchesWaSend = dispatchStatus === waSendFilter;
+    }
+
+    return matchesSearch && matchesStatus && matchesCategory && matchesInvitationType && matchesWaSend;
   }).sort((a, b) => {
     if (sortBy === 'category_setting' || sortBy === 'category_desc') {
       const rankA = getCategoryRank(a.category);
@@ -853,9 +965,13 @@ export default function EventDetails() {
   // Reset page to 1 whenever filters or itemsPerPage change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, rsvpFilter, attendanceFilter, categoryFilter, invitationTypeFilter, sortBy, activeTab, itemsPerPage]);
+  }, [searchTerm, rsvpFilter, attendanceFilter, waSendFilter, categoryFilter, invitationTypeFilter, sortBy, activeTab, itemsPerPage]);
 
   const handleExportPDF = () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     const doc = new jsPDF();
     doc.text(`Daftar Tamu - ${event?.title || 'Event'}`, 14, 15);
     
@@ -890,6 +1006,10 @@ export default function EventDetails() {
   };
 
   const handleDownloadQR = async () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     if (qrRef.current && activeQrGuest) {
       try {
         const prefix = qrModalViewMode === 'card' ? 'Card_QR' : 'QR_Label';
@@ -902,20 +1022,128 @@ export default function EventDetails() {
     }
   };
 
-  const handlePrintSingleGuest = (guest: Guest, mode: 'card' | 'standard') => {
-    setSinglePrintGuest(guest);
-    setPrintFormat(mode === 'card' ? 'card-4' : 'standard');
-    setTimeout(() => {
+  const prepareAndTriggerPrint = async (
+    targetGuests: Guest[],
+    targetFormat: 'standard' | 'card-4' | 'card-8'
+  ) => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
+    if (targetGuests.length === 0) {
+      showAlert('Info', 'Tidak ada tamu yang dipilih untuk dicetak.', 'info');
+      return;
+    }
+
+    const perPage = targetFormat === 'card-4' ? 4 : targetFormat === 'card-8' ? 8 : 20;
+    const totalPages = Math.ceil(targetGuests.length / perPage);
+
+    setIsPrintModalOpen(false);
+    setPrintRenderFormat(targetFormat);
+    setPrintRenderGuests(targetGuests);
+    setIsPreparingPrint(true);
+    setPrintPrepStatus(
+      `Menyiapkan ${targetGuests.length} QR (${totalPages} halaman A4)...`
+    );
+
+    try {
+      // Wait 2 frames so React portals #print-area into document.body
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      );
+
+      // Wait for web fonts (capped at 2s)
+      if (document.fonts && document.fonts.ready) {
+        setPrintPrepStatus('Memuat tipografi & desain kartu...');
+        await Promise.race([
+          document.fonts.ready,
+          new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+        ]);
+      }
+
+      // Wait for all images inside #print-area to load or settle (capped at 8s)
+      const printEl = document.getElementById('print-area');
+      if (printEl) {
+        const imgs = Array.from(printEl.querySelectorAll('img'));
+        const pendingImgs = imgs.filter((img) => !img.complete || img.naturalWidth === 0);
+
+        if (pendingImgs.length > 0) {
+          let settledCount = imgs.length - pendingImgs.length;
+          setPrintPrepStatus(
+            `Memuat foto & aset cetak (${settledCount}/${imgs.length})...`
+          );
+
+          await Promise.race([
+            Promise.all(
+              pendingImgs.map(
+                (img) =>
+                  new Promise<void>((resolve) => {
+                    const done = () => {
+                      settledCount += 1;
+                      setPrintPrepStatus(
+                        `Memuat foto & aset cetak (${Math.min(settledCount, imgs.length)}/${imgs.length})...`
+                      );
+                      resolve();
+                    };
+                    img.addEventListener('load', done, { once: true });
+                    img.addEventListener('error', done, { once: true });
+                    if (img.complete) done();
+                  })
+              )
+            ),
+            new Promise<void>((resolve) => setTimeout(resolve, 8000)),
+          ]);
+        }
+      }
+
+      setPrintPrepStatus('Membuka pratinjau cetak PDF...');
+      await new Promise<void>((resolve) => setTimeout(resolve, 160));
+
+      // Hide loading modal right before opening native browser print dialog
+      setIsPreparingPrint(false);
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      );
+
+      const handleAfterPrint = () => {
+        setPrintRenderGuests(null);
+        setSinglePrintGuest(null);
+      };
+      window.addEventListener('afterprint', handleAfterPrint, { once: true });
+
       window.print();
-    }, 180);
+    } catch (err) {
+      console.error('Error preparing QR print:', err);
+      setIsPreparingPrint(false);
+      setPrintRenderGuests(null);
+      showAlert('Gagal', 'Terjadi kendala saat menyiapkan dokumen cetak QR.', 'error');
+    }
+  };
+
+  const handlePrintSingleGuest = (guest: Guest, mode: 'card' | 'standard') => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
+    const targetFormat = mode === 'card' ? 'card-4' : 'standard';
+    setSinglePrintGuest(guest);
+    setPrintFormat(targetFormat);
+    prepareAndTriggerPrint([guest], targetFormat);
   };
 
   const handleExecuteBulkPrint = () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     setSinglePrintGuest(null);
-    setIsPrintModalOpen(false);
-    setTimeout(() => {
-      window.print();
-    }, 180);
+    const selectedSet = new Set(selectedGuestIds);
+    const orderedFromFiltered = filteredGuests.filter((g) => g.id && selectedSet.has(g.id));
+    const orderedSet = new Set(orderedFromFiltered.map((g) => g.id));
+    const remainingSelected = guests.filter(
+      (g) => g.id && selectedSet.has(g.id) && !orderedSet.has(g.id)
+    );
+    prepareAndTriggerPrint([...orderedFromFiltered, ...remainingSelected], printFormat);
   };
 
   const getQrTicketLink = (ticketCode: string) => {
@@ -943,7 +1171,11 @@ export default function EventDetails() {
     return inviteUrl;
   };
 
-  const handleShareWA = (guest: Guest) => {
+  const handleShareWA = async (guest: Guest) => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     const qrLink = getQrTicketLink(guest.ticketCode);
     
     let digitalInviteLink = event?.digitalInviteLink || qrLink;
@@ -965,11 +1197,34 @@ export default function EventDetails() {
       .replace(/\[INVITE_LINK\]/g, digitalInviteLink)
       .replace(/\[SENDER_NAME\]/g, senderName);
 
-    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
-    window.open(waUrl, '_blank');
+    const intlPhone = toWhatsAppInternational(guest.phone || '');
+    const waUrl = intlPhone
+      ? `https://wa.me/${intlPhone}?text=${encodeURIComponent(message)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+    window.open(waUrl, '_blank', 'noopener,noreferrer');
+
+    if (eventId && guest.id) {
+      saveGuestWaStatus(eventId, guest.id, {
+        status: 'sent',
+        sentAt: new Date().toISOString(),
+        method: 'manual',
+        tokenSource: 'manual',
+      }).catch(() => {});
+    }
   };
 
+  const resolvedOwnFonnteToken = (
+    event?.fonnteToken ||
+    (appUser?.role === 'client' ? appUser?.fonnteToken : clientFonnteToken || appUser?.fonnteToken) ||
+    ''
+  ).trim();
+  const isUsingOwnFonnteToken = Boolean(resolvedOwnFonnteToken);
+
   const openBlastModal = () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     const guestsToBlast = selectedGuestIds.length > 0 
       ? filteredGuests.filter(g => selectedGuestIds.includes(g.id!))
       : filteredGuests;
@@ -985,10 +1240,10 @@ export default function EventDetails() {
     const userWaBlastQuota = appUser?.waBlastQuota || 0;
     const availableWaBlastQuota = Math.max(0, freeWaBlastQuota - currentWaBlastCount) + userWaBlastQuota;
 
-    if (appUser?.role !== 'superadmin' && validGuests.length > availableWaBlastQuota) {
+    if (!isUsingOwnFonnteToken && appUser?.role !== 'superadmin' && validGuests.length > availableWaBlastQuota) {
        showAlert(
          'Kuota Tidak Mencukupi', 
-         `Anda mencoba mengirim ${validGuests.length} pesan, namun sisa kuota WA Blast Anda gabungan dari Free (sisa ${Math.max(0, freeWaBlastQuota - currentWaBlastCount)}) dan Add-on (${userWaBlastQuota}) adalah ${availableWaBlastQuota}. \n\nSilakan beli add-on Kuota WA Blast di menu Layanan (Katalog), atau kurangi jumlah pilihan tamu, atau gunakan tombol pesan WA manual (opsi gratis tanpa batas).`, 
+         `Anda mencoba mengirim ${validGuests.length} pesan menggunakan Token Global, namun sisa kuota WA Blast Guestly Anda adalah ${availableWaBlastQuota}.\n\nPasang Token Fonnte Pribadi di menu Profil Saya / halaman Kirim Undangan (gratis tanpa potong kuota), atau gunakan tombol WA manual.`, 
          'warning'
        );
        return;
@@ -1003,6 +1258,10 @@ export default function EventDetails() {
   };
 
   const handleBlastWA = async () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     setIsBlastModalOpen(false);
     
     const guestsToBlast = selectedGuestIds.length > 0 
@@ -1048,16 +1307,39 @@ export default function EventDetails() {
             .replace(/\[INVITE_LINK\]/g, digitalInviteLink)
             .replace(/\[SENDER_NAME\]/g, senderName);
 
-          const rawImgUrl = event?.thumbnailUrl || event?.frameOverlayUrl || 'https://queinvite.yulovi.com/wp-content/uploads/2026/06/Tumbnail.webp';
-          const imgUrl: string | undefined = rawImgUrl.startsWith('/') ? `${baseUrl}${rawImgUrl}` : rawImgUrl;
+          const imgUrl = `${baseUrl}/api/og/einvite/${encodeURIComponent(eventId!)}/${encodeURIComponent(guest.ticketCode)}.jpg`;
           
-          const result = await sendFonnteMessage(null, guest.phone!, message, imgUrl);
+          const result = await sendFonnteMessage(
+            isUsingOwnFonnteToken ? resolvedOwnFonnteToken : null,
+            guest.phone!,
+            message,
+            imgUrl,
+            { strictToken: isUsingOwnFonnteToken, fallbackTextOnMediaError: true }
+          );
           if (result.success) {
             successCount++;
+            if (eventId && guest.id) {
+              await saveGuestWaStatus(eventId, guest.id, {
+                status: 'sent',
+                sentAt: new Date().toISOString(),
+                method: 'fonnte',
+                tokenSource: event?.fonnteToken ? 'event' : isUsingOwnFonnteToken ? 'client' : 'global',
+                mediaMode: result.usedTextFallback ? 'text' : 'einvite',
+                lastError: '',
+              }).catch(() => {});
+            }
           } else {
             failCount++;
             if (result.error && !errors.includes(result.error)) {
               errors.push(result.error);
+            }
+            if (eventId && guest.id) {
+              await saveGuestWaStatus(eventId, guest.id, {
+                status: 'failed',
+                method: 'fonnte',
+                tokenSource: event?.fonnteToken ? 'event' : isUsingOwnFonnteToken ? 'client' : 'global',
+                lastError: result.error || 'Gagal mengirim',
+              }).catch(() => {});
             }
           }
 
@@ -1065,8 +1347,8 @@ export default function EventDetails() {
           await new Promise(resolve => setTimeout(resolve, 3000));
       }
       
-      // Update Quotas
-      if (successCount > 0 && appUser?.role !== 'superadmin') {
+      // Update Quotas only when using Global Token fallback
+      if (successCount > 0 && !isUsingOwnFonnteToken && appUser?.role !== 'superadmin') {
          const countUsedFromFree = Math.min(successCount, Math.max(0, freeWaBlastQuota - currentWaBlastCount));
          const countUsedFromUser = successCount - countUsedFromFree;
          
@@ -1102,6 +1384,10 @@ export default function EventDetails() {
   };
 
   const handleExportExcel = () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     const data = filteredGuests.map((guest, index) => {
       const effectivePax = guest.rsvpStatus === 'declined' ? 0 : Math.max(1, Number(guest.pax) || 1);
       return {
@@ -1132,6 +1418,10 @@ export default function EventDetails() {
   };
 
   const handleDownloadTemplate = () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     const data = [{
       "Pangkat / Jabatan": '',
       "Nama Tamu": '',
@@ -1149,10 +1439,18 @@ export default function EventDetails() {
   };
 
   const handleImportClick = () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     setIsImportModalOpen(true);
   };
 
   const processFile = async (file: File) => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     if (!file) return;
 
     const reader = new FileReader();
@@ -1396,6 +1694,10 @@ export default function EventDetails() {
   };
 
   const handleClearAllGuests = async () => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     if (!eventId || guests.length === 0) return;
 
     if (appUser?.role !== 'superadmin' && appUser?.role !== 'owner' && appUser?.role !== 'admin' && appUser?.role !== 'partner') {
@@ -1422,6 +1724,7 @@ export default function EventDetails() {
         await batch.commit();
       }
 
+      await clearWaDispatchMap(eventId);
       setGuests([]);
       setSelectedGuestIds([]);
       showAlert('Berhasil', 'Semua data tamu berhasil dihapus.', 'success');
@@ -1450,6 +1753,10 @@ export default function EventDetails() {
   };
 
   const handleQuickSaveGuestTitle = async (guest: Guest, rawDraftTitle: string) => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     if (!canDirectEditRank || !guest.id || !eventId) return;
     const nextTitle = rawDraftTitle.trim();
     const prevTitle = (guest.title || '').trim();
@@ -1479,6 +1786,10 @@ export default function EventDetails() {
 
   const handleBulkSetRank = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     if (!canDirectEditRank || !eventId || selectedGuestIds.length === 0) return;
 
     const nextTitle = bulkRankValue.trim();
@@ -1534,6 +1845,10 @@ export default function EventDetails() {
   };
 
   const handleEditGuestClick = (guest: Guest) => {
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     setEditingGuestId(guest.id!);
     setEditGuestTitle(guest.title || '');
     setEditGuestName(getGuestBaseName(guest.name || '', guest.title || ''));
@@ -1552,6 +1867,10 @@ export default function EventDetails() {
 
   const handleSaveEditGuest = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
     if (!editingGuestId || !event) return;
 
     try {
@@ -1565,7 +1884,7 @@ export default function EventDetails() {
         originalGuest.title || ''
       );
 
-      if (appUser?.role === 'client') {
+      if (isManagedClient) {
         // Create approval request
         await addDoc(collection(db, 'guest_edit_requests'), {
           eventId: eventId,
@@ -1688,8 +2007,6 @@ export default function EventDetails() {
     );
   }
 
-  const eventExpired = isEventExpired(event);
-  const eventInactive = isEventInactiveOrExpired(event);
   const resolvedActiveDate = event ? resolveEventActiveUntil(event) : null;
   const daysLeft = event ? getDaysRemaining(event) : 0;
   const hideServiceCatalog = shouldHideServiceInfo(appUser);
@@ -1706,13 +2023,15 @@ export default function EventDetails() {
             <div>
               <h3 className="text-sm font-bold text-[#6E293C]">
                 {eventExpired
-                  ? 'Masa Aktif Acara Berakhir — Status Otomatis Draft'
-                  : 'Acara Berstatus Draft — Fasilitas Publik Dikunci'}
+                  ? 'Masa Aktif Acara Berakhir — Mode Baca Saja (Status Draft)'
+                  : 'Acara Berstatus Draft — Seluruh Fitur Operasional Dikunci'}
               </h3>
               <p className="text-xs text-rose-800/90 mt-0.5 leading-relaxed">
-                {eventExpired
-                  ? 'Masa aktif 30 hari acara ini telah habis. Data tamu, RSVP, dan laporan tetap aman di dashboard, namun Form RSVP Publik, E-Invitation, QR Scanner, dan Layar Sapa dikunci sementara hingga masa aktif diperpanjang.'
-                  : 'Saat ini Form RSVP Publik, E-Invitation, QR Scanner, dan Layar Sapa dinonaktifkan sementara. Ubah status menjadi Published atau perpanjang paket untuk membuka akses kembali.'}
+                {isSuperAdmin
+                  ? 'Acara ini sedang berstatus Draft / Kedaluwarsa. Sebagai Super Admin Anda masih memiliki akses penuh untuk mengelola data, ekspor laporan, atau mengubah status.'
+                  : eventExpired
+                  ? 'Masa aktif 30 hari acara ini telah habis. Data tamu, RSVP, dan statistik tetap aman untuk dilihat, namun seluruh fitur operasional (kelola tamu, impor, ekspor Excel/PDF, kirim undangan/WA, check-in manual, souvenir, QR Scanner, Layar Sapa, dan Form RSVP Publik) dikunci sementara hingga dilakukan Top-Up Paket.'
+                  : 'Acara ini berstatus Draft. Seluruh fitur operasional, ekspor laporan, kirim undangan, check-in, souvenir, dan akses publik dikunci sementara hingga acara diaktifkan melalui Top-Up Paket.'}
               </p>
             </div>
           </div>
@@ -1778,7 +2097,7 @@ export default function EventDetails() {
                     <ImageIcon className="w-7 h-7 sm:w-8 sm:h-8" />
                   </div>
                 )}
-                {!isStaff && (
+                {!isStaff && !isEventLocked && (
                   <button
                     type="button"
                     onClick={openThumbnailModal}
@@ -1798,7 +2117,7 @@ export default function EventDetails() {
                     {event?.title || 'Detail Acara'}
                   </h1>
 
-                  {/* Status Badge & Dropdown */}
+                  {/* Status Badge & Dropdown (Manual Status Change: Super Admin ONLY) */}
                   {event && (
                     <div className="inline-flex items-center gap-1.5">
                       <span
@@ -1809,6 +2128,11 @@ export default function EventDetails() {
                             ? 'bg-slate-100 text-slate-700 border border-slate-200'
                             : 'bg-amber-50 text-amber-700 border border-amber-200'
                         }`}
+                        title={
+                          !isSuperAdmin
+                            ? 'Status acara dikelola otomatis melalui Top-Up Paket (perubahan manual hanya untuk Super Admin)'
+                            : undefined
+                        }
                       >
                         <span
                           className={`w-1.5 h-1.5 rounded-full ${
@@ -1820,13 +2144,15 @@ export default function EventDetails() {
                           }`}
                         />
                         {event.status}
+                        {isEventLocked && <Lock className="w-3 h-3 ml-0.5 text-amber-600" />}
                       </span>
 
-                      {appUser?.role !== 'client' && !isStaff && (
+                      {isSuperAdmin && (
                         <select
                           value={event.status}
                           onChange={(e) => handleStatusChange(e.target.value)}
                           className="text-xs border border-slate-200 rounded-md py-0.5 px-2 bg-slate-50 text-slate-700 focus:ring-indigo-500 focus:border-indigo-500 cursor-pointer"
+                          title="Ubah Status Acara (Khusus Super Admin)"
                         >
                           <option value="draft">Draft</option>
                           <option value="published">Published</option>
@@ -2010,16 +2336,35 @@ export default function EventDetails() {
                 <div className="relative">
                   <button
                     type="button"
-                    onClick={() => setIsOptionsDropdownOpen(!isOptionsDropdownOpen)}
-                    className="h-8.5 sm:h-9 flex items-center gap-1 px-2.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                    title="Opsi & Alat Acara Lainnya"
+                    onClick={() => {
+                      if (isEventLocked) {
+                        showEventLockedAlert();
+                        return;
+                      }
+                      setIsOptionsDropdownOpen(!isOptionsDropdownOpen);
+                    }}
+                    disabled={isEventLocked}
+                    className={`h-8.5 sm:h-9 flex items-center gap-1 px-2.5 text-xs font-semibold rounded-lg transition-colors shadow-2xs ${
+                      isEventLocked
+                        ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                        : 'text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 cursor-pointer'
+                    }`}
+                    title={
+                      isEventLocked
+                        ? 'Menu Lainnya dikunci hingga dilakukan Top-Up Paket'
+                        : 'Opsi & Alat Acara Lainnya'
+                    }
                   >
-                    <MoreHorizontal className="w-4 h-4 text-slate-600" />
+                    {isEventLocked ? (
+                      <Lock className="w-3.5 h-3.5 text-slate-400" />
+                    ) : (
+                      <MoreHorizontal className="w-4 h-4 text-slate-600" />
+                    )}
                     <span className="hidden sm:inline">Lainnya</span>
                     <ChevronDown className="w-3 h-3 text-slate-400" />
                   </button>
 
-                  {isOptionsDropdownOpen && (
+                  {isOptionsDropdownOpen && !isEventLocked && (
                     <>
                       <div
                         className="fixed inset-0 z-20"
@@ -2327,6 +2672,7 @@ export default function EventDetails() {
           onGuestsUpdated={() => fetchGuests(false)}
           currentUserEmail={appUser?.email}
           currentUserName={currentOperator}
+          isLocked={isEventLocked}
         />
       ) : (
         <>
@@ -2359,24 +2705,61 @@ export default function EventDetails() {
                   <div className="inline-flex items-center gap-1.5">
                     {!isStaff && (
                       <button
-                        onClick={() => setIsImportModalOpen(true)}
-                        disabled={isImporting || isGeneratingSample}
-                        className="h-8.5 px-3 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap shadow-2xs cursor-pointer disabled:opacity-50"
-                        title="Import data tamu dari Excel & unduh template"
+                        onClick={() => {
+                          if (isEventLocked) {
+                            showEventLockedAlert();
+                            return;
+                          }
+                          setIsImportModalOpen(true);
+                        }}
+                        disabled={isEventLocked || isImporting || isGeneratingSample}
+                        className={`h-8.5 px-3 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap shadow-2xs ${
+                          isEventLocked
+                            ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed'
+                            : 'text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 cursor-pointer disabled:opacity-50'
+                        }`}
+                        title={
+                          isEventLocked
+                            ? 'Import dikunci — lakukan Top-Up Paket untuk membuka'
+                            : 'Import data tamu dari Excel & unduh template'
+                        }
                       >
-                        <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                        {isEventLocked ? (
+                          <Lock className="w-3.5 h-3.5 text-slate-400" />
+                        ) : (
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                        )}
                         <span>Import</span>
                       </button>
                     )}
 
                     <button
-                      onClick={() => setIsExportModalOpen(true)}
-                      className="h-8.5 px-3 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap shadow-2xs cursor-pointer"
-                      title="Ekspor data tamu ke Excel atau PDF"
+                      onClick={() => {
+                        if (isEventLocked) {
+                          showEventLockedAlert();
+                          return;
+                        }
+                        setIsExportModalOpen(true);
+                      }}
+                      disabled={isEventLocked}
+                      className={`h-8.5 px-3 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap shadow-2xs ${
+                        isEventLocked
+                          ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed'
+                          : 'text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 cursor-pointer'
+                      }`}
+                      title={
+                        isEventLocked
+                          ? 'Export Excel/PDF dikunci — lakukan Top-Up Paket untuk membuka'
+                          : 'Ekspor data tamu ke Excel atau PDF'
+                      }
                     >
-                      <Download className="w-3.5 h-3.5 text-indigo-600" />
+                      {isEventLocked ? (
+                        <Lock className="w-3.5 h-3.5 text-slate-400" />
+                      ) : (
+                        <Download className="w-3.5 h-3.5 text-indigo-600" />
+                      )}
                       <span>Export</span>
-                      <ChevronDown className="w-3 h-3 text-slate-400" />
+                      {!isEventLocked && <ChevronDown className="w-3 h-3 text-slate-400" />}
                     </button>
                   </div>
 
@@ -2411,38 +2794,93 @@ export default function EventDetails() {
                     {(appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'partner') && guests.length > 0 && (
                       <button
                         onClick={handleClearAllGuests}
-                        disabled={isGeneratingSample || isImporting}
-                        className="h-8.5 w-8.5 justify-center text-xs font-medium flex items-center rounded-lg text-rose-600 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
-                        title="Kosongkan Semua Tamu (Reset Acara)"
+                        disabled={isEventLocked || isGeneratingSample || isImporting}
+                        className={`h-8.5 w-8.5 justify-center text-xs font-medium flex items-center rounded-lg transition-colors shadow-2xs ${
+                          isEventLocked
+                            ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed'
+                            : 'text-rose-600 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 cursor-pointer disabled:opacity-50'
+                        }`}
+                        title={
+                          isEventLocked
+                            ? 'Reset Semua Tamu dikunci — lakukan Top-Up Paket'
+                            : 'Kosongkan Semua Tamu (Reset Acara)'
+                        }
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        {isEventLocked ? <Lock className="w-3.5 h-3.5" /> : <Trash2 className="w-3.5 h-3.5" />}
                       </button>
                     )}
                   </div>
 
-                  {/* Group 3: Primary Actions (Blast WA & Tambah Tamu) */}
+                  {/* Group 3: Primary Actions (Kirim Undangan, Blast WA & Tambah Tamu) */}
                   {!isStaff && (
                     <div className="inline-flex items-center gap-1.5">
+                      {isEventLocked ? (
+                        <button
+                          type="button"
+                          disabled
+                          className="h-8.5 px-3 text-xs font-semibold flex items-center gap-1.5 rounded-lg whitespace-nowrap text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed shadow-2xs"
+                          title="Kirim Undangan dikunci — lakukan Top-Up Paket untuk membuka"
+                        >
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>Kirim Undangan</span>
+                        </button>
+                      ) : (
+                        <Link
+                          to={`/auth/login/events/${eventId}/send-invitations`}
+                          className="h-8.5 px-3 text-xs font-semibold flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap text-emerald-800 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 shadow-2xs"
+                          title="Buka halaman khusus Kirim Undangan & Tracking Status Terkirim"
+                        >
+                          <Send className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Kirim Undangan</span>
+                        </Link>
+                      )}
+
                       <button
                         onClick={openBlastModal}
-                        disabled={isBlasting}
-                        className="h-8.5 px-3 text-xs font-medium flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 disabled:opacity-60"
-                        title="Kirim Pesan WhatsApp Massal"
+                        disabled={isEventLocked || isBlasting}
+                        className={`h-8.5 px-3 text-xs font-medium flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap shadow-2xs ${
+                          isEventLocked
+                            ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed'
+                            : 'text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-60 cursor-pointer'
+                        }`}
+                        title={
+                          isEventLocked
+                            ? 'Blast WA dikunci — lakukan Top-Up Paket untuk membuka'
+                            : 'Blast WhatsApp Cepat'
+                        }
                       >
-                        <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                        {isEventLocked ? (
+                          <Lock className="w-3.5 h-3.5 text-slate-400" />
+                        ) : (
+                          <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                        )}
                         <span>{isBlasting ? 'Memproses...' : 'Blast WA'}</span>
                       </button>
 
                       <button
                         onClick={() => {
+                          if (isEventLocked) {
+                            showEventLockedAlert();
+                            return;
+                          }
                           setIsAddingGuest(true);
                           if (eventId && !location.pathname.endsWith('/guests/add')) {
                             navigate(`/auth/login/events/${eventId}/guests/add`);
                           }
                         }}
-                        className="h-8.5 px-3 text-xs font-medium flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap text-white bg-indigo-600 hover:bg-indigo-700 shadow-xs cursor-pointer"
+                        disabled={isEventLocked}
+                        className={`h-8.5 px-3 text-xs font-medium flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap shadow-xs ${
+                          isEventLocked
+                            ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed'
+                            : 'text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer'
+                        }`}
+                        title={
+                          isEventLocked
+                            ? 'Tambah Tamu dikunci — lakukan Top-Up Paket untuk membuka'
+                            : 'Tambah data tamu baru'
+                        }
                       >
-                        <Plus className="w-3.5 h-3.5" />
+                        {isEventLocked ? <Lock className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
                         <span>Tambah Tamu</span>
                       </button>
                     </div>
@@ -2586,10 +3024,25 @@ export default function EventDetails() {
                       <option value="all">Semua ({filteredGuests.length})</option>
                     </select>
                   </div>
+                  {/* Invitation Send Status Filter (guest-list tab) */}
+                  {activeTab === 'guest-list' && (
+                    <div className="lg:col-span-2">
+                      <select
+                        value={waSendFilter}
+                        onChange={(e) => setWaSendFilter(e.target.value as any)}
+                        className="block w-full h-9 pl-3 pr-7 border border-slate-200 rounded-lg text-xs sm:text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
+                      >
+                        <option value="all">Semua Status Kirim</option>
+                        <option value="pending">Belum Dikirim</option>
+                        <option value="sent">Sudah Dikirim</option>
+                        <option value="failed">Gagal Kirim</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 {/* Active Filter Indicator & Quick Reset */}
-                {(searchTerm || rsvpFilter !== 'all' || attendanceFilter !== 'all' || categoryFilter !== 'all' || invitationTypeFilter !== 'all') && (
+                {(searchTerm || rsvpFilter !== 'all' || attendanceFilter !== 'all' || waSendFilter !== 'all' || categoryFilter !== 'all' || invitationTypeFilter !== 'all') && (
                   <div className="mt-2.5 pt-2 border-t border-slate-200/70 flex items-center justify-between text-xs text-slate-500">
                     <span>
                       Menampilkan <strong className="text-slate-800 font-mono tabular-nums">{filteredGuests.length}</strong> hasil yang cocok dengan filter
@@ -2600,6 +3053,7 @@ export default function EventDetails() {
                         setSearchTerm('');
                         setRsvpFilter('all');
                         setAttendanceFilter('all');
+                        setWaSendFilter('all');
                         setCategoryFilter('all');
                         setInvitationTypeFilter('all');
                       }}
@@ -2624,7 +3078,7 @@ export default function EventDetails() {
           ) : (
             <>
               <div className="overflow-x-auto">
-                {selectedGuestIds.length > 0 && (
+                {selectedGuestIds.length > 0 && !isEventLocked && (
                 <div className="bg-indigo-50 px-6 py-3 border-b border-indigo-100 flex flex-wrap items-center justify-between gap-2">
                   <span className="text-sm text-indigo-700 font-medium">{selectedGuestIds.length} tamu terpilih</span>
                   <div className="flex flex-wrap items-center gap-3">
@@ -2682,16 +3136,18 @@ export default function EventDetails() {
                     <th className="px-4 sm:px-5 py-3.5 text-left w-10">
                       <input 
                         type="checkbox" 
-                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                        checked={selectedGuestIds.length === filteredGuests.length && filteredGuests.length > 0}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                        checked={!isEventLocked && selectedGuestIds.length === filteredGuests.length && filteredGuests.length > 0}
+                        disabled={isEventLocked}
                         onChange={handleSelectAll}
+                        title={isEventLocked ? 'Aksi massal dikunci hingga Top-Up Paket' : undefined}
                       />
                     </th>
                     <th className="px-3 py-3.5 text-left text-xs font-semibold text-slate-600 w-12">No</th>
                     <th className="px-3 py-3.5 text-left text-xs font-semibold text-slate-600 w-40">
                       <div className="flex flex-col">
                         <span>Pangkat / Jabatan</span>
-                        {canDirectEditRank && (
+                        {canDirectEditRank && !isEventLocked && (
                           <span className="text-[10px] font-normal text-indigo-600">Ketik & Enter</span>
                         )}
                       </div>
@@ -2723,6 +3179,7 @@ export default function EventDetails() {
                       </>
                     ) : (
                       <>
+                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Status Kirim</th>
                         <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Status RSVP</th>
                         <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Status Scan</th>
                         <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Waktu Kehadiran</th>
@@ -2738,14 +3195,15 @@ export default function EventDetails() {
                       <td className="px-4 sm:px-5 py-3.5 whitespace-nowrap">
                         <input 
                           type="checkbox" 
-                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                          checked={selectedGuestIds.includes(guest.id)}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                          checked={!isEventLocked && selectedGuestIds.includes(guest.id)}
+                          disabled={isEventLocked}
                           onChange={(e) => handleSelectGuest(guest.id, e.target.checked)}
                         />
                       </td>
                       <td className="px-3 py-3.5 whitespace-nowrap text-xs text-slate-400 font-mono tabular-nums">{startIndex + index + 1}</td>
                       <td className="px-3 py-3.5 whitespace-nowrap">
-                        {canDirectEditRank ? (
+                        {canDirectEditRank && !isEventLocked ? (
                           <div className="relative flex items-center">
                             <input
                               type="text"
@@ -2850,6 +3308,40 @@ export default function EventDetails() {
                       ) : (
                         <>
                           <td className="px-4 py-3.5 whitespace-nowrap text-xs font-medium">
+                            {(() => {
+                              const dispatchEntry = guest.id ? waDispatchMap[guest.id] : undefined;
+                              const st = dispatchEntry?.status || 'pending';
+                              if (st === 'sent') {
+                                return (
+                                  <span
+                                    className="inline-flex items-center gap-1.5 text-emerald-700"
+                                    title={dispatchEntry?.sentAt ? `Terkirim ${new Date(dispatchEntry.sentAt).toLocaleString('id-ID')}` : 'Terkirim'}
+                                  >
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                    Terkirim ({dispatchEntry?.method === 'manual' ? 'Manual' : 'Fonnte'})
+                                  </span>
+                                );
+                              }
+                              if (st === 'failed') {
+                                return (
+                                  <span
+                                    className="inline-flex items-center gap-1.5 text-rose-600"
+                                    title={dispatchEntry?.lastError || 'Gagal mengirim'}
+                                  >
+                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                                    Gagal
+                                  </span>
+                                );
+                              }
+                              return (
+                                <span className="inline-flex items-center gap-1.5 text-slate-500">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                                  Belum
+                                </span>
+                              );
+                            })()}
+                          </td>
+                          <td className="px-4 py-3.5 whitespace-nowrap text-xs font-medium">
                             <span className={`inline-flex items-center gap-1.5 ${
                               guest.rsvpStatus === 'attending' ? 'text-emerald-700' : 
                               guest.rsvpStatus === 'declined' ? 'text-rose-700' : 
@@ -2913,7 +3405,15 @@ export default function EventDetails() {
                       )}
                       <td className={`px-4 sm:px-5 py-3.5 whitespace-nowrap text-sm font-medium sticky right-0 z-10 shadow-[-4px_0_12px_-3px_rgba(0,0,0,0.04)] ${selectedGuestIds.includes(guest.id) ? 'bg-indigo-50/40' : 'bg-white group-hover:bg-slate-50/90'}`}>
                         <div className="flex items-center justify-end gap-1">
-                          {activeTab === 'rsvp' ? (
+                          {isEventLocked ? (
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-100 text-slate-400 text-[11px] font-medium border border-slate-200/80 cursor-not-allowed"
+                              title="Aksi tamu dikunci sementara — lakukan Top-Up Paket untuk membuka kembali"
+                            >
+                              <Lock className="w-3 h-3" />
+                              <span>Terkunci</span>
+                            </span>
+                          ) : activeTab === 'rsvp' ? (
                             <>
                                <button
                                     onClick={() => handleEditWishesClick(guest)}
@@ -3035,6 +3535,24 @@ export default function EventDetails() {
 
       <Modal isOpen={isBlastModalOpen} onClose={() => setIsBlastModalOpen(false)} title="Blast WhatsApp">
         <div className="space-y-4">
+          <div className={`p-3 rounded-lg border text-xs ${
+            isUsingOwnFonnteToken
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : 'bg-slate-50 border-slate-200 text-slate-700'
+          }`}>
+            {isUsingOwnFonnteToken ? (
+              <span>
+                <strong>Mode Token Sendiri Aktif:</strong> Pengiriman memakai Token Fonnte {event?.fonnteToken ? 'Acara' : 'Client/Akun'} dan <strong>tidak memotong kuota Guestly</strong>.
+              </span>
+            ) : (
+              <span>
+                <strong>Mode Fallback Token Global:</strong> Akan memotong kuota WA Blast Guestly. Untuk kirim lebih terkontrol &amp; melihat preview Kartu E-Invitation, gunakan halaman{' '}
+                <Link to={`/auth/login/events/${eventId}/send-invitations`} onClick={() => setIsBlastModalOpen(false)} className="underline font-semibold text-indigo-700">
+                  Kirim Undangan
+                </Link>.
+              </span>
+            )}
+          </div>
           <p className="text-sm text-gray-600">
              Anda akan mengirim pesan WhatsApp secara bersamaan ke <strong>
                {selectedGuestIds.length > 0 
@@ -3306,7 +3824,7 @@ export default function EventDetails() {
               type="submit"
               className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700 transition-colors cursor-pointer"
             >
-              {appUser?.role === 'client' ? 'Ajukan Tambah Tamu' : 'Simpan Tamu'}
+              {isManagedClient ? 'Ajukan Tambah Tamu' : 'Simpan Tamu'}
             </button>
           </div>
         </form>
@@ -3468,7 +3986,7 @@ export default function EventDetails() {
               type="submit" 
               className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700 transition-colors"
             >
-              {appUser?.role === 'client' ? 'Ajukan Edit' : 'Simpan Perubahan'}
+              {isManagedClient ? 'Ajukan Edit' : 'Simpan Perubahan'}
             </button>
           </div>
         </form>
@@ -4014,10 +4532,15 @@ export default function EventDetails() {
                   <button
                     type="button"
                     onClick={handleExecuteBulkPrint}
-                    className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    disabled={isPreparingPrint}
+                    className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
                   >
-                    <Printer className="w-4 h-4" />
-                    <span>Cetak Sekarang ({count} Tamu)</span>
+                    {isPreparingPrint ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Printer className="w-4 h-4" />
+                    )}
+                    <span>{isPreparingPrint ? 'Menyiapkan PDF...' : `Cetak Sekarang (${count} Tamu)`}</span>
                   </button>
                 </div>
               </div>
@@ -4473,108 +4996,144 @@ export default function EventDetails() {
         </div>
       </Modal>
 
-      {/* Hidden Print Area: Supports Standard QR (20/page) & Card E-Invitation (4 or 8/page) */}
-      <div id="print-area" className="hidden bg-white text-black">
-        {(() => {
-          const selectedGuests = singlePrintGuest
-            ? [singlePrintGuest]
-            : guests.filter((g) => selectedGuestIds.includes(g.id!));
-          if (selectedGuests.length === 0) return null;
-
-          const baseUrl = window.location.origin;
-          const activeTemplate =
-            eInviteTemplates.find((t) => t.id === event?.eInviteTemplateId) ||
-            eInviteTemplates.find((t) => t.isDefault) ||
-            DEFAULT_EINVITE_TEMPLATES[0];
-          const domFav =
-            typeof document !== 'undefined'
-              ? (document.querySelector("link[rel~='icon']") as HTMLLinkElement | null)?.href || ''
-              : '';
-          const resolvedFavicon = settings?.faviconUrl || domFav || settings?.logoUrl || '';
-
-          if (printFormat === 'card-4' || printFormat === 'card-8') {
-            const perPage = printFormat === 'card-4' ? 4 : 8;
-            const cardWidthPx = printFormat === 'card-4' ? 420 : 340;
-            const pageClass = printFormat === 'card-4' ? 'a4-card-page-4' : 'a4-card-page-8';
-            const pages: Guest[][] = [];
-            for (let i = 0; i < selectedGuests.length; i += perPage) {
-              pages.push(selectedGuests.slice(i, i + perPage));
-            }
-
-            return pages.map((pageGuests, pageIndex) => (
-              <div key={pageIndex} className={pageClass}>
-                {pageGuests.map((guest) => (
-                  <div key={guest.id} className="a4-qr-card">
-                    <EInvitationCard
-                      fixedWidthPx={cardWidthPx}
-                      event={event}
-                      guest={guest}
-                      template={activeTemplate}
-                      appLogoUrl={settings?.logoUrl}
-                      appFaviconUrl={settings?.faviconUrl}
-                      appBrandName={settings?.appName || 'Guestly'}
-                      appTagline="Buku Tamu Digital"
-                    />
-                  </div>
-                ))}
-              </div>
-            ));
-          }
-
-          // Default: Standard QR Label (20 per A4 page: 4 columns x 5 rows)
-          const pages: Guest[][] = [];
-          for (let i = 0; i < selectedGuests.length; i += 20) {
-            pages.push(selectedGuests.slice(i, i + 20));
-          }
-
-          return pages.map((pageGuests, pageIndex) => (
-            <div key={pageIndex} className="a4-qr-page">
-              {pageGuests.map((guest) => {
-                const qrLink = `${baseUrl}/rsvp/${eventId}/${guest.ticketCode}`;
-
-                return (
-                  <div
-                    key={guest.id}
-                    className="a4-qr-card flex flex-col items-center justify-between p-2 border border-gray-400 rounded bg-white text-black overflow-hidden"
-                  >
-                    <div
-                      className={`w-full text-center font-bold ${
-                        guest.name.length > 36
-                          ? 'text-[8.5px]'
-                          : guest.name.length > 22
-                          ? 'text-[9.5px]'
-                          : 'text-[11px]'
-                      } leading-tight text-black break-words px-0.5`}
-                    >
-                      {guest.name}
-                    </div>
-                    <div className="relative my-0.5 flex items-center justify-center bg-white p-1">
-                      <QRCode value={qrLink} size={104} level="H" />
-                      {resolvedFavicon && (
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[22px] h-[22px] rounded bg-white shadow-2xs flex items-center justify-center p-0.5 border border-gray-100">
-                          <img
-                            src={resolvedFavicon}
-                            alt=""
-                            className="w-full h-full object-contain"
-                          />
-                        </div>
-                      )}
-                    </div>
-                    <div className="w-full text-center">
-                      <div className="text-[9px] font-semibold text-gray-700 leading-tight truncate">
-                        {guest.category || 'Tamu'}
-                      </div>
-                      <div className="text-[9px] font-mono font-bold text-black leading-tight mt-0.5 tracking-tight">
-                        {guest.ticketCode}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+      {/* Loading Overlay while Preparing A4 Print / PDF Assets */}
+      {isPreparingPrint && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/55 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-sm w-full p-6 text-center space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
+              <Loader2 className="w-6 h-6 animate-spin" />
             </div>
-          ));
-        })()}
-      </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">
+                Menyiapkan Dokumen Cetak QR
+              </h3>
+              <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                {printPrepStatus || 'Memuat data tamu, gambar kartu & tata letak A4...'}
+              </p>
+            </div>
+            <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <div className="h-full w-2/3 bg-indigo-600 rounded-full animate-pulse" />
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Mohon tunggu sejenak hingga jendela Print/PDF terbuka otomatis.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Portaled Print Area directly inside document.body (isolated from sidebar, header & h-screen overflow-hidden) */}
+      {typeof document !== 'undefined' &&
+        printRenderGuests &&
+        printRenderGuests.length > 0 &&
+        createPortal(
+          <div
+            id="print-area"
+            className={`bg-white text-black ${isPreparingPrint ? 'print-area-preloading' : ''}`}
+          >
+            {(() => {
+              const selectedGuests = printRenderGuests;
+              const baseUrl = window.location.origin;
+              const activeTemplate =
+                eInviteTemplates.find((t) => t.id === event?.eInviteTemplateId) ||
+                eInviteTemplates.find((t) => t.isDefault) ||
+                DEFAULT_EINVITE_TEMPLATES[0];
+              const domFav =
+                typeof document !== 'undefined'
+                  ? (document.querySelector("link[rel~='icon']") as HTMLLinkElement | null)?.href || ''
+                  : '';
+              const resolvedFavicon = settings?.faviconUrl || domFav || settings?.logoUrl || '';
+
+              if (printRenderFormat === 'card-4' || printRenderFormat === 'card-8') {
+                const perPage = printRenderFormat === 'card-4' ? 4 : 8;
+                const cardWidthPx = printRenderFormat === 'card-4' ? 420 : 344;
+                const cardHeightPx = Math.round((675 * cardWidthPx) / 1200);
+                const pageClass = printRenderFormat === 'card-4' ? 'a4-card-page-4' : 'a4-card-page-8';
+                const pages: Guest[][] = [];
+                for (let i = 0; i < selectedGuests.length; i += perPage) {
+                  pages.push(selectedGuests.slice(i, i + perPage));
+                }
+
+                return pages.map((pageGuests, pageIndex) => (
+                  <div key={pageIndex} className={pageClass}>
+                    {pageGuests.map((guest) => (
+                      <div
+                        key={guest.id}
+                        className="a4-qr-card"
+                        style={{ width: `${cardWidthPx}px`, height: `${cardHeightPx}px` }}
+                      >
+                        <EInvitationCard
+                          fixedWidthPx={cardWidthPx}
+                          event={event}
+                          guest={guest}
+                          template={activeTemplate}
+                          appLogoUrl={settings?.logoUrl}
+                          appFaviconUrl={settings?.faviconUrl}
+                          appBrandName={settings?.appName || 'Guestly'}
+                          appTagline="Buku Tamu Digital"
+                          className="!shadow-none"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ));
+              }
+
+              // Default: Standard QR Label (20 per A4 page: 4 columns x 5 rows)
+              const pages: Guest[][] = [];
+              for (let i = 0; i < selectedGuests.length; i += 20) {
+                pages.push(selectedGuests.slice(i, i + 20));
+              }
+
+              return pages.map((pageGuests, pageIndex) => (
+                <div key={pageIndex} className="a4-qr-page">
+                  {pageGuests.map((guest) => {
+                    const qrLink = `${baseUrl}/rsvp/${eventId}/${guest.ticketCode}`;
+
+                    return (
+                      <div
+                        key={guest.id}
+                        className="a4-qr-card flex flex-col items-center justify-between p-2 border border-gray-400 rounded bg-white text-black overflow-hidden"
+                      >
+                        <div
+                          className={`w-full text-center font-bold ${
+                            guest.name.length > 36
+                              ? 'text-[8.5px]'
+                              : guest.name.length > 22
+                              ? 'text-[9.5px]'
+                              : 'text-[11px]'
+                          } leading-tight text-black break-words px-0.5`}
+                        >
+                          {guest.name}
+                        </div>
+                        <div className="relative my-0.5 flex items-center justify-center bg-white p-1">
+                          <QRCode value={qrLink} size={104} level="H" />
+                          {resolvedFavicon && (
+                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[22px] h-[22px] rounded bg-white shadow-2xs flex items-center justify-center p-0.5 border border-gray-100">
+                              <img
+                                src={resolvedFavicon}
+                                alt=""
+                                className="w-full h-full object-contain"
+                              />
+                            </div>
+                          )}
+                        </div>
+                        <div className="w-full text-center">
+                          <div className="text-[9px] font-semibold text-gray-700 leading-tight truncate">
+                            {guest.category || 'Tamu'}
+                          </div>
+                          <div className="text-[9px] font-mono font-bold text-black leading-tight mt-0.5 tracking-tight">
+                            {guest.ticketCode}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ));
+            })()}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

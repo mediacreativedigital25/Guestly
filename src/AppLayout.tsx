@@ -32,6 +32,7 @@ import {
   Radio,
   ShieldAlert,
   Laptop,
+  Smartphone,
   ArrowRight,
   HeartHandshake,
   ListChecks,
@@ -40,17 +41,33 @@ import {
   CalendarClock,
   LayoutGrid,
   Tag,
+  Sun,
+  Moon,
+  PanelLeft,
+  Check,
 } from 'lucide-react';
 import { useCart } from './CartContext';
-import { cn, getRoleLabel, shouldHideServiceInfo, isGreetingScreenUser, canUserAccessEvent, getUserBusinessId } from './lib/utils';
+import { cn, getRoleLabel, shouldHideServiceInfo, isGreetingScreenUser, canUserAccessEvent, getUserBusinessId, isVendorManagedClient, isSelfRegisteredClient } from './lib/utils';
 import { CURRENT_APP_VERSION, LATEST_RELEASE } from './pages/Changelog';
 import { showConfirm } from './lib/alerts';
 import RouteBreadcrumbs from './components/RouteBreadcrumbs';
 import { Modal } from './components/Modal';
 import { auth, db } from './lib/firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc, getDocs, collection, query, where, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { getDeviceId, getDeviceName, isSessionExpired, getTimeRemainingMs, formatTimeRemaining, formatRelativeActivity } from './lib/deviceUtils';
+import { doc, getDoc, getDocs, collection, query, where, setDoc, updateDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import {
+  getDeviceId,
+  getDeviceName,
+  getMaxDevicesForRole,
+  normalizeUserDevices,
+  getNonExpiredDevices,
+  buildLegacyDeviceFields,
+  setLoginHandshakeActive,
+  getTimeRemainingMs,
+  formatTimeRemaining,
+  formatRelativeActivity,
+} from './lib/deviceUtils';
+import type { ActiveDeviceSession } from './types';
 
 interface TopbarNotification {
   id: string;
@@ -79,6 +96,18 @@ export default function AppLayout() {
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
   const [isCartDropdownOpen, setIsCartDropdownOpen] = useState(false);
+  const [isThemeDropdownOpen, setIsThemeDropdownOpen] = useState(false);
+  const [dashboardTheme, setDashboardTheme] = useState<'soft' | 'hybrid' | 'dark'>(() => {
+    try {
+      const saved = localStorage.getItem('guestly_dashboard_theme_v2');
+      if (saved === 'soft' || saved === 'hybrid' || saved === 'dark') {
+        return saved;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return 'soft';
+  });
   const [notifications, setNotifications] = useState<TopbarNotification[]>([]);
   const [readNotifIds, setReadNotifIds] = useState<string[]>([]);
   const [globalSearch, setGlobalSearch] = useState('');
@@ -87,8 +116,16 @@ export default function AppLayout() {
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const notifDropdownRef = useRef<HTMLDivElement>(null);
   const cartDropdownRef = useRef<HTMLDivElement>(null);
+  const themeDropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.dashboardTheme = dashboardTheme;
+    return () => {
+      delete document.documentElement.dataset.dashboardTheme;
+    };
+  }, [dashboardTheme]);
 
   // Cart context data for header cart icon
   const {
@@ -112,6 +149,9 @@ export default function AppLayout() {
       }
       if (cartDropdownRef.current && !cartDropdownRef.current.contains(e.target as Node)) {
         setIsCartDropdownOpen(false);
+      }
+      if (themeDropdownRef.current && !themeDropdownRef.current.contains(e.target as Node)) {
+        setIsThemeDropdownOpen(false);
       }
       if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
         setIsSearchOpen(false);
@@ -181,16 +221,26 @@ export default function AppLayout() {
     }
   }, [location.pathname]);
 
-  // Check if role 'client' has at least one active Wedding Planner project
+  // Check if role 'client' (under Vendor/Owner) has active Wedding Planner package/project
   useEffect(() => {
     if (!appUser || appUser.role !== 'client') {
       setHasClientWeddingPlanner(false);
       return;
     }
 
+    // Client Mandiri always sees the Wedding Planner menu (locked inside workspace until top-up/event)
+    if (isSelfRegisteredClient(appUser)) {
+      setHasClientWeddingPlanner(true);
+      return;
+    }
+
     let mounted = true;
     const checkClientPlanner = async () => {
       try {
+        if (appUser.includeWeddingPlanner === true) {
+          if (mounted) setHasClientWeddingPlanner(true);
+          return;
+        }
         const [evSnap, wpSnap] = await Promise.all([
           getDocs(collection(db, 'events')),
           getDocs(collection(db, 'wedding_planners')),
@@ -199,6 +249,7 @@ export default function AppLayout() {
         const assignedIds = Array.isArray(appUser.assignedEventIds) ? appUser.assignedEventIds : [];
 
         const clientEventIds = new Set<string>();
+        let hasEventPackagePlanner = false;
         evSnap.docs.forEach((d) => {
           const ev = d.data() as any;
           if (
@@ -207,10 +258,13 @@ export default function AppLayout() {
             assignedIds.includes(d.id)
           ) {
             clientEventIds.add(d.id);
+            if (ev.includeWeddingPlanner === true) {
+              hasEventPackagePlanner = true;
+            }
           }
         });
 
-        const hasEnrolled = wpSnap.docs.some((d) => {
+        const hasEnrolled = hasEventPackagePlanner || wpSnap.docs.some((d) => {
           const data = d.data() as any;
           const evId = data.eventId || d.id;
           return data.plannerStatus !== 'archived' && clientEventIds.has(evId);
@@ -577,6 +631,8 @@ export default function AppLayout() {
     email: string;
     name: string;
     deviceName: string;
+    activeDevices: ActiveDeviceSession[];
+    maxDevices: number;
     lastActiveAt: any;
     remainingStr: string;
     partnerId?: string | null;
@@ -611,21 +667,43 @@ export default function AppLayout() {
     setLoginError('');
     try {
       if (isRegistering) {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        const newUser = {
-          role: email === '64.iklas@gmail.com' ? 'superadmin' : 'client',
-          name: name || 'Unnamed User',
-          email: email,
-          phone: phone || null,
-          partnerId: null,
-          clientId: null,
-          eventQuota: 1,
-          guestQuota: 10,
-          activeUntil: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        };
-        await setDoc(doc(db, 'users', userCredential.user.uid), newUser);
+        setLoginHandshakeActive(true);
+        try {
+          const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+          const currentDevId = getDeviceId();
+          const currentDevName = getDeviceName();
+          const now = Date.now();
+          const initialDevices: ActiveDeviceSession[] = [
+            {
+              deviceId: currentDevId,
+              deviceName: currentDevName,
+              lastActiveAt: now,
+              loggedInAt: now,
+            },
+          ];
+          const newUser = {
+            role: email === '64.iklas@gmail.com' ? 'superadmin' : 'client',
+            name: name || 'Unnamed User',
+            email: email,
+            phone: phone || null,
+            partnerId: null,
+            clientId: null,
+            eventQuota: 0,
+            eventCredit: 0,
+            guestQuota: 0,
+            activeUntil: null,
+            activeDevices: initialDevices,
+            ...buildLegacyDeviceFields(initialDevices),
+            lastActiveAt: serverTimestamp(),
+            lastLoginAt: serverTimestamp(),
+            sessionRevoked: false,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          };
+          await setDoc(doc(db, 'users', userCredential.user.uid), newUser);
+        } finally {
+          setLoginHandshakeActive(false);
+        }
 
         if (phone) {
           import('./lib/fonnte').then(({ sendFonnteMessage }) => {
@@ -660,55 +738,110 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
           });
         }
       } else {
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        const loggedUser = userCredential.user;
+        setLoginHandshakeActive(true);
+        try {
+          const userCredential = await signInWithEmailAndPassword(auth, email, password);
+          const loggedUser = userCredential.user;
 
-        // Check single active device lock & 2-hour inactivity auto-reset
-        const userDocRef = doc(db, 'users', loggedUser.uid);
-        const userDocSnap = await getDoc(userDocRef);
+          // Atomic device limit check & 2-hour inactivity auto-reset
+          // Client role: max 2 active devices (strict block on 3rd); other standard roles: 1 device
+          const userDocRef = doc(db, 'users', loggedUser.uid);
+          const currentDevId = getDeviceId();
+          const currentDevName = getDeviceName();
 
-        if (userDocSnap.exists()) {
-          const uData = userDocSnap.data();
-
-          // Superadmin and Greeting TV accounts have multi-device bypass
-          if (uData.role !== 'superadmin' && !isGreetingScreenUser(uData)) {
-            const currentDevId = getDeviceId();
-            const activeDevId = uData.activeDeviceId;
-
-            // If an active session on a different device is recorded
-            if (activeDevId && activeDevId !== currentDevId) {
-              const expired = isSessionExpired(uData.lastActiveAt);
-
-              if (!expired) {
-                // Device is active and locked on another device!
-                await auth.signOut();
-
-                const remainingMs = getTimeRemainingMs(uData.lastActiveAt);
-                const remainingStr = formatTimeRemaining(remainingMs);
-
-                setLockedSessionInfo({
-                  email: uData.email || email,
-                  name: uData.name || 'Pengguna',
-                  deviceName: uData.activeDeviceName || 'Perangkat Lain',
-                  lastActiveAt: uData.lastActiveAt,
-                  remainingStr,
-                  partnerId: uData.partnerId,
-                });
-                setIsLoggingIn(false);
-                return;
-              }
+          const lockCheck = await runTransaction(db, async (tx) => {
+            const snap = await tx.get(userDocRef);
+            if (!snap.exists()) {
+              return { allowed: true as const };
             }
 
-            // Either no previous device, same device, or 2 hours have expired -> Claim device
-            await updateDoc(userDocRef, {
-              activeDeviceId: currentDevId,
-              activeDeviceName: getDeviceName(),
+            const uData = snap.data();
+            const isUnlimitedRole = uData.role === 'superadmin' || isGreetingScreenUser(uData);
+            const maxDevices = isUnlimitedRole ? Infinity : getMaxDevicesForRole(uData.role);
+            const activeOnes = getNonExpiredDevices(normalizeUserDevices(uData));
+            const existingIdx = activeOnes.findIndex((d) => d.deviceId === currentDevId);
+
+            // Strict block (Opsi A) when capacity is already full on other devices (skipped for unlimited roles)
+            if (!isUnlimitedRole && existingIdx === -1 && activeOnes.length >= maxDevices) {
+              return {
+                allowed: false as const,
+                uData,
+                activeOnes,
+                maxDevices,
+              };
+            }
+
+            const now = Date.now();
+            let updatedDevices: ActiveDeviceSession[] =
+              existingIdx >= 0
+                ? activeOnes.map((d, i) =>
+                    i === existingIdx
+                      ? { ...d, deviceName: currentDevName, lastActiveAt: now }
+                      : d
+                  )
+                : [
+                    ...activeOnes,
+                    {
+                      deviceId: currentDevId,
+                      deviceName: currentDevName,
+                      lastActiveAt: now,
+                      loggedInAt: now,
+                    },
+                  ];
+
+            // Keep unlimited-role device history tidy (latest 5 active devices)
+            if (isUnlimitedRole && updatedDevices.length > 5) {
+              updatedDevices = [...updatedDevices]
+                .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
+                .slice(0, 5);
+            }
+
+            tx.update(userDocRef, {
+              activeDevices: updatedDevices,
+              ...buildLegacyDeviceFields(updatedDevices),
               lastActiveAt: serverTimestamp(),
               lastLoginAt: serverTimestamp(),
               sessionRevoked: false,
               updatedAt: serverTimestamp(),
             });
+
+            return { allowed: true as const };
+          });
+
+          if (!lockCheck.allowed) {
+            await auth.signOut();
+
+            const { uData, activeOnes, maxDevices } = lockCheck;
+            // Earliest expiring device determines when the next slot will open automatically
+            const earliestLastActive = activeOnes.reduce(
+              (min, d) => (d.lastActiveAt < min ? d.lastActiveAt : min),
+              activeOnes[0]?.lastActiveAt || Date.now()
+            );
+            const latestLastActive = activeOnes.reduce(
+              (max, d) => (d.lastActiveAt > max ? d.lastActiveAt : max),
+              activeOnes[0]?.lastActiveAt || Date.now()
+            );
+            const remainingMs = getTimeRemainingMs(earliestLastActive);
+            const remainingStr = formatTimeRemaining(remainingMs);
+
+            setLockedSessionInfo({
+              email: uData.email || email,
+              name: uData.name || 'Pengguna',
+              deviceName:
+                activeOnes.map((d) => d.deviceName).join(', ') ||
+                uData.activeDeviceName ||
+                'Perangkat Lain',
+              activeDevices: activeOnes,
+              maxDevices,
+              lastActiveAt: latestLastActive,
+              remainingStr,
+              partnerId: uData.partnerId,
+            });
+            setIsLoggingIn(false);
+            return;
           }
+        } finally {
+          setLoginHandshakeActive(false);
         }
       }
       navigate('/auth/login', { replace: true });
@@ -885,7 +1018,11 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
         <Modal
           isOpen={Boolean(lockedSessionInfo)}
           onClose={() => setLockedSessionInfo(null)}
-          title="Akun Aktif di Perangkat Lain"
+          title={
+            lockedSessionInfo && lockedSessionInfo.maxDevices > 1
+              ? `Batas ${lockedSessionInfo.maxDevices} Perangkat Tercapai`
+              : 'Akun Aktif di Perangkat Lain'
+          }
           maxWidth="max-w-md"
         >
           {lockedSessionInfo && (
@@ -894,30 +1031,76 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                 <ShieldAlert className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
                 <div>
                   <h4 className="text-sm font-bold text-amber-900">
-                    Batasan 1 Akun = 1 Perangkat Aktif
+                    {lockedSessionInfo.maxDevices > 1
+                      ? `Batasan Akun Client = Maksimal ${lockedSessionInfo.maxDevices} Perangkat Aktif`
+                      : 'Batasan 1 Akun = 1 Perangkat Aktif'}
                   </h4>
                   <p className="text-xs text-amber-700 mt-1 leading-relaxed">
-                    Akun <strong>{lockedSessionInfo.email}</strong> saat ini sedang memegang sesi login aktif di perangkat lain.
+                    {lockedSessionInfo.maxDevices > 1 ? (
+                      <>
+                        Akun <strong>{lockedSessionInfo.email}</strong> saat ini sudah aktif di{' '}
+                        <strong>
+                          {lockedSessionInfo.activeDevices.length}/{lockedSessionInfo.maxDevices} perangkat
+                        </strong>
+                        . Silakan logout dari salah satu perangkat terlebih dahulu sebelum login di perangkat baru.
+                      </>
+                    ) : (
+                      <>
+                        Akun <strong>{lockedSessionInfo.email}</strong> saat ini sedang memegang sesi login aktif di perangkat lain.
+                      </>
+                    )}
                   </p>
                 </div>
               </div>
 
-              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Perangkat Aktif:</span>
-                  <span className="font-bold text-slate-800 flex items-center gap-1">
-                    <Laptop className="w-3.5 h-3.5 text-indigo-600" />
-                    {lockedSessionInfo.deviceName}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5 text-xs">
+                <div className="space-y-2">
+                  <span className="text-slate-500 font-medium block">
+                    {lockedSessionInfo.activeDevices.length > 1
+                      ? `Perangkat Aktif (${lockedSessionInfo.activeDevices.length}/${lockedSessionInfo.maxDevices}):`
+                      : 'Perangkat Aktif:'}
                   </span>
+                  {lockedSessionInfo.activeDevices.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {lockedSessionInfo.activeDevices.map((dev, idx) => {
+                        const isMob = /mobile|android|iphone|ipad/i.test(dev.deviceName);
+                        return (
+                          <div
+                            key={dev.deviceId}
+                            className="flex items-center justify-between gap-2 bg-white border border-slate-200/80 rounded-lg px-2.5 py-2"
+                          >
+                            <span className="font-semibold text-slate-800 flex items-center gap-1.5 min-w-0">
+                              {isMob ? (
+                                <Smartphone className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                              ) : (
+                                <Laptop className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                              )}
+                              <span className="truncate">
+                                {lockedSessionInfo.activeDevices.length > 1 ? `${idx + 1}. ` : ''}
+                                {dev.deviceName}
+                              </span>
+                            </span>
+                            <span className="text-[11px] text-slate-500 whitespace-nowrap shrink-0">
+                              {formatRelativeActivity(dev.lastActiveAt)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="font-bold text-slate-800 flex items-center gap-1">
+                      <Laptop className="w-3.5 h-3.5 text-indigo-600" />
+                      {lockedSessionInfo.deviceName}
+                    </div>
+                  )}
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Aktivitas Terakhir:</span>
-                  <span className="font-semibold text-slate-800">
-                    {formatRelativeActivity(lockedSessionInfo.lastActiveAt)}
+
+                <div className="flex justify-between items-center pt-2 border-t border-slate-200">
+                  <span className="text-slate-500">
+                    {lockedSessionInfo.activeDevices.length > 1
+                      ? 'Slot Terdekat Terbuka Otomatis:'
+                      : 'Auto-Reset Otomatis:'}
                   </span>
-                </div>
-                <div className="flex justify-between items-center pt-1 border-t border-slate-200">
-                  <span className="text-slate-500">Auto-Reset Otomatis:</span>
                   <span className="font-bold text-emerald-700">
                     {lockedSessionInfo.remainingStr}
                   </span>
@@ -925,7 +1108,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
               </div>
 
               <p className="text-xs text-slate-500 leading-relaxed">
-                Jika perangkat lama sudah tidak digunakan atau tertinggal, kuncian akan otomatis lepas sendiri jika tidak ada aktivitas selama 2 jam. Atau Anda dapat meminta <strong>Super Admin / Owner</strong> untuk memutuskan sesi sekarang juga.
+                Jika perangkat lama sudah tidak digunakan atau tertinggal, slot perangkat akan otomatis terlepas sendiri setelah tidak ada aktivitas selama 2 jam. Atau Anda dapat meminta <strong>Super Admin / Owner</strong> untuk memutuskan sesi sekarang juga.
               </p>
 
               <div className="pt-2 flex flex-col gap-2">
@@ -1005,6 +1188,11 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
   }
 
   const isStaff = appUser.role === 'staff';
+  const isSelfClient = isSelfRegisteredClient(appUser);
+  const isManagedClient = isVendorManagedClient(appUser);
+  const showApprovalsNav =
+    ['superadmin', 'owner', 'admin', 'partner'].includes(appUser.role) || isManagedClient;
+
   const navItems: Array<{
     name: string;
     path: string;
@@ -1015,14 +1203,17 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
     { name: isStaff ? 'Workspace Petugas' : 'Dashboard', path: '/auth/login', icon: LayoutDashboard },
     { name: 'Clients', path: '/auth/login/clients', icon: Users, role: ['superadmin', 'owner', 'partner'] },
     { name: isStaff ? 'Acara Ditugaskan' : 'Events', path: '/auth/login/events', icon: CalendarDays },
-    { name: 'Approvals', path: '/auth/login/approvals', icon: FileText, role: ['superadmin', 'owner', 'admin', 'partner', 'client'] },
+    ...(showApprovalsNav
+      ? [{ name: 'Approvals', path: '/auth/login/approvals', icon: FileText, role: ['superadmin', 'owner', 'admin', 'partner', 'client'] }]
+      : []),
     { name: 'Media', path: '/auth/login/media', icon: ImageIcon, role: ['superadmin'] },
     { name: 'White Label', path: '/auth/login/settings', icon: Settings, role: ['superadmin', 'owner', 'partner'] },
   ];
 
   const showWeddingPlannerNav =
     ['superadmin', 'owner', 'admin', 'partner'].includes(appUser.role) ||
-    (appUser.role === 'client' && hasClientWeddingPlanner);
+    isSelfClient ||
+    (isManagedClient && hasClientWeddingPlanner);
 
   const unreadCount = notifications.filter(n => !readNotifIds.includes(n.id)).length;
 
@@ -1045,7 +1236,9 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
           { label: 'Wedding Planner — Denah Meja & Tamu', path: '/auth/login/wedding-planner/seating', keywords: 'wedding planner denah meja seating kursi tamu' },
         ]
       : []),
-    { label: 'Approvals (Persetujuan Tamu)', path: '/auth/login/approvals', keywords: 'approvals persetujuan edit tamu' },
+    ...(showApprovalsNav
+      ? [{ label: 'Approvals (Persetujuan Tamu)', path: '/auth/login/approvals', keywords: 'approvals persetujuan edit tamu' }]
+      : []),
     { label: 'Profil Saya', path: '/auth/login/profile', keywords: 'profil saya akun password ubah' },
     ...(!isStaff ? [{ label: 'Changelog', path: '/auth/login/changelog', keywords: 'changelog update versi baru' }] : []),
   ].filter(item => {
@@ -1054,12 +1247,46 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
     return item.label.toLowerCase().includes(q) || item.keywords.includes(q);
   });
 
+  const isDarkTheme = dashboardTheme === 'dark';
+  const isDarkSidebar = dashboardTheme === 'hybrid' || dashboardTheme === 'dark';
+  const navActiveClass = isDarkSidebar
+    ? "bg-[#8C3A50] text-white font-semibold shadow-sm shadow-black/20"
+    : "bg-rose-50 text-[#8C3A50] font-semibold";
+  const navIdleClass = isDarkSidebar
+    ? "text-[#D4CFD2] hover:bg-white/[0.07] hover:text-[#FAF9F6]"
+    : "text-gray-700 hover:bg-gray-100 hover:text-gray-900";
+  const groupActiveClass = isDarkSidebar
+    ? "bg-white/[0.09] text-[#FAF9F6]"
+    : "bg-rose-50/70 text-[#8C3A50]";
+  const subActiveClass = isDarkSidebar
+    ? "bg-[#8C3A50]/35 text-[#FCE7EC] font-semibold"
+    : "bg-rose-50 text-[#8C3A50] font-semibold";
+  const subIdleClass = isDarkSidebar
+    ? "text-[#ABA4A8] hover:bg-white/[0.06] hover:text-[#FAF9F6]"
+    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900";
+  const chevronOpenClass = isDarkSidebar ? "rotate-90 text-[#F0A8B9]" : "rotate-90 text-[#8C3A50]";
+  const chevronClosedClass = isDarkSidebar ? "text-[#9A9297]" : "";
+  const subTreeBorderClass = isDarkSidebar ? "border-white/10" : "border-rose-100";
+
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-gray-50">
+    <div
+      data-theme={dashboardTheme}
+      className={cn(
+        "dashboard-shell flex flex-col h-screen overflow-hidden transition-colors duration-200",
+        isDarkTheme ? "bg-[#151416] text-[#ECE9E4]" : "bg-[#F5F3F4]"
+      )}
+    >
       {/* =================================================================== */}
       {/* STICKY TOPBAR (Sesuai referensi gambar dashboard.png)               */}
       {/* =================================================================== */}
-      <header className="sticky top-0 z-30 h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 sm:px-6 shrink-0">
+      <header
+        className={cn(
+          "sticky top-0 z-30 h-16 border-b flex items-center justify-between px-4 sm:px-6 shrink-0 transition-colors duration-200",
+          isDarkTheme
+            ? "bg-[#1B191C] border-[#2E2A31] shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
+            : "bg-[#FBFAFB] border-[#E7E3E5] shadow-[0_1px_2px_rgba(32,28,30,0.03)]"
+        )}
+      >
         {/* Left: Brand Logo + Sidebar Toggle + Search Bar */}
         <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
           {/* Brand Logo (Tampilan Mobile & Sidebar Diperkecil: Gunakan Favicon) */}
@@ -1076,16 +1303,18 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
               {/* Tampilan Mobile: Selalu Gunakan Favicon */}
               <span className="flex md:hidden items-center justify-center">
                 {settings?.faviconUrl || settings?.logoUrl ? (
-                  <img
-                    src={settings?.faviconUrl || '/favicon.ico'}
-                    alt="Guestly"
-                    className="w-9 h-9 object-contain"
-                    onError={(e) => {
-                      if (settings?.logoUrl && e.currentTarget.src !== settings.logoUrl) {
-                        e.currentTarget.src = settings.logoUrl;
-                      }
-                    }}
-                  />
+                  <span className={cn("w-9 h-9 flex items-center justify-center", isDarkTheme && "rounded-lg bg-[#FAF9F6] p-1")}>
+                    <img
+                      src={settings?.faviconUrl || '/favicon.ico'}
+                      alt="Guestly"
+                      className="w-full h-full object-contain"
+                      onError={(e) => {
+                        if (settings?.logoUrl && e.currentTarget.src !== settings.logoUrl) {
+                          e.currentTarget.src = settings.logoUrl;
+                        }
+                      }}
+                    />
+                  </span>
                 ) : (
                   <span className="w-9 h-9 rounded-md bg-rose-50 text-[#8C3A50] flex items-center justify-center font-bold text-lg">
                     G
@@ -1097,27 +1326,31 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
               <span className="hidden md:flex items-center">
                 {isSidebarCollapsed ? (
                   settings?.faviconUrl || settings?.logoUrl ? (
-                    <img
-                      src={settings?.faviconUrl || '/favicon.ico'}
-                      alt="Favicon"
-                      className="w-9 h-9 object-contain"
-                      onError={(e) => {
-                        if (settings?.logoUrl && e.currentTarget.src !== settings.logoUrl) {
-                          e.currentTarget.src = settings.logoUrl;
-                        }
-                      }}
-                    />
+                    <span className={cn("w-9 h-9 flex items-center justify-center", isDarkTheme && "rounded-lg bg-[#FAF9F6] p-1")}>
+                      <img
+                        src={settings?.faviconUrl || '/favicon.ico'}
+                        alt="Favicon"
+                        className="w-full h-full object-contain"
+                        onError={(e) => {
+                          if (settings?.logoUrl && e.currentTarget.src !== settings.logoUrl) {
+                            e.currentTarget.src = settings.logoUrl;
+                          }
+                        }}
+                      />
+                    </span>
                   ) : (
                     <span className="w-9 h-9 rounded-md bg-rose-50 text-[#8C3A50] flex items-center justify-center font-bold text-lg">
                       G
                     </span>
                   )
                 ) : settings?.logoUrl ? (
-                  <img
-                    src={settings.logoUrl}
-                    alt="Logo"
-                    className="h-auto max-h-10 w-auto max-w-[150px] object-contain"
-                  />
+                  <span className={cn("flex items-center", isDarkTheme && "rounded-lg bg-[#FAF9F6]/95 px-2.5 py-1 shadow-xs")}>
+                    <img
+                      src={settings.logoUrl}
+                      alt="Logo"
+                      className={cn("h-auto w-auto max-w-[145px] object-contain", isDarkTheme ? "max-h-8" : "max-h-10")}
+                    />
+                  </span>
                 ) : (
                   <span>Guestly</span>
                 )}
@@ -1168,13 +1401,32 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                   }
                 }}
                 placeholder="Cari tamu, event, atau informasi..."
-                className="w-full pl-10 pr-16 py-2 text-sm bg-gray-50/90 border border-gray-200 rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:bg-white focus:border-[#8C3A50] focus:ring-2 focus:ring-[#8C3A50]/15 transition-all"
+                className={cn(
+                  "w-full pl-10 pr-16 py-2 text-sm border rounded-lg focus:outline-none focus:border-[#8C3A50] focus:ring-2 focus:ring-[#8C3A50]/20 transition-all",
+                  isDarkTheme
+                    ? "bg-[#262329] border-[#36323B] text-[#F2EFEA] placeholder-[#8D878E] focus:bg-[#2C2930]"
+                    : "bg-[#F2EFF0] border-[#E7E3E5] text-gray-800 placeholder-gray-400 focus:bg-[#FEFEFE]"
+                )}
               />
               <div className="absolute right-2.5 flex items-center gap-1 pointer-events-none">
-                <kbd className="px-1.5 py-0.5 text-[10px] font-semibold text-gray-500 bg-white border border-gray-200 rounded shadow-2xs">
+                <kbd
+                  className={cn(
+                    "px-1.5 py-0.5 text-[10px] font-semibold border rounded shadow-2xs",
+                    isDarkTheme
+                      ? "text-[#A59FA6] bg-[#1B191C] border-[#36323B]"
+                      : "text-gray-500 bg-[#FEFEFE] border-[#E4DFE2]"
+                  )}
+                >
                   Ctrl
                 </kbd>
-                <kbd className="px-1.5 py-0.5 text-[10px] font-semibold text-gray-500 bg-white border border-gray-200 rounded shadow-2xs">
+                <kbd
+                  className={cn(
+                    "px-1.5 py-0.5 text-[10px] font-semibold border rounded shadow-2xs",
+                    isDarkTheme
+                      ? "text-[#A59FA6] bg-[#1B191C] border-[#36323B]"
+                      : "text-gray-500 bg-[#FEFEFE] border-[#E4DFE2]"
+                  )}
+                >
                   K
                 </kbd>
               </div>
@@ -1222,14 +1474,90 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
           </div>
         </div>
 
-        {/* Right: Cart, Notification Bell & Person Profile Dropdown */}
-        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+        {/* Right: Theme Switcher, Cart, Notification Bell & Person Profile Dropdown */}
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+          {/* Theme Switcher (Opsi 1 Soft Warm / Opsi 2 Hybrid / Opsi 3 Soft Dark) */}
+          <div ref={themeDropdownRef} className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setIsThemeDropdownOpen((prev) => !prev);
+                setIsCartDropdownOpen(false);
+                setIsNotifDropdownOpen(false);
+                setIsProfileDropdownOpen(false);
+                setIsSearchOpen(false);
+              }}
+              className={cn(
+                "relative p-2 rounded-full transition-all duration-200 cursor-pointer",
+                isThemeDropdownOpen
+                  ? "bg-rose-50 text-[#8C3A50] ring-2 ring-[#8C3A50]/20"
+                  : "text-gray-600 hover:text-[#8C3A50] hover:bg-rose-50/60"
+              )}
+              title="Ganti Tema Tampilan Dashboard"
+              aria-label="Ganti Tema Tampilan Dashboard"
+            >
+              {dashboardTheme === 'soft' && <Sun className="w-5 h-5" />}
+              {dashboardTheme === 'hybrid' && <PanelLeft className="w-5 h-5" />}
+              {dashboardTheme === 'dark' && <Moon className="w-5 h-5" />}
+            </button>
+
+            <div
+              className={cn(
+                "absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-200 p-1.5 z-50 origin-top-right transition-all duration-200 ease-out",
+                isThemeDropdownOpen
+                  ? "opacity-100 scale-100 translate-y-0 pointer-events-auto visible"
+                  : "opacity-0 scale-95 -translate-y-1.5 pointer-events-none invisible"
+              )}
+            >
+              <div className="px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+                Tema Dashboard
+              </div>
+              {[
+                { id: 'soft' as const, label: 'Pearl White', desc: 'Putih mutiara selaras Guestly', icon: Sun },
+                { id: 'hybrid' as const, label: 'Hybrid Contrast', desc: 'Sidebar gelap + konten putih', icon: PanelLeft },
+                { id: 'dark' as const, label: 'Soft Dark Mode', desc: 'Gelap teduh nyaman di mata', icon: Moon },
+              ].map((opt) => {
+                const Icon = opt.icon;
+                const active = dashboardTheme === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      setDashboardTheme(opt.id);
+                      try {
+                        localStorage.setItem('guestly_dashboard_theme_v2', opt.id);
+                      } catch {
+                        // ignore storage errors
+                      }
+                      setIsThemeDropdownOpen(false);
+                    }}
+                    className={cn(
+                      "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer",
+                      active
+                        ? "bg-rose-50 text-[#8C3A50]"
+                        : "text-gray-700 hover:bg-gray-100"
+                    )}
+                  >
+                    <Icon className="w-4 h-4 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-semibold leading-tight">{opt.label}</div>
+                      <div className="text-[11px] text-gray-500 truncate">{opt.desc}</div>
+                    </div>
+                    {active && <Check className="w-3.5 h-3.5 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* 0. Cart Icon & Popover (Standard Guestly Palette) */}
           <div ref={cartDropdownRef} className="relative">
             <button
               type="button"
               onClick={() => {
                 setIsCartDropdownOpen((prev) => !prev);
+                setIsThemeDropdownOpen(false);
                 setIsNotifDropdownOpen(false);
                 setIsProfileDropdownOpen(false);
                 setIsSearchOpen(false);
@@ -1652,38 +1980,68 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
           />
         )}
 
-        {/* Sidebar (Tanpa Menu Profil Saya & Tanpa Tombol Keluar karena sudah di Dropdown Person) */}
+        {/* Sidebar (Adaptif: Pearl White / Hybrid / Soft Dark Mode) */}
         <aside
           className={cn(
-            "fixed inset-y-0 left-0 z-50 md:z-20 transform bg-white flex flex-col border-r border-gray-200 transition-all duration-300 ease-in-out md:relative md:translate-x-0 md:flex-shrink-0",
+            "fixed inset-y-0 left-0 z-50 md:z-20 transform flex flex-col border-r transition-all duration-300 ease-in-out md:relative md:translate-x-0 md:flex-shrink-0",
+            isDarkTheme
+              ? "bg-[#1B191C] text-[#D4CFD2] border-[#2E2A31]"
+              : isDarkSidebar
+                ? "bg-[#1F1C1E] text-[#D4CFD2] border-[#302B2E]"
+                : "bg-[#FBFAFB] text-gray-700 border-[#E7E3E5]",
             isSidebarCollapsed ? "md:w-20" : "md:w-64",
             isMobileMenuOpen ? "translate-x-0 w-64" : "-translate-x-full md:translate-x-0"
           )}
         >
           {/* Mobile Drawer Top Header */}
-          <div className="flex md:hidden h-16 items-center justify-between px-6 border-b border-gray-200">
-            <div className="flex items-center gap-2.5 font-bold text-xl tracking-tight text-[#8C3A50] truncate">
+          <div
+            className={cn(
+              "flex md:hidden h-16 items-center justify-between px-5 border-b",
+              isDarkSidebar ? "border-white/10" : "border-[#E7E3E5]"
+            )}
+          >
+            <div
+              className={cn(
+                "flex items-center gap-2.5 font-bold text-xl tracking-tight truncate",
+                isDarkSidebar ? "text-[#FAF9F6]" : "text-[#8C3A50]"
+              )}
+            >
               {settings?.faviconUrl || settings?.logoUrl ? (
-                <img
-                  src={settings?.faviconUrl || '/favicon.ico'}
-                  alt="Guestly"
-                  className="w-9 h-9 object-contain shrink-0"
-                  onError={(e) => {
-                    if (settings?.logoUrl && e.currentTarget.src !== settings.logoUrl) {
-                      e.currentTarget.src = settings.logoUrl;
-                    }
-                  }}
-                />
+                <span className={cn("w-9 h-9 flex items-center justify-center shrink-0", isDarkSidebar && "rounded-lg bg-[#FAF9F6] p-1")}>
+                  <img
+                    src={settings?.faviconUrl || '/favicon.ico'}
+                    alt="Guestly"
+                    className="w-full h-full object-contain"
+                    onError={(e) => {
+                      if (settings?.logoUrl && e.currentTarget.src !== settings.logoUrl) {
+                        e.currentTarget.src = settings.logoUrl;
+                      }
+                    }}
+                  />
+                </span>
               ) : (
                 'Guestly'
               )}
+              <span
+                className={cn(
+                  "text-base font-semibold tracking-tight truncate",
+                  isDarkSidebar ? "text-[#FAF9F6]" : "text-[#8C3A50]"
+                )}
+              >
+                Guestly
+              </span>
             </div>
             <button
               type="button"
-              className="text-gray-500 hover:text-gray-700"
+              className={cn(
+                "p-1.5 rounded-md transition-colors cursor-pointer",
+                isDarkSidebar
+                  ? "text-[#B8B1B5] hover:text-white hover:bg-white/10"
+                  : "text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+              )}
               onClick={() => setIsMobileMenuOpen(false)}
             >
-              <X className="h-6 w-6" />
+              <X className="h-5 w-5" />
             </button>
           </div>
 
@@ -1702,11 +2060,9 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       title={isSidebarCollapsed ? item.name : undefined}
                       onClick={() => setIsMobileMenuOpen(false)}
                       className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                         isSidebarCollapsed ? "justify-center px-0" : "",
-                        isItemActive
-                          ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                          : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                        isItemActive ? navActiveClass : navIdleClass
                       )}
                     >
                       <item.icon className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
@@ -1714,7 +2070,14 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                         <div className="flex items-center justify-between flex-1 min-w-0">
                           <span className="truncate">{item.name}</span>
                           {item.badge && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 leading-none">
+                            <span
+                              className={cn(
+                                "text-[10px] font-bold px-1.5 py-0.5 rounded-full border leading-none",
+                                isDarkSidebar
+                                  ? "bg-amber-500/20 text-amber-200 border-amber-400/30"
+                                  : "bg-amber-50 text-amber-800 border-amber-200/80"
+                              )}
+                            >
                               {item.badge}
                             </span>
                           )}
@@ -1746,11 +2109,11 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                           }}
                           title={isSidebarCollapsed ? "Wedding Planner (New)" : undefined}
                           className={cn(
-                            "w-full flex items-center justify-between gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                            "w-full flex items-center justify-between gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
                             isSidebarCollapsed ? "justify-center px-0" : "",
                             isWeddingPlannerMenuOpen || location.pathname.startsWith('/auth/login/wedding-planner')
-                              ? "bg-rose-50/70 text-[#8C3A50]"
-                              : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                              ? groupActiveClass
+                              : navIdleClass
                           )}
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
@@ -1758,7 +2121,14 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             {!isSidebarCollapsed && (
                               <div className="flex items-center gap-1.5 min-w-0">
                                 <span className="whitespace-nowrap">Wedding Planner</span>
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-[#8C3A50] border border-rose-200 leading-none shrink-0">
+                                <span
+                                  className={cn(
+                                    "text-[10px] font-bold px-1.5 py-0.5 rounded-full border leading-none shrink-0",
+                                    isDarkSidebar
+                                      ? "bg-[#8C3A50]/45 text-[#FAD4DF] border-[#C25972]/45"
+                                      : "bg-rose-100 text-[#8C3A50] border-rose-200"
+                                  )}
+                                >
                                   New
                                 </span>
                               </div>
@@ -1768,7 +2138,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             <ChevronRight
                               className={cn(
                                 "h-4 w-4 shrink-0 transition-transform duration-300 ease-in-out",
-                                isWeddingPlannerMenuOpen ? "rotate-90 text-[#8C3A50]" : ""
+                                isWeddingPlannerMenuOpen ? chevronOpenClass : chevronClosedClass
                               )}
                             />
                           )}
@@ -1782,15 +2152,13 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                           )}
                         >
                           <div className="overflow-hidden">
-                            <div className="ml-8 flex flex-col gap-1 space-y-0.5 border-l border-rose-100 pl-2">
+                            <div className={cn("ml-6 flex flex-col gap-1 space-y-0.5 border-l pl-2.5", subTreeBorderClass)}>
                               <Link
                                 to="/auth/login/wedding-planner"
                                 onClick={() => setIsMobileMenuOpen(false)}
                                 className={cn(
                                   "block rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                                  location.pathname === '/auth/login/wedding-planner'
-                                    ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                                  location.pathname === '/auth/login/wedding-planner' ? subActiveClass : subIdleClass
                                 )}
                               >
                                 <div className="flex items-center gap-2">
@@ -1803,9 +2171,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                                 onClick={() => setIsMobileMenuOpen(false)}
                                 className={cn(
                                   "block rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                                  location.pathname === '/auth/login/wedding-planner/checklist'
-                                    ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                                  location.pathname === '/auth/login/wedding-planner/checklist' ? subActiveClass : subIdleClass
                                 )}
                               >
                                 <div className="flex items-center gap-2">
@@ -1818,9 +2184,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                                 onClick={() => setIsMobileMenuOpen(false)}
                                 className={cn(
                                   "block rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                                  location.pathname === '/auth/login/wedding-planner/vendors'
-                                    ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                                  location.pathname === '/auth/login/wedding-planner/vendors' ? subActiveClass : subIdleClass
                                 )}
                               >
                                 <div className="flex items-center gap-2">
@@ -1833,9 +2197,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                                 onClick={() => setIsMobileMenuOpen(false)}
                                 className={cn(
                                   "block rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                                  location.pathname === '/auth/login/wedding-planner/budget'
-                                    ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                                  location.pathname === '/auth/login/wedding-planner/budget' ? subActiveClass : subIdleClass
                                 )}
                               >
                                 <div className="flex items-center gap-2">
@@ -1848,9 +2210,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                                 onClick={() => setIsMobileMenuOpen(false)}
                                 className={cn(
                                   "block rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                                  location.pathname === '/auth/login/wedding-planner/rundown'
-                                    ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                                  location.pathname === '/auth/login/wedding-planner/rundown' ? subActiveClass : subIdleClass
                                 )}
                               >
                                 <div className="flex items-center gap-2">
@@ -1863,9 +2223,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                                 onClick={() => setIsMobileMenuOpen(false)}
                                 className={cn(
                                   "block rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                                  location.pathname === '/auth/login/wedding-planner/seating'
-                                    ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                                  location.pathname === '/auth/login/wedding-planner/seating' ? subActiveClass : subIdleClass
                                 )}
                               >
                                 <div className="flex items-center gap-2">
@@ -1882,9 +2240,9 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                 );
               })}
 
-            {/* Informasi Layanan Dropdown (Standard Guestly Palette) */}
+            {/* Informasi Layanan Dropdown */}
             {!shouldHideServiceInfo(appUser) && (
-              <div className="mt-2">
+              <div className={cn("mt-2 pt-2 border-t", isDarkSidebar ? "border-white/[0.07]" : "border-[#E7E3E5]")}>
                 <button
                   onClick={() => {
                     if (isSidebarCollapsed) {
@@ -1905,13 +2263,13 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                   }}
                   title={isSidebarCollapsed ? "Informasi Layanan" : undefined}
                   className={cn(
-                    "w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                    "w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
                     isSidebarCollapsed ? "justify-center px-0" : "",
                     isServiceInfoMenuOpen ||
                       location.pathname.startsWith('/auth/login/services') ||
                       location.pathname.startsWith('/auth/login/invoices')
-                      ? "bg-rose-50/70 text-[#8C3A50]"
-                      : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                      ? groupActiveClass
+                      : navIdleClass
                   )}
                 >
                   <div className="flex items-center gap-3">
@@ -1922,7 +2280,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     <ChevronRight
                       className={cn(
                         "h-4 w-4 transition-transform duration-300 ease-in-out",
-                        isServiceInfoMenuOpen ? "rotate-90 text-[#8C3A50]" : ""
+                        isServiceInfoMenuOpen ? chevronOpenClass : chevronClosedClass
                       )}
                     />
                   )}
@@ -1936,15 +2294,13 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                   )}
                 >
                   <div className="overflow-hidden">
-                    <div className="ml-8 flex flex-col gap-1 space-y-1">
+                    <div className={cn("ml-6 flex flex-col gap-1 space-y-0.5 border-l pl-2.5", subTreeBorderClass)}>
                       <Link
                         to="/auth/login/services/dashboard"
                         onClick={() => setIsMobileMenuOpen(false)}
                         className={cn(
                           "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                          location.pathname === '/auth/login/services/dashboard'
-                            ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                          location.pathname === '/auth/login/services/dashboard' ? subActiveClass : subIdleClass
                         )}
                       >
                         <div className="flex items-center gap-2">
@@ -1957,9 +2313,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                         onClick={() => setIsMobileMenuOpen(false)}
                         className={cn(
                           "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                          location.pathname === '/auth/login/services/catalog'
-                            ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                          location.pathname === '/auth/login/services/catalog' ? subActiveClass : subIdleClass
                         )}
                       >
                         <div className="flex items-center gap-2">
@@ -1972,9 +2326,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                         onClick={() => setIsMobileMenuOpen(false)}
                         className={cn(
                           "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                          location.pathname === '/auth/login/invoices/my'
-                            ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                          location.pathname === '/auth/login/invoices/my' ? subActiveClass : subIdleClass
                         )}
                       >
                         <div className="flex items-center gap-2">
@@ -1999,9 +2351,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                           onClick={() => setIsMobileMenuOpen(false)}
                           className={cn(
                             "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                            location.pathname === '/auth/login/services/my'
-                              ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                              : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                            location.pathname === '/auth/login/services/my' ? subActiveClass : subIdleClass
                           )}
                         >
                           <div className="flex items-center gap-2">
@@ -2018,7 +2368,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
 
             {['superadmin', 'owner', 'admin'].includes(appUser.role) && (
               <>
-                <div className="mt-2">
+                <div className="mt-1">
                   <button
                     onClick={() => {
                       if (isSidebarCollapsed) {
@@ -2039,14 +2389,15 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     }}
                     title={isSidebarCollapsed ? "Manajemen User" : undefined}
                     className={cn(
-                      "w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                      "w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
                       isSidebarCollapsed ? "justify-center px-0" : "",
                       isUserMenuOpen ||
                         location.pathname.startsWith('/auth/login/users') ||
                         location.pathname.startsWith('/auth/login/businesses') ||
+                        location.pathname.startsWith('/auth/login/sessions') ||
                         location.pathname === '/auth/login/roles'
-                        ? "bg-rose-50/70 text-[#8C3A50]"
-                        : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                        ? groupActiveClass
+                        : navIdleClass
                     )}
                   >
                     <div className="flex items-center gap-3">
@@ -2057,7 +2408,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       <ChevronRight
                         className={cn(
                           "h-4 w-4 transition-transform duration-300 ease-in-out",
-                          isUserMenuOpen ? "rotate-90 text-[#8C3A50]" : ""
+                          isUserMenuOpen ? chevronOpenClass : chevronClosedClass
                         )}
                       />
                     )}
@@ -2071,16 +2422,14 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                     )}
                   >
                     <div className="overflow-hidden">
-                      <div className="ml-8 flex flex-col gap-1 space-y-1">
+                      <div className={cn("ml-6 flex flex-col gap-1 space-y-0.5 border-l pl-2.5", subTreeBorderClass)}>
                         {appUser.role === 'superadmin' && (
                           <Link
                             to="/auth/login/businesses"
                             onClick={() => setIsMobileMenuOpen(false)}
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                              location.pathname.startsWith('/auth/login/businesses')
-                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                              location.pathname.startsWith('/auth/login/businesses') ? subActiveClass : subIdleClass
                             )}
                           >
                             Manajemen Bisnis
@@ -2091,9 +2440,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                           onClick={() => setIsMobileMenuOpen(false)}
                           className={cn(
                             "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                            location.pathname.startsWith('/auth/login/users')
-                              ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                              : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                            location.pathname.startsWith('/auth/login/users') ? subActiveClass : subIdleClass
                           )}
                         >
                           User & Petugas
@@ -2104,17 +2451,15 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             onClick={() => setIsMobileMenuOpen(false)}
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                              location.pathname.startsWith('/auth/login/sessions')
-                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                              location.pathname.startsWith('/auth/login/sessions') ? subActiveClass : subIdleClass
                             )}
                           >
                             <div className="flex items-center justify-between">
                               <span className="flex items-center gap-2">
-                                <Radio className="h-4 w-4 text-emerald-500 animate-pulse" />
+                                <Radio className="h-4 w-4 text-emerald-400 animate-pulse" />
                                 Sesi Aktif
                               </span>
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                             </div>
                           </Link>
                         )}
@@ -2124,9 +2469,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             onClick={() => setIsMobileMenuOpen(false)}
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                              location.pathname === '/auth/login/roles'
-                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                              location.pathname === '/auth/login/roles' ? subActiveClass : subIdleClass
                             )}
                           >
                             Role / Hak Akses
@@ -2138,7 +2481,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                 </div>
 
                 {appUser.role === 'superadmin' && (
-                  <div className="mt-2">
+                  <div className="mt-1">
                     <button
                       onClick={() => {
                         if (isSidebarCollapsed) {
@@ -2159,11 +2502,11 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       }}
                       title={isSidebarCollapsed ? "Admin Panel" : undefined}
                       className={cn(
-                        "w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                        "w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
                         isSidebarCollapsed ? "justify-center px-0" : "",
                         isAdminPanelMenuOpen || location.pathname.startsWith('/auth/login/admin')
-                          ? "bg-rose-50/70 text-[#8C3A50]"
-                          : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                          ? groupActiveClass
+                          : navIdleClass
                       )}
                     >
                       <div className="flex items-center gap-3">
@@ -2174,7 +2517,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                         <ChevronRight
                           className={cn(
                             "h-4 w-4 transition-transform duration-300 ease-in-out",
-                            isAdminPanelMenuOpen ? "rotate-90 text-[#8C3A50]" : ""
+                            isAdminPanelMenuOpen ? chevronOpenClass : chevronClosedClass
                           )}
                         />
                       )}
@@ -2188,15 +2531,13 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       )}
                     >
                       <div className="overflow-hidden">
-                        <div className="ml-8 flex flex-col gap-1 space-y-1">
+                        <div className={cn("ml-6 flex flex-col gap-1 space-y-0.5 border-l pl-2.5", subTreeBorderClass)}>
                           <Link
                             to="/auth/login/admin/services"
                             onClick={() => setIsMobileMenuOpen(false)}
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                              location.pathname === '/auth/login/admin/services'
-                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                              location.pathname === '/auth/login/admin/services' ? subActiveClass : subIdleClass
                             )}
                           >
                             <div className="flex items-center gap-2">
@@ -2209,9 +2550,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             onClick={() => setIsMobileMenuOpen(false)}
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                              location.pathname === '/auth/login/admin/invoice'
-                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                              location.pathname === '/auth/login/admin/invoice' ? subActiveClass : subIdleClass
                             )}
                           >
                             <div className="flex items-center gap-2">
@@ -2224,9 +2563,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             onClick={() => setIsMobileMenuOpen(false)}
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                              location.pathname === '/auth/login/admin/settings'
-                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                              location.pathname === '/auth/login/admin/settings' ? subActiveClass : subIdleClass
                             )}
                           >
                             <div className="flex items-center gap-2">
@@ -2239,9 +2576,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             onClick={() => setIsMobileMenuOpen(false)}
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                              location.pathname === '/auth/login/admin/calendar'
-                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                              location.pathname === '/auth/login/admin/calendar' ? subActiveClass : subIdleClass
                             )}
                           >
                             <div className="flex items-center gap-2">
@@ -2254,9 +2589,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             onClick={() => setIsMobileMenuOpen(false)}
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                              location.pathname === '/auth/login/admin/wa-templates'
-                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                              location.pathname === '/auth/login/admin/wa-templates' ? subActiveClass : subIdleClass
                             )}
                           >
                             <div className="flex items-center gap-2">
@@ -2269,9 +2602,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             onClick={() => setIsMobileMenuOpen(false)}
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                              location.pathname === '/auth/login/admin/e-invitation-templates'
-                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                              location.pathname === '/auth/login/admin/e-invitation-templates' ? subActiveClass : subIdleClass
                             )}
                           >
                             <div className="flex items-center gap-2">
@@ -2284,9 +2615,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                             onClick={() => setIsMobileMenuOpen(false)}
                             className={cn(
                               "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                              location.pathname === '/auth/login/admin/greeting-templates'
-                                ? "bg-rose-50 text-[#8C3A50] font-semibold"
-                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                              location.pathname === '/auth/login/admin/greeting-templates' ? subActiveClass : subIdleClass
                             )}
                           >
                             <div className="flex items-center gap-2">

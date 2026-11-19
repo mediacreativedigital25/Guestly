@@ -1,7 +1,32 @@
 import { auth, db } from './firebase';
 import { doc, getDoc } from 'firebase/firestore';
 
-function normalizePhoneTarget(raw: string): string {
+export interface FonnteDeviceCheckResult {
+  success: boolean;
+  configured: boolean;
+  connected: boolean;
+  device?: string;
+  name?: string;
+  quota?: string | number;
+  expired?: string;
+  deviceStatus?: string;
+  reason?: string;
+  error?: string;
+}
+
+export interface SendFonnteOptions {
+  strictToken?: boolean;
+  fallbackTextOnMediaError?: boolean;
+}
+
+export interface SendFonnteResult {
+  success: boolean;
+  error?: string;
+  isMediaError?: boolean;
+  usedTextFallback?: boolean;
+}
+
+export function normalizePhoneTarget(raw: string): string {
   const cleaned = String(raw || '').trim().replace(/[\s\-().]/g, '');
   if (!cleaned) return '';
   if (cleaned.startsWith('+62')) return '0' + cleaned.slice(3);
@@ -9,9 +34,20 @@ function normalizePhoneTarget(raw: string): string {
   return cleaned;
 }
 
-async function resolveClientFonnteToken(explicitToken?: string | null): Promise<string> {
+export function toWhatsAppInternational(raw: string): string {
+  const cleaned = String(raw || '').trim().replace(/[\s\-().+]/g, '');
+  if (!cleaned) return '';
+  if (cleaned.startsWith('0')) return '62' + cleaned.slice(1);
+  if (cleaned.startsWith('62')) return cleaned;
+  return cleaned;
+}
+
+async function resolveClientFonnteToken(explicitToken?: string | null, strictToken = false): Promise<string> {
   if (explicitToken && explicitToken.trim()) {
     return explicitToken.trim();
+  }
+  if (strictToken) {
+    return '';
   }
   const viteToken = ((import.meta as any).env?.VITE_FONNTE_TOKEN || '').trim();
   if (viteToken) {
@@ -44,7 +80,48 @@ async function resolveClientFonnteToken(explicitToken?: string | null): Promise<
   return '';
 }
 
-async function sendDirectToFonnte(token: string, target: string, message: string, url?: string): Promise<{ success: boolean; error?: string }> {
+export async function checkFonnteDevice(
+  token?: string | null,
+  useGlobal = false
+): Promise<FonnteDeviceCheckResult> {
+  try {
+    const cleanToken = token ? token.trim() : '';
+    const user = auth.currentUser;
+    let idToken = '';
+    if (user) {
+      idToken = await user.getIdToken();
+    }
+
+    const response = await fetch('/api/fonnte/check-device', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+      },
+      body: JSON.stringify({
+        token: cleanToken || undefined,
+        useGlobal,
+      }),
+    });
+
+    const data = await response.json();
+    return data as FonnteDeviceCheckResult;
+  } catch (err: any) {
+    return {
+      success: false,
+      configured: Boolean(token && token.trim()),
+      connected: false,
+      error: err?.message || 'Gagal memeriksa koneksi device Fonnte.',
+    };
+  }
+}
+
+async function sendDirectToFonnte(
+  token: string,
+  target: string,
+  message: string,
+  url?: string
+): Promise<SendFonnteResult> {
   try {
     const body = new URLSearchParams({
       target,
@@ -65,48 +142,69 @@ async function sendDirectToFonnte(token: string, target: string, message: string
     if (directData.status) {
       return { success: true };
     }
-    return { success: false, error: directData.reason || 'Fonnte API error' };
+    const reasonStr = String(directData.reason || 'Fonnte API error');
+    const isMediaError = /url|media|file|image|attachment|package|plan|upgrade/i.test(reasonStr);
+    return { success: false, error: reasonStr, isMediaError };
   } catch (err: any) {
     return { success: false, error: 'Gagal menghubungi API Fonnte: ' + (err?.message || String(err)) };
   }
 }
 
-export async function sendFonnteMessage(token: string | null | undefined, target: string, message: string, url?: string): Promise<{ success: boolean; error?: string }> {
+export async function sendFonnteMessage(
+  token: string | null | undefined,
+  target: string,
+  message: string,
+  url?: string,
+  options?: SendFonnteOptions
+): Promise<SendFonnteResult> {
   const normalizedTarget = normalizePhoneTarget(target);
   if (!normalizedTarget) {
-    console.warn("Target phone number is missing, cannot send message.");
-    return { success: false, error: "Nomor HP tujuan kosong atau tidak valid" };
+    console.warn('Target phone number is missing, cannot send message.');
+    return { success: false, error: 'Nomor HP tujuan kosong atau tidak valid' };
   }
 
+  let resolvedUrl = url ? String(url).trim() : undefined;
+  if (resolvedUrl && resolvedUrl.startsWith('/') && typeof window !== 'undefined') {
+    resolvedUrl = `${window.location.origin}${resolvedUrl}`;
+  }
+
+  const strictToken = Boolean(options?.strictToken);
+
   try {
-    const resolvedToken = await resolveClientFonnteToken(token);
+    const resolvedToken = await resolveClientFonnteToken(token, strictToken);
     const user = auth.currentUser;
     let idToken = '';
     if (user) {
       idToken = await user.getIdToken();
     }
 
-    const response = await fetch("/api/send-whatsapp", {
-      method: "POST",
+    const response = await fetch('/api/send-whatsapp', {
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
-        ...(idToken ? { "Authorization": `Bearer ${idToken}` } : {})
+        'Content-Type': 'application/json',
+        ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
       },
       body: JSON.stringify({
         target: normalizedTarget,
         message,
-        url,
-        token: resolvedToken || undefined
+        url: resolvedUrl,
+        token: resolvedToken || undefined,
+        strictToken,
       }),
     });
 
     if (response.status === 404 || response.status === 405) {
       if (resolvedToken) {
-        return await sendDirectToFonnte(resolvedToken, normalizedTarget, message, url);
+        const directRes = await sendDirectToFonnte(resolvedToken, normalizedTarget, message, resolvedUrl);
+        if (!directRes.success && resolvedUrl && directRes.isMediaError && options?.fallbackTextOnMediaError) {
+          const retry = await sendDirectToFonnte(resolvedToken, normalizedTarget, message, undefined);
+          return { ...retry, usedTextFallback: retry.success };
+        }
+        return directRes;
       }
       return {
         success: false,
-        error: `Token Fonnte belum diatur di menu Pengaturan > Token Fonnte.`
+        error: 'Token Fonnte belum diatur di menu Profil Saya atau Pengaturan.',
       };
     }
 
@@ -115,26 +213,39 @@ export async function sendFonnteMessage(token: string | null | undefined, target
       data = await response.json();
     } catch {
       if (resolvedToken) {
-        return await sendDirectToFonnte(resolvedToken, normalizedTarget, message, url);
+        return await sendDirectToFonnte(resolvedToken, normalizedTarget, message, resolvedUrl);
       }
       return { success: false, error: `Invalid proxy response (bukan JSON): ${response.status} ${response.statusText}` };
     }
 
     if (response.ok && data.success) {
-      console.log("WhatsApp message sent successfully via proxy:", data);
       return { success: true };
-    } else if (data?.notConfigured) {
-      if (resolvedToken) {
-        return await sendDirectToFonnte(resolvedToken, normalizedTarget, message, url);
-      }
-      console.warn("Pemberitahuan WhatsApp dilewati (Token Fonnte belum diatur di menu Pengaturan).");
-      return { success: false, error: data.error };
-    } else {
-      console.warn("WhatsApp proxy notice:", data);
-      return { success: false, error: data.error || data.reason || "Terjadi kesalahan pada server WhatsApp" };
     }
+
+    if (data?.notConfigured) {
+      if (resolvedToken) {
+        return await sendDirectToFonnte(resolvedToken, normalizedTarget, message, resolvedUrl);
+      }
+      return { success: false, error: data.error };
+    }
+
+    if (resolvedUrl && data?.isMediaError && options?.fallbackTextOnMediaError) {
+      const retryRes = await sendFonnteMessage(token, target, message, undefined, {
+        ...options,
+        fallbackTextOnMediaError: false,
+      });
+      if (retryRes.success) {
+        return { success: true, usedTextFallback: true };
+      }
+    }
+
+    return {
+      success: false,
+      error: data.error || data.reason || 'Terjadi kesalahan pada server WhatsApp',
+      isMediaError: Boolean(data?.isMediaError),
+    };
   } catch (error: any) {
-    console.warn("WhatsApp connection notice:", error);
-    return { success: false, error: error.message || "Gagal menghubungi server WhatsApp" };
+    console.warn('WhatsApp connection notice:', error);
+    return { success: false, error: error.message || 'Gagal menghubungi server WhatsApp' };
   }
 }

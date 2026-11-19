@@ -1,11 +1,127 @@
 /**
  * Device and Session Management Utilities
- * Handles single active device identification, device name detection,
- * and 2-hour inactivity expiration.
+ * Handles active device identification, multi-device quota per role
+ * (Client = 2 devices, Super Admin & Layar Sapa = unlimited, others = 1 device),
+ * device name detection, and 2-hour inactivity expiration.
  */
+
+import type { ActiveDeviceSession } from '../types';
 
 const DEVICE_STORAGE_KEY = 'guestly_device_id_v1';
 export const INACTIVITY_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+// In-memory handshake guard so AuthContext onSnapshot does not kick out
+// a newly signing-in device before AppLayout finishes validating/registering its slot.
+let loginHandshakeInProgress = false;
+
+export function setLoginHandshakeActive(active: boolean): void {
+  loginHandshakeInProgress = active;
+}
+
+export function isLoginHandshakeActive(): boolean {
+  return loginHandshakeInProgress;
+}
+
+/**
+ * Maximum concurrent active devices allowed per role.
+ * - superadmin / greeting: unlimited (Infinity)
+ * - client: 2 devices
+ * - owner / partner / admin / staff / reseller: 1 device
+ */
+export function getMaxDevicesForRole(role?: string | null): number {
+  if (role === 'superadmin' || role === 'greeting') return Infinity;
+  if (role === 'client') return 2;
+  return 1;
+}
+
+/**
+ * Safely convert Firestore Timestamp / Date / number / string into epoch ms.
+ */
+export function toMillisSafe(timestamp: any): number {
+  if (!timestamp) return 0;
+  if (typeof timestamp?.toMillis === 'function') return timestamp.toMillis();
+  if (typeof timestamp?.toDate === 'function') return timestamp.toDate().getTime();
+  if (timestamp instanceof Date) return timestamp.getTime();
+  if (typeof timestamp === 'number') return Number.isFinite(timestamp) ? timestamp : 0;
+  if (typeof timestamp === 'string') {
+    const parsed = Date.parse(timestamp);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+/**
+ * Normalize a user document's active device sessions into an array.
+ * Backward-compatible with legacy single-device fields (activeDeviceId / activeDeviceName).
+ */
+export function normalizeUserDevices(userData: any): ActiveDeviceSession[] {
+  if (!userData) return [];
+
+  if (Array.isArray(userData.activeDevices)) {
+    const seen = new Map<string, ActiveDeviceSession>();
+    for (const raw of userData.activeDevices) {
+      if (!raw || typeof raw.deviceId !== 'string' || !raw.deviceId.trim()) continue;
+      const lastActiveMs = toMillisSafe(raw.lastActiveAt) || Date.now();
+      const loggedInMs = toMillisSafe(raw.loggedInAt) || lastActiveMs;
+      const prev = seen.get(raw.deviceId);
+      if (!prev || lastActiveMs >= prev.lastActiveAt) {
+        seen.set(raw.deviceId, {
+          deviceId: raw.deviceId,
+          deviceName: raw.deviceName || 'Perangkat Web',
+          lastActiveAt: lastActiveMs,
+          loggedInAt: loggedInMs,
+        });
+      }
+    }
+    return Array.from(seen.values()).sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+  }
+
+  // Fallback for legacy documents that only have activeDeviceId
+  if (typeof userData.activeDeviceId === 'string' && userData.activeDeviceId.trim()) {
+    const lastActiveMs = toMillisSafe(userData.lastActiveAt) || Date.now();
+    const loggedInMs = toMillisSafe(userData.lastLoginAt) || lastActiveMs;
+    return [
+      {
+        deviceId: userData.activeDeviceId,
+        deviceName: userData.activeDeviceName || 'Perangkat Web',
+        lastActiveAt: lastActiveMs,
+        loggedInAt: loggedInMs,
+      },
+    ];
+  }
+
+  return [];
+}
+
+/**
+ * Filter active device sessions to only those that have NOT expired (> 2h idle).
+ */
+export function getNonExpiredDevices(
+  devices: ActiveDeviceSession[],
+  maxAgeMs: number = INACTIVITY_TIMEOUT_MS
+): ActiveDeviceSession[] {
+  return devices.filter((d) => !isSessionExpired(d.lastActiveAt, maxAgeMs));
+}
+
+/**
+ * Compute legacy single-device mirror fields from the normalized activeDevices array.
+ */
+export function buildLegacyDeviceFields(devices: ActiveDeviceSession[]): {
+  activeDeviceId: string | null;
+  activeDeviceName: string | null;
+} {
+  if (!devices || devices.length === 0) {
+    return { activeDeviceId: null, activeDeviceName: null };
+  }
+  const sorted = [...devices].sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+  return {
+    activeDeviceId: sorted[0].deviceId,
+    activeDeviceName:
+      sorted.length === 1
+        ? sorted[0].deviceName
+        : `${sorted[0].deviceName} (+${sorted.length - 1} perangkat)`,
+  };
+}
 
 /**
  * Get or create a persistent unique Device ID for the current browser/device.
@@ -70,22 +186,8 @@ export function getDeviceName(): string {
  * Returns true if expired (meaning auto-reset is allowed), false if still locked.
  */
 export function isSessionExpired(lastActiveAt: any, maxAgeMs: number = INACTIVITY_TIMEOUT_MS): boolean {
-  if (!lastActiveAt) return true; // No activity timestamp -> consider expired/free
-  
-  let timestampMs = 0;
-  if (typeof lastActiveAt?.toMillis === 'function') {
-    timestampMs = lastActiveAt.toMillis();
-  } else if (typeof lastActiveAt?.toDate === 'function') {
-    timestampMs = lastActiveAt.toDate().getTime();
-  } else if (lastActiveAt instanceof Date) {
-    timestampMs = lastActiveAt.getTime();
-  } else if (typeof lastActiveAt === 'number') {
-    timestampMs = lastActiveAt;
-  } else if (typeof lastActiveAt === 'string') {
-    timestampMs = Date.parse(lastActiveAt) || 0;
-  }
-
-  if (timestampMs <= 0) return true;
+  const timestampMs = toMillisSafe(lastActiveAt);
+  if (timestampMs <= 0) return true; // No activity timestamp -> consider expired/free
 
   const elapsedMs = Date.now() - timestampMs;
   return elapsedMs > maxAgeMs;
@@ -95,21 +197,7 @@ export function isSessionExpired(lastActiveAt: any, maxAgeMs: number = INACTIVIT
  * Get milliseconds remaining until the 2-hour inactivity auto-reset.
  */
 export function getTimeRemainingMs(lastActiveAt: any, maxAgeMs: number = INACTIVITY_TIMEOUT_MS): number {
-  if (!lastActiveAt) return 0;
-  
-  let timestampMs = 0;
-  if (typeof lastActiveAt?.toMillis === 'function') {
-    timestampMs = lastActiveAt.toMillis();
-  } else if (typeof lastActiveAt?.toDate === 'function') {
-    timestampMs = lastActiveAt.toDate().getTime();
-  } else if (lastActiveAt instanceof Date) {
-    timestampMs = lastActiveAt.getTime();
-  } else if (typeof lastActiveAt === 'number') {
-    timestampMs = lastActiveAt;
-  } else if (typeof lastActiveAt === 'string') {
-    timestampMs = Date.parse(lastActiveAt) || 0;
-  }
-
+  const timestampMs = toMillisSafe(lastActiveAt);
   if (timestampMs <= 0) return 0;
 
   const elapsedMs = Date.now() - timestampMs;
@@ -128,7 +216,7 @@ export function formatTimeRemaining(ms: number): string {
   const minutes = totalMinutes % 60;
 
   if (hours > 0) {
-    return `${hours} jam ${minutes > 0 ? `${minutes} menit` : ''}`;
+    return `${hours} jam ${minutes > 0 ? `${minutes} menit` : ''}`.trim();
   }
   return `${minutes} menit`;
 }
@@ -137,21 +225,7 @@ export function formatTimeRemaining(ms: number): string {
  * Format a timestamp into friendly relative time or date string in Indonesian.
  */
 export function formatRelativeActivity(timestamp: any): string {
-  if (!timestamp) return 'Belum ada aktivitas';
-
-  let ms = 0;
-  if (typeof timestamp?.toMillis === 'function') {
-    ms = timestamp.toMillis();
-  } else if (typeof timestamp?.toDate === 'function') {
-    ms = timestamp.toDate().getTime();
-  } else if (timestamp instanceof Date) {
-    ms = timestamp.getTime();
-  } else if (typeof timestamp === 'number') {
-    ms = timestamp;
-  } else if (typeof timestamp === 'string') {
-    ms = Date.parse(timestamp) || 0;
-  }
-
+  const ms = toMillisSafe(timestamp);
   if (ms <= 0) return 'Belum ada aktivitas';
 
   const diffSec = Math.floor((Date.now() - ms) / 1000);

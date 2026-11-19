@@ -29,6 +29,9 @@ import {
   computeDefaultActiveUntil,
   DEFAULT_EVENT_ACTIVE_DAYS,
   getUserBusinessId,
+  isEventInactiveOrExpired,
+  isSelfRegisteredClient,
+  isVendorManagedClient,
   parseFirestoreDate,
 } from '../../lib/utils';
 import { showAlert, showConfirm } from '../../lib/alerts';
@@ -60,6 +63,8 @@ import {
   UserPlus,
   Archive,
   Building2,
+  Lock,
+  ShoppingBag,
 } from 'lucide-react';
 
 export type WeddingPlannerSection =
@@ -131,6 +136,10 @@ export default function WeddingPlannerWorkspace({ section }: WeddingPlannerWorks
 
   const isManagerRole = ['superadmin', 'owner', 'admin', 'partner'].includes(appUser?.role || '');
   const isClientRole = appUser?.role === 'client';
+  const isSelfClient = isSelfRegisteredClient(appUser);
+  const isManagedClient = isVendorManagedClient(appUser);
+  const userEventCredit =
+    appUser?.eventCredit !== undefined ? appUser.eventCredit : (appUser?.eventQuota || 0);
 
   const [allAccessibleEvents, setAllAccessibleEvents] = useState<EventRecord[]>([]);
   const [accessibleClients, setAccessibleClients] = useState<Client[]>([]);
@@ -322,11 +331,16 @@ export default function WeddingPlannerWorkspace({ section }: WeddingPlannerWorks
           nextPlannerMap[evId] = { ...data, id: d.id };
         });
 
-        const enrolledList = accessibleEvList.filter((ev) => {
+        const isEventUnlockedForPlanner = (ev: EventRecord) => {
           if (!ev.id) return false;
           const pData = nextPlannerMap[ev.id];
-          return Boolean(pData) && pData?.plannerStatus !== 'archived';
-        });
+          if (Boolean(pData) && pData?.plannerStatus !== 'archived') return true;
+          if (isSelfClient && !isEventInactiveOrExpired(ev)) return true;
+          if (isManagedClient && (ev.includeWeddingPlanner === true || appUser.includeWeddingPlanner === true)) return true;
+          return false;
+        };
+
+        const enrolledList = accessibleEvList.filter(isEventUnlockedForPlanner);
 
         setPartnerNameMap(nextPartnerNameMap);
         setPartnersList(nextPartnersList);
@@ -350,14 +364,17 @@ export default function WeddingPlannerWorkspace({ section }: WeddingPlannerWorks
     fetchWorkspaceData();
   }, [appUser, reloadTrigger]);
 
-  // Events that are strictly enrolled & active in Wedding Planner
+  // Events that are enrolled & active in Wedding Planner (or unlocked by package/top-up for Client)
   const events = useMemo(() => {
     return allAccessibleEvents.filter((ev) => {
       if (!ev.id) return false;
       const pData = plannerMap[ev.id];
-      return Boolean(pData) && pData?.plannerStatus !== 'archived';
+      if (Boolean(pData) && pData?.plannerStatus !== 'archived') return true;
+      if (isSelfClient && !isEventInactiveOrExpired(ev)) return true;
+      if (isManagedClient && (ev.includeWeddingPlanner === true || appUser?.includeWeddingPlanner === true)) return true;
+      return false;
     });
-  }, [allAccessibleEvents, plannerMap]);
+  }, [allAccessibleEvents, plannerMap, isSelfClient, isManagedClient, appUser?.includeWeddingPlanner]);
 
   const clientsById = useMemo(() => {
     const map: Record<string, Client> = {};
@@ -1200,55 +1217,159 @@ export default function WeddingPlannerWorkspace({ section }: WeddingPlannerWorks
   if (events.length === 0) {
     return (
       <>
-        <div className="max-w-3xl mx-auto bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-4 shadow-xs">
-          <div className="w-14 h-14 rounded-2xl bg-rose-50 text-[#8C3A50] border border-rose-200 flex items-center justify-center mx-auto">
-            <HeartHandshake className="w-7 h-7" />
-          </div>
-          {isClientRole ? (
-            <>
-              <h2 className="text-lg font-bold text-slate-900">Layanan Wedding Planner Belum Aktif</h2>
-              <p className="text-sm text-slate-600 max-w-md mx-auto">
-                Acara Anda saat ini hanya terdaftar untuk layanan Buku Tamu Digital. Silakan hubungi tim <strong>Wedding Organizer / Admin</strong> Anda apabila ingin mengaktifkan modul Wedding Planner.
+        {isSelfClient ? (
+          <div className="max-w-4xl mx-auto bg-white rounded-2xl border border-slate-200 p-6 sm:p-10 shadow-xs space-y-8">
+            <div className="text-center space-y-3">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 text-[#8C3A50] border border-rose-200 text-xs font-bold">
+                <Lock className="w-3.5 h-3.5" />
+                <span>{userEventCredit > 0 ? 'Satu Langkah Lagi' : 'Terkunci Hingga Top-Up Paket'}</span>
+              </div>
+              <div className="w-16 h-16 rounded-2xl bg-rose-50 text-[#8C3A50] border border-rose-200 flex items-center justify-center mx-auto">
+                <HeartHandshake className="w-8 h-8" />
+              </div>
+              <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
+                {userEventCredit > 0
+                  ? 'Kuota Aktif! Buat Acara Pertama untuk Membuka Wedding Planner'
+                  : 'Wedding Planner Siap Membantu Persiapan Pernikahan Anda'}
+              </h2>
+              <p className="text-sm text-slate-600 max-w-xl mx-auto leading-relaxed">
+                {userEventCredit > 0
+                  ? 'Anda sudah memiliki kuota acara aktif. Buat acara pernikahan Anda sekarang agar seluruh 6 modul Wedding Planner otomatis terbuka dan tersinkronisasi dengan daftar tamu.'
+                  : 'Sebagai akun Client Mandiri, seluruh 6 modul Wedding Planner di bawah ini akan otomatis terbuka segera setelah Anda melakukan Top-Up Paket dan membuat acara pernikahan Anda.'}
               </p>
-              <div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {[
+                {
+                  icon: HeartHandshake,
+                  title: '1. Overview & Countdown',
+                  desc: 'Pantau sisa hari menuju Hari-H, progres tugas, dan ringkasan kesiapan acara.',
+                },
+                {
+                  icon: ListChecks,
+                  title: '2. Checklist & Tugas',
+                  desc: 'Template timeline persiapan H-6 Bulan sampai Hari-H lengkap dengan penanggung jawab.',
+                },
+                {
+                  icon: Store,
+                  title: '3. Vendor & Kontrak',
+                  desc: 'Catat kontak Venue, Catering, Dekorasi, MUA, hingga status DP & pelunasan.',
+                },
+                {
+                  icon: Wallet,
+                  title: '4. Anggaran & Pembayaran',
+                  desc: 'Kontrol total budget pernikahan, realisasi biaya, dan sisa anggaran secara otomatis.',
+                },
+                {
+                  icon: CalendarClock,
+                  title: '5. Rundown Hari-H',
+                  desc: 'Susun jadwal Persiapan, Akad/Pemberkatan, hingga Resepsi yang siap dibagikan.',
+                },
+                {
+                  icon: LayoutGrid,
+                  title: '6. Denah Meja & Tamu',
+                  desc: 'Kelola kapasitas meja VVIP, VIP & Keluarga yang terhubung langsung ke buku tamu.',
+                },
+              ].map((feat) => {
+                const FeatIcon = feat.icon;
+                return (
+                  <div
+                    key={feat.title}
+                    className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-4 space-y-1.5 relative overflow-hidden"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="w-8 h-8 rounded-lg bg-rose-50 text-[#8C3A50] border border-rose-200/70 flex items-center justify-center">
+                        <FeatIcon className="w-4 h-4" />
+                      </div>
+                      <Lock className="w-3.5 h-3.5 text-slate-400" />
+                    </div>
+                    <h3 className="text-sm font-bold text-slate-900 pt-1">{feat.title}</h3>
+                    <p className="text-xs text-slate-600 leading-relaxed">{feat.desc}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+              {userEventCredit > 0 ? (
                 <Link
-                  to="/auth/login/events"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-sm font-semibold transition-colors shadow-xs"
+                  to="/auth/login/events/add"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-sm font-bold transition-colors shadow-xs w-full sm:w-auto"
                 >
-                  <span>Kembali ke Daftar Acara</span>
+                  <Plus className="w-4 h-4" />
+                  <span>Buat Acara Pertama Anda</span>
                   <ArrowRight className="w-4 h-4" />
                 </Link>
-              </div>
-            </>
-          ) : (
-            <>
-              <h2 className="text-lg font-bold text-slate-900">Belum Ada Client di Layanan Wedding Planner</h2>
-              <p className="text-sm text-slate-600 max-w-lg mx-auto leading-relaxed">
-                Hanya client &amp; acara yang didaftarkan ke layanan Wedding Planner yang akan muncul pada dropdown seluruh menu (<strong>Overview</strong> hingga <strong>Denah Meja</strong>), terpisah dari client buku tamu reguler.
-              </p>
-              <div>
-                {section === 'overview' ? (
-                  <button
-                    type="button"
-                    onClick={openEnrollModal}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-sm font-semibold transition-colors shadow-xs cursor-pointer"
-                  >
-                    <UserPlus className="w-4 h-4" />
-                    <span>Tambah Client Wedding Planner</span>
-                  </button>
-                ) : (
+              ) : (
+                <Link
+                  to="/auth/login/services/catalog"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-sm font-bold transition-colors shadow-xs w-full sm:w-auto"
+                >
+                  <ShoppingBag className="w-4 h-4" />
+                  <span>Top-Up Paket untuk Membuka</span>
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+              )}
+              <Link
+                to="/auth/login/events"
+                className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-sm font-semibold transition-colors w-full sm:w-auto"
+              >
+                <span>Lihat Daftar Acara</span>
+              </Link>
+            </div>
+          </div>
+        ) : (
+          <div className="max-w-3xl mx-auto bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-4 shadow-xs">
+            <div className="w-14 h-14 rounded-2xl bg-rose-50 text-[#8C3A50] border border-rose-200 flex items-center justify-center mx-auto">
+              <HeartHandshake className="w-7 h-7" />
+            </div>
+            {isClientRole ? (
+              <>
+                <h2 className="text-lg font-bold text-slate-900">Paket Acara Belum Mencakup Wedding Planner</h2>
+                <p className="text-sm text-slate-600 max-w-md mx-auto">
+                  Acara Anda saat ini hanya terdaftar untuk layanan Buku Tamu Digital di bawah naungan Vendor / Owner. Silakan hubungi tim <strong>Wedding Organizer / Vendor</strong> Anda apabila ingin mengaktifkan paket Wedding Planner.
+                </p>
+                <div>
                   <Link
-                    to="/auth/login/wedding-planner"
+                    to="/auth/login/events"
                     className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-sm font-semibold transition-colors shadow-xs"
                   >
-                    <span>Buka 1. Overview untuk Tambah Client</span>
+                    <span>Kembali ke Daftar Acara</span>
                     <ArrowRight className="w-4 h-4" />
                   </Link>
-                )}
-              </div>
-            </>
-          )}
-        </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-bold text-slate-900">Belum Ada Client di Layanan Wedding Planner</h2>
+                <p className="text-sm text-slate-600 max-w-lg mx-auto leading-relaxed">
+                  Hanya client &amp; acara yang didaftarkan ke layanan Wedding Planner yang akan muncul pada dropdown seluruh menu (<strong>Overview</strong> hingga <strong>Denah Meja</strong>), terpisah dari client buku tamu reguler.
+                </p>
+                <div>
+                  {section === 'overview' ? (
+                    <button
+                      type="button"
+                      onClick={openEnrollModal}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-sm font-semibold transition-colors shadow-xs cursor-pointer"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      <span>Tambah Client Wedding Planner</span>
+                    </button>
+                  ) : (
+                    <Link
+                      to="/auth/login/wedding-planner"
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#8C3A50] hover:bg-[#722B3E] text-white text-sm font-semibold transition-colors shadow-xs"
+                    >
+                      <span>Buka 1. Overview untuk Tambah Client</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </Link>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
         {enrollModalNode}
       </>
     );

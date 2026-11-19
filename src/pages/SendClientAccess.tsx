@@ -5,12 +5,14 @@ import {
   Calendar,
   Check,
   Copy,
+  CreditCard,
   Eye,
   EyeOff,
   Image as ImageIcon,
   KeyRound,
   Link2,
   Loader2,
+  Lock,
   Mail,
   RotateCcw,
   ShieldAlert,
@@ -20,7 +22,14 @@ import {
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { useAuth } from '../AuthContext';
 import { db } from '../lib/firebase';
-import { canUserAccessEvent, getUserBusinessId, resolveMediaUrl } from '../lib/utils';
+import {
+  canUserAccessEvent,
+  getUserBusinessId,
+  isEventExpired,
+  isEventInactiveOrExpired,
+  resolveMediaUrl,
+  shouldHideServiceInfo,
+} from '../lib/utils';
 import { Client, EventRecord, User } from '../types';
 
 type MessageStyle = 'elegan' | 'ringkas';
@@ -353,6 +362,48 @@ Apabila memerlukan bantuan atau penyesuaian data, silakan hubungi tim kami kapan
           <ArrowLeft className="w-4 h-4" />
           Kembali
         </Link>
+      </div>
+    );
+  }
+
+  const isEventLocked = Boolean(
+    eventData && isEventInactiveOrExpired(eventData) && appUser?.role !== 'superadmin'
+  );
+  const eventExpired = isEventExpired(eventData);
+  const hideServiceCatalog = shouldHideServiceInfo(appUser);
+
+  if (isEventLocked && eventData) {
+    return (
+      <div className="max-w-xl mx-auto bg-white rounded-2xl border border-rose-200 p-8 text-center shadow-sm mt-8">
+        <div className="w-14 h-14 rounded-2xl bg-rose-50 text-[#8C3A50] flex items-center justify-center mx-auto mb-4">
+          <Lock className="w-7 h-7" />
+        </div>
+        <h2 className="text-lg font-bold text-slate-900 mb-2">
+          {eventExpired ? 'Masa Aktif Acara Berakhir' : 'Acara Berstatus Draft'}
+        </h2>
+        <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+          {eventExpired
+            ? `Fitur Kirim Akses Client untuk "${eventData.title}" dikunci sementara karena masa aktif acara telah berakhir. Silakan lakukan Top-Up Paket terlebih dahulu.`
+            : `Fitur Kirim Akses Client untuk "${eventData.title}" dikunci sementara karena acara masih berstatus Draft. Silakan lakukan Top-Up Paket terlebih dahulu.`}
+        </p>
+        <div className="flex flex-wrap items-center justify-center gap-2.5">
+          <Link
+            to={backTarget}
+            className="inline-flex items-center gap-2 px-4 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-xl transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Kembali
+          </Link>
+          {!hideServiceCatalog && eventData.id && (
+            <Link
+              to={`/auth/login/services/catalog?renewEvent=${eventData.id}`}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-[#8C3A50] hover:bg-[#722B3E] text-white text-sm font-semibold rounded-xl transition-colors"
+            >
+              <CreditCard className="w-4 h-4" />
+              Top-Up Paket / Perpanjang
+            </Link>
+          )}
+        </div>
       </div>
     );
   }

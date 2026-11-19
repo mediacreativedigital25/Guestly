@@ -105,6 +105,7 @@ export default function AdminInvoice() {
         let addedGuestQuota = 0;
         let addedWaBlastQuota = 0;
         let addedActiveDays = 0;
+        let grantsWeddingPlanner = Boolean(invoice.includeWeddingPlanner);
 
         // Check if invoice has structured multi-item array
         if (invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0) {
@@ -115,6 +116,9 @@ export default function AdminInvoice() {
             addedGuestQuota += (item.guestQuota || 0) * qty;
             addedWaBlastQuota += (item.waBlastQuota || 0) * qty;
             addedActiveDays += (item.activePeriodDays || 0) * qty;
+            if (item.includeWeddingPlanner) {
+              grantsWeddingPlanner = true;
+            }
           });
         } else if (invoice.serviceId) {
           // Legacy single service checkout
@@ -127,6 +131,9 @@ export default function AdminInvoice() {
             addedGuestQuota = serviceData.guestQuota || 0;
             addedWaBlastQuota = serviceData.waBlastQuota || 0;
             addedActiveDays = serviceData.activePeriodDays || 0;
+            if (serviceData.includeWeddingPlanner) {
+              grantsWeddingPlanner = true;
+            }
           }
         }
 
@@ -152,11 +159,12 @@ export default function AdminInvoice() {
           clientCredit: nextClientQuota,
           guestQuota: nextGuestQuota,
           waBlastQuota: nextWaBlastQuota,
+          ...(grantsWeddingPlanner ? { includeWeddingPlanner: true } : {}),
           ...(newActiveUntil ? { activeUntil: newActiveUntil } : {}),
           updatedAt: serverTimestamp(),
         });
 
-        if (targetEventRef && targetEventDoc && targetEventDoc.exists() && (addedActiveDays > 0 || addedEventQuota > 0)) {
+        if (targetEventRef && targetEventDoc && targetEventDoc.exists() && (addedActiveDays > 0 || addedEventQuota > 0 || grantsWeddingPlanner)) {
           const evData = targetEventDoc.data() as any;
           const now = new Date();
           const extensionDays = addedActiveDays > 0 ? addedActiveDays : 30;
@@ -166,10 +174,15 @@ export default function AdminInvoice() {
           const nextEvActiveUntil = formatDateInputYMD(nextEvExpiryDate);
 
           transaction.update(targetEventRef, {
-            activeUntil: nextEvActiveUntil,
-            activeDays: extensionDays,
-            status: 'published',
-            subscriptionStatus: 'active',
+            ...(addedActiveDays > 0 || addedEventQuota > 0
+              ? {
+                  activeUntil: nextEvActiveUntil,
+                  activeDays: extensionDays,
+                  status: 'published',
+                  subscriptionStatus: 'active',
+                }
+              : {}),
+            ...(grantsWeddingPlanner ? { includeWeddingPlanner: true } : {}),
             updatedAt: serverTimestamp(),
           });
         }
