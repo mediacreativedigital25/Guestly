@@ -90,16 +90,65 @@ export async function onRequest(context: any) {
         ? `Undangan Digital & Tiket QR Kehadiran untuk ${guestName}. Mohon tunjukkan QR Code di dalam link ini saat tiba di lokasi acara.`
         : 'Undangan Digital & Layar Sapa RSVP. Mohon tunjukkan QR Code di dalam link ini saat tiba di lokasi acara.');
 
+    const cdnDomain = (env?.CDN_DOMAIN || env?.R2_PUBLIC_URL || 'https://cdn.guestly.yulovi.com').replace(/\/+$/, '');
     let thumb =
       eventRow.thumbnail_url ||
       extra.thumbnailUrl ||
       eventRow.cover_image ||
       extra.coverImage ||
+      extra.eInvitePhotoUrl ||
       eventRow.frame_overlay_url ||
       extra.frameOverlayUrl ||
       DEFAULT_THUMBNAIL;
 
-    if (thumb && thumb.startsWith('/')) {
+    let ogWidth = '1200';
+    let ogHeight = '630';
+    let ogType = 'image/jpeg';
+
+    // Prefer personalized 1200x675 Kartu E-Invite JPEG if already rendered to R2/CDN
+    if (ticketCode) {
+      const safeEventId = eventId.replace(/[^a-zA-Z0-9_-]/g, '');
+      const safeTicket = ticketCode.replace(/[^a-zA-Z0-9_-]/g, '');
+      if (safeEventId && safeTicket) {
+        const cardKey = `einvite-cards/${safeEventId}/${safeTicket}.jpg`;
+        let hasRenderedCard = false;
+
+        if (env?.R2_BUCKET) {
+          try {
+            const headObj = await env.R2_BUCKET.head(cardKey);
+            if (headObj) hasRenderedCard = true;
+          } catch {
+            // ignore
+          }
+        }
+
+        if (!hasRenderedCard) {
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 1500);
+            const headRes = await fetch(`${cdnDomain}/${cardKey}`, {
+              method: 'HEAD',
+              signal: controller.signal,
+            });
+            clearTimeout(timer);
+            if (headRes.ok) hasRenderedCard = true;
+          } catch {
+            // ignore timeout/network error
+          }
+        }
+
+        if (hasRenderedCard) {
+          thumb = `${cdnDomain}/${cardKey}`;
+          ogWidth = '1200';
+          ogHeight = '675';
+          ogType = 'image/jpeg';
+        }
+      }
+    }
+
+    if (thumb && thumb.startsWith('/api/media/r2/')) {
+      thumb = `${cdnDomain}/${thumb.replace(/^\/api\/media\/r2\/+/, '')}`;
+    } else if (thumb && thumb.startsWith('/')) {
       thumb = `${url.origin}${thumb}`;
     }
 
@@ -123,8 +172,9 @@ export async function onRequest(context: any) {
     <meta property="og:description" content="${safeDesc}" />
     <meta property="og:image" content="${safeThumb}" />
     <meta property="og:image:secure_url" content="${safeThumb}" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content="${ogType}" />
+    <meta property="og:image:width" content="${ogWidth}" />
+    <meta property="og:image:height" content="${ogHeight}" />
     <meta property="og:url" content="${safeUrl}" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />

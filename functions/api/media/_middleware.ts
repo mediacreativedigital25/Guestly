@@ -2,10 +2,11 @@ export async function onRequest(context: any) {
   const { request, next } = context;
   const url = new URL(request.url);
   
-  // Skip authentication for health, proxy, and r2 public media endpoints
+  // Skip authentication for health, proxy, wa-thumbnail, and r2 public media endpoints
   if (
     url.pathname === '/api/media/health' ||
     url.pathname === '/api/media/proxy' ||
+    url.pathname.startsWith('/api/media/wa-thumbnail/') ||
     url.pathname.startsWith('/api/media/r2/')
   ) {
     return next();

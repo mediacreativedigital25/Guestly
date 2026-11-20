@@ -1,8 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Html5QrcodeScanner } from 'html5-qrcode';
-import { doc, serverTimestamp, collection, query, where, getDocs, getDoc, limit, runTransaction, onSnapshot, orderBy, updateDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { supabaseDb } from '../lib/supabaseDb';
 import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel, isEventExpired, isEventInactiveOrExpired, shouldHideServiceInfo } from '../lib/utils';
 import { useAuth } from '../AuthContext';
@@ -47,10 +45,11 @@ import {
   Edit3,
   X,
   Lock,
-  CreditCard
+  CreditCard,
+  RotateCcw
 } from 'lucide-react';
 import ScannerStressTestModal from '../components/ScannerStressTestModal';
-import { souvenirStorage } from '../services/souvenirStorage';
+import { souvenirStorage, parseSouvenirBatchQrPayload } from '../services/souvenirStorage';
 import { offlineSyncService, OfflineSnapshotMeta } from '../services/offlineSyncService';
 
 const playBeep = () => {
@@ -183,6 +182,9 @@ export default function Scanner() {
     pax?: number;
     souvenirNotice?: string;
     operatorName?: string;
+    batchScanId?: string;
+    batchCode?: string;
+    souvenirName?: string;
   } | null>(null);
 
   // Dedicated VIP / VVIP Alert Modal State
@@ -281,7 +283,9 @@ export default function Scanner() {
     eventId ? offlineSyncService.isForceOffline(eventId) : false
   );
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(() =>
-    eventId ? offlineSyncService.getSyncQueue(eventId).length : 0
+    eventId
+      ? offlineSyncService.getSyncQueue(eventId).length + souvenirStorage.getPendingBatchScanCount(eventId)
+      : 0
   );
   const [snapshotMeta, setSnapshotMeta] = useState<OfflineSnapshotMeta>(() =>
     eventId ? offlineSyncService.getSnapshotMeta(eventId) : { updatedAt: null, count: 0 }
@@ -300,12 +304,53 @@ export default function Scanner() {
 
   const isProcessingRef = useRef(false);
   const lastScannedCodeRef = useRef<string | null>(null);
+  const lastBatchScanRef = useRef<{ code: string; ts: number }>({ code: '', ts: 0 });
   const allGuestsRef = useRef<Guest[]>([]);
   const lastDeltaSyncRef = useRef<string>(new Date(Date.now() - 60000).toISOString());
+  const scanResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showScanResult = (
+    result: {
+      status: 'success' | 'error';
+      message: string;
+      guestName?: string;
+      category?: string;
+      tableNumber?: string;
+      pax?: number;
+      souvenirNotice?: string;
+      operatorName?: string;
+      batchScanId?: string;
+      batchCode?: string;
+      souvenirName?: string;
+    } | null,
+    autoHideMs = 5000
+  ) => {
+    if (scanResultTimerRef.current) {
+      clearTimeout(scanResultTimerRef.current);
+      scanResultTimerRef.current = null;
+    }
+    setScanResult(result);
+    if (result && autoHideMs > 0) {
+      scanResultTimerRef.current = setTimeout(() => {
+        setScanResult(null);
+        scanResultTimerRef.current = null;
+      }, autoHideMs);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (scanResultTimerRef.current) {
+        clearTimeout(scanResultTimerRef.current);
+      }
+    };
+  }, []);
 
   const refreshOfflineStatus = () => {
     if (!eventId) return;
-    setPendingSyncCount(offlineSyncService.getSyncQueue(eventId).length);
+    setPendingSyncCount(
+      offlineSyncService.getSyncQueue(eventId).length + souvenirStorage.getPendingBatchScanCount(eventId)
+    );
     setSnapshotMeta(offlineSyncService.getSnapshotMeta(eventId));
     setIsForceOffline(offlineSyncService.isForceOffline(eventId));
   };
@@ -314,10 +359,25 @@ export default function Scanner() {
     if (!eventId) return;
     allGuestsRef.current = mergedList;
     setAllGuests(mergedList);
+
+    const updatedSouvenirs = souvenirStorage.getSouvenirs(eventId, mergedList);
+    setSouvenirs(updatedSouvenirs);
+    if (updatedSouvenirs.length > 0) {
+      setSelectedSouvenirId(prev =>
+        prev && updatedSouvenirs.some(s => s.id === prev) ? prev : updatedSouvenirs[0].id!
+      );
+    }
+
+    const guestSouvenirTakenCount = mergedList.filter(g => g.souvenirTaken).length;
+    const totalDistributedFromInventory =
+      updatedSouvenirs.length > 0
+        ? updatedSouvenirs.reduce((sum, s) => sum + (s.totalDistributed || 0), 0)
+        : guestSouvenirTakenCount;
+
     setStats({
       total: mergedList.length,
       attended: mergedList.filter(g => g.attended).length,
-      souvenirTaken: mergedList.filter(g => g.souvenirTaken).length
+      souvenirTaken: Math.max(guestSouvenirTakenCount, totalDistributedFromInventory)
     });
 
     const attendedOrSouvenir = mergedList
@@ -330,11 +390,6 @@ export default function Scanner() {
       .slice(0, 15);
     setRecentScans(attendedOrSouvenir);
 
-    const updatedSouvenirs = souvenirStorage.getSouvenirs(eventId, mergedList);
-    setSouvenirs(updatedSouvenirs);
-    if (updatedSouvenirs.length > 0) {
-      setSelectedSouvenirId(prev => prev || updatedSouvenirs[0].id!);
-    }
     setSouvenirLogs(souvenirStorage.getLogs(eventId));
     refreshOfflineStatus();
   };
@@ -464,18 +519,6 @@ export default function Scanner() {
       console.warn("Supabase loadAllGuests fallback to local snapshot:", supaErr);
     }
 
-    try {
-      const guestsRef = collection(db, 'events', eventId, 'guests');
-      const snap = await getDocs(guestsRef);
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Guest));
-      if (list.length > 0 || localSnapshot.length === 0) {
-        applyGuestsListToState(list, true);
-        return;
-      }
-    } catch (e) {
-      console.warn("Failed to load guests list (falling back to offline snapshot):", e);
-    }
-
     if (localSnapshot.length > 0) {
       applyGuestsListToState(localSnapshot, false);
     }
@@ -495,11 +538,10 @@ export default function Scanner() {
       if (supaList && supaList.length > 0) {
         applyGuestsListToState(supaList, true);
         playBeep();
-        setScanResult({
+        showScanResult({
           status: 'success',
           message: `✓ Data Offline Siap! ${supaList.length.toLocaleString('id-ID')} data tamu telah disimpan ke memori perangkat ini.`
-        });
-        setTimeout(() => setScanResult(null), 4000);
+        }, 4000);
         return;
       }
     } catch (e) {
@@ -513,11 +555,10 @@ export default function Scanner() {
       offlineSyncService.saveGuestsSnapshot(eventId, fallbackList);
       refreshOfflineStatus();
       playBeep();
-      setScanResult({
+      showScanResult({
         status: 'success',
         message: `✓ Data Offline Tersimpan (${fallbackList.length.toLocaleString('id-ID')} tamu siap diverifikasi tanpa internet).`
-      });
-      setTimeout(() => setScanResult(null), 4000);
+      }, 4000);
     }
   };
 
@@ -530,11 +571,10 @@ export default function Scanner() {
       await loadAllGuests();
       if (res.synced > 0) {
         playBeep();
-        setScanResult({
+        showScanResult({
           status: 'success',
           message: `✓ Sinkronisasi Berhasil! ${res.synced} antrean scan offline telah dikirim ke server pusat.`
-        });
-        setTimeout(() => setScanResult(null), 4000);
+        }, 4000);
       }
     } finally {
       setIsSyncingQueue(false);
@@ -587,10 +627,13 @@ export default function Scanner() {
 
     // Background Auto-Sync every 5 seconds when online and not in manual Force-Offline lock
     const syncTimer = setInterval(async () => {
+      const hasPending =
+        offlineSyncService.getSyncQueue(eventId).length > 0 ||
+        souvenirStorage.getPendingBatchScanCount(eventId) > 0;
       if (
         navigator.onLine &&
         !offlineSyncService.isForceOffline(eventId) &&
-        offlineSyncService.getSyncQueue(eventId).length > 0 &&
+        hasPending &&
         !isProcessingRef.current
       ) {
         setIsSyncingQueue(true);
@@ -624,14 +667,6 @@ export default function Scanner() {
       if (ev) {
         setEventData(ev);
         offlineSyncService.saveEventSnapshot(eventId, ev);
-      } else {
-        getDoc(doc(db, 'events', eventId)).then((snap) => {
-          if (snap.exists()) {
-            const evDoc = { id: snap.id, ...snap.data() } as EventRecord;
-            setEventData(evDoc);
-            offlineSyncService.saveEventSnapshot(eventId, evDoc);
-          }
-        }).catch(() => {});
       }
     }).catch(() => {});
 
@@ -654,8 +689,7 @@ export default function Scanner() {
     const handleCompatChange = (e: any) => {
       const col = e.detail?.collectionName;
       if (col === 'settings' || col === 'events') {
-        const updatedSouvenirs = souvenirStorage.getSouvenirs(eventId, allGuestsRef.current);
-        setSouvenirs(updatedSouvenirs);
+        recomputeDerivedState(allGuestsRef.current);
       } else if (!col || col === 'guests') {
         syncRecentGuestChanges();
       }
@@ -663,8 +697,7 @@ export default function Scanner() {
 
     const handleSouvenirsChanged = (e: any) => {
       if (!e.detail?.eventId || e.detail?.eventId === eventId) {
-        const updatedSouvenirs = souvenirStorage.getSouvenirs(eventId, allGuestsRef.current);
-        setSouvenirs(updatedSouvenirs);
+        recomputeDerivedState(allGuestsRef.current);
       }
     };
 
@@ -677,6 +710,9 @@ export default function Scanner() {
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         syncRecentGuestChanges();
+        if (navigator.onLine && !offlineSyncService.isForceOffline(eventId)) {
+          souvenirStorage.hydrateFromSupabase(eventId, true);
+        }
       }
     };
 
@@ -694,6 +730,7 @@ export default function Scanner() {
         !offlineSyncService.isForceOffline(eventId)
       ) {
         syncRecentGuestChanges();
+        souvenirStorage.hydrateFromSupabase(eventId, true);
       }
     }, 10000);
 
@@ -715,33 +752,36 @@ export default function Scanner() {
 
   const activeSouvenir = souvenirs.find(s => s.id === selectedSouvenirId) || souvenirs[0];
 
-  const executeOnlineTicketTransaction = async (code: string, method: 'scan' | 'manual' = 'scan') => {
-    // 1. Direct single-row indexed query in Supabase (fallback to compat if needed)
+  const executeOnlineTicketTransaction = async (
+    code: string,
+    method: 'scan' | 'manual' = 'scan',
+    cancelSignal?: { cancelled: boolean }
+  ) => {
+    // 1. Direct single-row indexed query in Supabase scoped strictly to current eventId
     let freshGuest = await supabaseDb.getGuestByTicket(eventId!, code).catch(() => null);
     if (!freshGuest) {
-      freshGuest = await supabaseDb.getGuestById(code).catch(() => null);
+      freshGuest = await supabaseDb.getGuestById(code, eventId!).catch(() => null);
     }
     if (!freshGuest) {
-      const guestsRef = collection(db, 'events', eventId!, 'guests');
-      const q = query(guestsRef, where('ticketCode', '==', code), limit(1));
-      const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        freshGuest = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Guest;
+      const memGuest = (allGuestsRef.current.length > 0 ? allGuestsRef.current : allGuests).find(
+        (g) =>
+          (!g.eventId || g.eventId === eventId) &&
+          ((g.ticketCode || '').trim().toUpperCase() === code || g.id === code)
+      );
+      if (memGuest) {
+        freshGuest = memGuest;
       } else {
-        const memGuest = (allGuestsRef.current.length > 0 ? allGuestsRef.current : allGuests).find(
-          (g) => (g.ticketCode || '').trim().toUpperCase() === code || g.id === code
-        );
-        if (memGuest) {
-          freshGuest = memGuest;
-        } else {
-          const notFoundErr: any = new Error('TICKET_NOT_FOUND');
-          throw notFoundErr;
-        }
+        const notFoundErr: any = new Error('TICKET_NOT_FOUND');
+        throw notFoundErr;
       }
     }
 
-    if (!freshGuest || !freshGuest.id) {
-      throw new Error('GUEST_NOT_FOUND');
+    if (!freshGuest || !freshGuest.id || (freshGuest.eventId && freshGuest.eventId !== eventId)) {
+      throw new Error('TICKET_NOT_FOUND');
+    }
+
+    if (cancelSignal?.cancelled) {
+      throw new Error('BALLROOM_SIGNAL_TIMEOUT');
     }
 
     const guestDocId = freshGuest.id;
@@ -761,6 +801,7 @@ export default function Scanner() {
       attended: Boolean(freshGuest.attended || localGuest?.attended),
       attendedAt: freshGuest.attendedAt || localGuest?.attendedAt,
       checkInStaff: freshGuest.checkInStaff || localGuest?.checkInStaff,
+      checkInMethod: freshGuest.checkInMethod || localGuest?.checkInMethod,
       souvenirTaken: Boolean(freshGuest.souvenirTaken || localGuest?.souvenirTaken),
       souvenirTakenAt: freshGuest.souvenirTakenAt || localGuest?.souvenirTakenAt,
       souvenirName: freshGuest.souvenirName || localGuest?.souvenirName,
@@ -798,26 +839,42 @@ export default function Scanner() {
         throw new Error('OUT_OF_STOCK');
       }
 
-      const attendedAtVal = guestData.attendedAt || nowIso;
-      const checkInStaffVal = guestData.checkInStaff || currentOperator;
+      if (cancelSignal?.cancelled) {
+        throw new Error('BALLROOM_SIGNAL_TIMEOUT');
+      }
 
-      await supabaseDb.updateGuest(guestDocId, {
-        attended: true,
-        attendedAt: attendedAtVal,
-        checkInTime: attendedAtVal,
-        checkInStaff: checkInStaffVal,
-        souvenirTaken: true,
-        souvenirName: activeSouvenir.name,
-        souvenirTakenAt: nowIso,
-        souvenirTakenBy: currentOperator,
-      });
+      // Atomic conditional update: only updates souvenir columns (preserves gate checkInStaff & checkInMethod!)
+      const claimRes = await supabaseDb.claimGuestScan(
+        guestDocId,
+        eventId!,
+        {
+          souvenirTaken: true,
+          souvenirName: activeSouvenir.name,
+          souvenirTakenAt: nowIso,
+          souvenirTakenBy: currentOperator,
+        },
+        { requireNotSouvenirTaken: true }
+      );
+
+      if (!claimRes.claimed) {
+        const latest = await supabaseDb.getGuestById(guestDocId, eventId!).catch(() => null);
+        const localTaken = souvenirStorage.getGuestTakenInfo(eventId!, guestDocId);
+        const error: any = new Error('ALREADY_TAKEN_SOUVENIR');
+        error.souvenirTakenAt = latest?.souvenirTakenAt || localTaken?.takenAt;
+        error.guestName = latest?.name || guestData.name;
+        error.souvenirName = latest?.souvenirName || localTaken?.souvenirName || 'Souvenir';
+        error.souvenirTakenBy = latest?.souvenirTakenBy || localTaken?.takenBy;
+        if (latest) applyDeltaGuestsToState([latest]);
+        throw error;
+      }
+
+      if (cancelSignal?.cancelled) {
+        throw new Error('BALLROOM_SIGNAL_TIMEOUT');
+      }
 
       const updatedGuestObj: Guest = {
         ...guestData,
-        attended: true,
-        attendedAt: attendedAtVal,
-        checkInTime: attendedAtVal,
-        checkInStaff: checkInStaffVal,
+        ...(claimRes.guest || {}),
         souvenirTaken: true,
         souvenirId: activeSouvenir.id,
         souvenirName: activeSouvenir.name,
@@ -860,24 +917,50 @@ export default function Scanner() {
         targetSouvenirName = activeSouvenir.name;
       }
 
-      await supabaseDb.updateGuest(guestDocId, {
-        attended: true,
-        attendedAt: nowIso,
-        checkInTime: nowIso,
-        checkInStaff: currentOperator,
-        checkInMethod: method,
-        ...(souvenirGiven
-          ? {
-              souvenirTaken: true,
-              souvenirName: targetSouvenirName,
-              souvenirTakenAt: nowIso,
-              souvenirTakenBy: currentOperator,
-            }
-          : {}),
-      });
+      if (cancelSignal?.cancelled) {
+        throw new Error('BALLROOM_SIGNAL_TIMEOUT');
+      }
+
+      const claimRes = await supabaseDb.claimGuestScan(
+        guestDocId,
+        eventId!,
+        {
+          attended: true,
+          attendedAt: nowIso,
+          checkInTime: nowIso,
+          checkInStaff: currentOperator,
+          checkInMethod: method,
+          ...(souvenirGiven
+            ? {
+                souvenirTaken: true,
+                souvenirName: targetSouvenirName,
+                souvenirTakenAt: nowIso,
+                souvenirTakenBy: currentOperator,
+              }
+            : {}),
+        },
+        { requireNotAttended: true }
+      );
+
+      if (!claimRes.claimed) {
+        const latest = await supabaseDb.getGuestById(guestDocId, eventId!).catch(() => null);
+        const error: any = new Error('ALREADY_ATTENDED');
+        error.attendedAt = latest?.attendedAt;
+        error.guestName = latest?.name || guestData.name;
+        error.category = latest?.category || guestData.category;
+        error.checkInStaff = latest?.checkInStaff;
+        error.souvenirTaken = latest?.souvenirTaken || souvenirStorage.isGuestTaken(eventId!, guestDocId);
+        if (latest) applyDeltaGuestsToState([latest]);
+        throw error;
+      }
+
+      if (cancelSignal?.cancelled) {
+        throw new Error('BALLROOM_SIGNAL_TIMEOUT');
+      }
 
       const updatedGuestObj: Guest = {
         ...guestData,
+        ...(claimRes.guest || {}),
         attended: true,
         attendedAt: nowIso,
         checkInTime: nowIso,
@@ -919,16 +1002,41 @@ export default function Scanner() {
         throw error;
       }
 
-      await supabaseDb.updateGuest(guestDocId, {
-        attended: true,
-        attendedAt: nowIso,
-        checkInTime: nowIso,
-        checkInStaff: currentOperator,
-        checkInMethod: method,
-      });
+      if (cancelSignal?.cancelled) {
+        throw new Error('BALLROOM_SIGNAL_TIMEOUT');
+      }
+
+      const claimRes = await supabaseDb.claimGuestScan(
+        guestDocId,
+        eventId!,
+        {
+          attended: true,
+          attendedAt: nowIso,
+          checkInTime: nowIso,
+          checkInStaff: currentOperator,
+          checkInMethod: method,
+        },
+        { requireNotAttended: true }
+      );
+
+      if (!claimRes.claimed) {
+        const latest = await supabaseDb.getGuestById(guestDocId, eventId!).catch(() => null);
+        const error: any = new Error('ALREADY_ATTENDED');
+        error.attendedAt = latest?.attendedAt;
+        error.guestName = latest?.name || guestData.name;
+        error.category = latest?.category || guestData.category;
+        error.checkInStaff = latest?.checkInStaff;
+        if (latest) applyDeltaGuestsToState([latest]);
+        throw error;
+      }
+
+      if (cancelSignal?.cancelled) {
+        throw new Error('BALLROOM_SIGNAL_TIMEOUT');
+      }
 
       const updatedGuestObj: Guest = {
         ...guestData,
+        ...(claimRes.guest || {}),
         attended: true,
         attendedAt: nowIso,
         checkInTime: nowIso,
@@ -953,8 +1061,151 @@ export default function Scanner() {
     }
   };
 
+  // Direct Souvenir Batch QR scan handler (stiker QR di fisik souvenir: SV:XXXXX)
+  const handleSouvenirBatchScan = (batchCode: string, source: 'camera' | 'tool') => {
+    if (!eventId) return;
+    const cleanCode = batchCode.trim().toUpperCase();
+
+    if (isStaffCheckinOnly) {
+      playErrorBuzz();
+      try {
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate([200, 100, 200]);
+        }
+      } catch {}
+      showScanResult(
+        {
+          status: 'error',
+          message: `⛔ QR ini adalah QR Stiker Souvenir (Batch ${cleanCode}). Pindai stiker ini menggunakan akun/mode Pos Souvenir atau Meja Terpadu.`,
+        },
+        5000
+      );
+      return;
+    }
+
+    const now = Date.now();
+    const cooldownMs = source === 'camera' ? 2000 : 650;
+    if (lastBatchScanRef.current.code === cleanCode && now - lastBatchScanRef.current.ts < cooldownMs) {
+      return;
+    }
+    lastBatchScanRef.current = { code: cleanCode, ts: now };
+
+    const matched = souvenirStorage.findSouvenirByBatchCode(eventId, cleanCode, allGuestsRef.current);
+    if (!matched) {
+      playErrorBuzz();
+      try {
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate([200, 100, 200]);
+        }
+      } catch {}
+      showScanResult(
+        {
+          status: 'error',
+          message: `⛔ QR Batch Souvenir (${cleanCode}) tidak terdaftar pada acara ini. Pastikan stiker sesuai dengan acara yang sedang dibuka.`,
+        },
+        5000
+      );
+      return;
+    }
+
+    if ((matched.remainingStock || 0) <= 0) {
+      playErrorBuzz();
+      try {
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate([200, 100, 200]);
+        }
+      } catch {}
+      showScanResult(
+        {
+          status: 'error',
+          message: `⚠️ STOK HABIS: Stok fisik souvenir "${matched.name}" (Batch ${cleanCode}) sudah habis (0 pcs). Harap tambah stok di menu Manajemen Souvenir.`,
+        },
+        5000
+      );
+      return;
+    }
+
+    const forceOff = offlineSyncService.isForceOffline(eventId);
+    const { record, remainingAfter, processedOffline } = souvenirStorage.recordBatchScan(eventId, {
+      souvenir: matched,
+      performedBy: currentOperator,
+      notes:
+        source === 'camera'
+          ? `Scan kamera langsung stiker QR fisik souvenir (Batch ${cleanCode})`
+          : `Scan alat scanner langsung stiker QR fisik souvenir (Batch ${cleanCode})`,
+      forceOffline: forceOff,
+    });
+
+    if (matched.id) {
+      setSelectedSouvenirId(matched.id);
+    }
+
+    playSouvenirChime();
+    try {
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate([70]);
+      }
+    } catch {}
+
+    recomputeDerivedState(allGuestsRef.current);
+
+    const offlineBadge = processedOffline ? ' [Tersimpan Lokal • Auto-Sync]' : '';
+    showScanResult(
+      {
+        status: 'success',
+        message: `🎁 Souvenir "${matched.name}" diserahkan (-1 pcs) • Batch: ${cleanCode} • Sisa Stok: ${remainingAfter.toLocaleString('id-ID')} pcs${offlineBadge}`,
+        guestName: matched.name,
+        category: matched.category && matched.category !== 'Semua Tamu' ? matched.category : undefined,
+        souvenirNotice: `Batch ${cleanCode} • Sisa: ${remainingAfter} pcs`,
+        operatorName: currentOperator,
+        batchScanId: record.id,
+        batchCode: cleanCode,
+        souvenirName: matched.name,
+      },
+      6500
+    );
+  };
+
+  const handleUndoLastBatchScan = (scanId: string) => {
+    if (!eventId || !scanId) return;
+    const res = souvenirStorage.undoBatchScan(
+      eventId,
+      scanId,
+      currentOperator,
+      offlineSyncService.isForceOffline(eventId)
+    );
+    if (res.undone) {
+      playBeep();
+      recomputeDerivedState(allGuestsRef.current);
+      showScanResult(
+        {
+          status: 'success',
+          message: `↩️ Scan QR souvenir dibatalkan. Stok "${res.record?.souvenirName || 'Souvenir'}" dipulihkan +1 pcs.`,
+          operatorName: currentOperator,
+        },
+        4000
+      );
+    } else {
+      showScanResult(
+        {
+          status: 'error',
+          message: 'Scan QR souvenir ini sudah pernah dibatalkan sebelumnya.',
+        },
+        3500
+      );
+    }
+  };
+
   const processTicket = async (decodedText: string, options?: { checkInMethod?: 'scan' | 'manual' }) => {
     if (isProcessingRef.current) return;
+
+    // Auto-detect Souvenir Physical Batch QR (SV:XXXXX) — zero friction, no mode switch needed
+    const directBatchCode = parseSouvenirBatchQrPayload(decodedText);
+    if (directBatchCode) {
+      handleSouvenirBatchScan(directBatchCode, scanMode === 'tool' ? 'tool' : 'camera');
+      return;
+    }
+
     const checkInMethod = options?.checkInMethod || 'scan';
     
     // Parse the decodedText to handle URLs or raw codes (including ?v=... query or #... hash)
@@ -998,7 +1249,7 @@ export default function Scanner() {
     
     isProcessingRef.current = true;
     setIsProcessing(true);
-    setScanResult(null);
+    showScanResult(null, 0);
     lastScannedCodeRef.current = code;
 
     try {
@@ -1033,16 +1284,22 @@ export default function Scanner() {
           checkInMethod,
         });
       } else {
-        // Smart 1.5s Timeout: If ballroom signal lags > 1500ms or network fails, fallback to Local Snapshot
+        // Smart 2.5s Timeout with cancellation guard: prevents double writes/logs if ballroom signal lags
+        const cancelSignal = { cancelled: false };
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
         try {
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('BALLROOM_SIGNAL_TIMEOUT')), 1500)
-          );
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => {
+              cancelSignal.cancelled = true;
+              reject(new Error('BALLROOM_SIGNAL_TIMEOUT'));
+            }, 2500);
+          });
           transactionResult = await Promise.race([
-            executeOnlineTicketTransaction(code, checkInMethod),
+            executeOnlineTicketTransaction(code, checkInMethod, cancelSignal),
             timeoutPromise,
           ]);
         } catch (onlineErr: any) {
+          cancelSignal.cancelled = true;
           const businessErrors = [
             'NOT_CHECKED_IN',
             'ALREADY_ATTENDED',
@@ -1066,6 +1323,8 @@ export default function Scanner() {
             inMemoryGuests: currentMemGuests,
             checkInMethod,
           });
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId);
         }
       }
 
@@ -1157,7 +1416,7 @@ export default function Scanner() {
           successMessage = `✓ ${transactionResult.name} berhasil check-in & 🎁 Souvenir "${transactionResult.souvenirName}" diserahkan!${offlineBadge}`;
         }
 
-        setScanResult({ 
+        showScanResult({ 
           status: 'success', 
           message: successMessage,
           guestName: transactionResult.name,
@@ -1166,7 +1425,7 @@ export default function Scanner() {
           pax: guestPax,
           souvenirNotice: transactionResult.souvenirGiven ? `Souvenir: ${transactionResult.souvenirName}` : undefined,
           operatorName: currentOperator
-        });
+        }, 5000);
 
         // Trigger VIP / VVIP alert popup
         const guestCat = transactionResult.category || '';
@@ -1191,7 +1450,8 @@ export default function Scanner() {
           }
         }
 
-        if (!transactionResult.processedOffline) {
+        // Only broadcast arrival to Greeting Screen TV on gate check-ins (not souvenir desk scans)
+        if (!transactionResult.processedOffline && transactionResult.mode !== 'souvenir_only') {
           // Zero-latency broadcast over shared WebSocket to Greeting Screen TV & peer Scanners
           supabaseDb.broadcastGuestArrival(eventId!, {
             id: transactionResult.guestDocId,
@@ -1226,68 +1486,66 @@ export default function Scanner() {
       if (error?.message === 'NOT_CHECKED_IN') {
         const guestNameInfo = error.guestName ? `"${error.guestName}" ` : '';
         const catInfo = error.category ? `[${error.category}] ` : '';
-        setScanResult({
+        showScanResult({
           status: 'error',
           message: `⛔ DITOLAK: Tamu ${guestNameInfo}${catInfo}BELUM check-in di gate depan/resepsionis! Tamu tidak boleh mengambil souvenir di loket ini dan WAJIB kembali ke meja check-in depan terlebih dahulu.`,
           guestName: error.guestName,
           category: error.category,
           tableNumber: error.tableNumber,
           pax: error.pax
-        });
+        }, 5000);
       } else if (error?.message === 'TICKET_NOT_FOUND' || error?.message === 'TICKET_NOT_FOUND_LOCALLY') {
-        setScanResult({
+        showScanResult({
           status: 'error',
           message: stationMode === 'souvenir_only'
             ? `⛔ DITOLAK: Tiket (Kode: ${code}) tidak ditemukan dalam daftar undangan acara ini! Tamu tidak terdaftar dan tidak boleh mengambil souvenir. Arahkan tamu ke Meja Registrasi Utama di depan.`
             : `Tiket tidak valid atau tidak terdaftar di acara ini. (Kode: ${code})`
-        });
+        }, 5000);
       } else if (error?.message === 'GUEST_NOT_FOUND') {
-        setScanResult({ 
+        showScanResult({ 
           status: 'error', 
           message: stationMode === 'souvenir_only'
             ? `⛔ DITOLAK: Data tamu tidak ditemukan dalam database acara! Tamu tidak boleh mengambil souvenir dan harus melapor ke Meja Registrasi Utama di depan.`
             : `Data tiket tidak ditemukan di database acara.` 
-        });
+        }, 5000);
       } else if (error?.message === 'ALREADY_TAKEN_SOUVENIR') {
         const takenDate = parseFirestoreDate(error.souvenirTakenAt);
         const timeFormatted = takenDate 
           ? takenDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
           : '-';
         const byInfo = error.souvenirTakenBy ? ` (Petugas: ${error.souvenirTakenBy})` : '';
-        setScanResult({ 
+        showScanResult({ 
           status: 'error', 
           message: `⚠️ PERINGATAN: Tamu ${error.guestName ? `atas nama "${error.guestName}" ` : ''}SUDAH PERNAH mengambil souvenir "${error.souvenirName}" pada jam ${timeFormatted}${byInfo}! Penyerahan ditolak untuk mencegah klaim ganda.`,
           guestName: error.guestName,
           operatorName: error.souvenirTakenBy
-        });
+        }, 5000);
       } else if (error?.message === 'OUT_OF_STOCK') {
-        setScanResult({ 
+        showScanResult({ 
           status: 'error', 
           message: `⚠️ STOK HABIS: Stok fisik souvenir di sistem sudah habis (0 pcs). Harap tambahkan stok atau pilih souvenir lain.`,
           guestName: error.guestName
-        });
+        }, 5000);
       } else if (error?.message === 'NO_SOUVENIR_CONFIGURED') {
-        setScanResult({ 
+        showScanResult({ 
           status: 'error', 
           message: `⚠️ Belum ada jenis souvenir yang dipilih atau didaftarkan pada acara ini.` 
-        });
+        }, 5000);
       } else if (error?.message === 'ALREADY_ATTENDED') {
         const attendedDate = parseFirestoreDate(error.attendedAt);
         const dateFormatted = attendedDate 
           ? attendedDate.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })
           : '-';
         const byInfo = error.checkInStaff ? ` oleh petugas ${error.checkInStaff}` : '';
-        setScanResult({ 
+        showScanResult({ 
           status: 'error', 
           message: `Tiket ${error.guestName ? `atas nama "${error.guestName}" ` : ''}sudah pernah check-in pada ${dateFormatted}${byInfo}${error.souvenirTaken ? ' (Souvenir sudah diambil)' : ''}.`,
           guestName: error.guestName,
           operatorName: error.checkInStaff
-        });
-      } else if (error?.message === 'GUEST_NOT_FOUND') {
-        setScanResult({ status: 'error', message: `Data tiket tidak ditemukan di database acara.` });
+        }, 5000);
       } else {
-        setScanResult({ status: 'error', message: "Terjadi kesalahan sistem saat scan tiket"});
-        handleFirestoreError(error, OperationType.UPDATE, `events/${eventId}/guests`);
+        showScanResult({ status: 'error', message: "Terjadi kesalahan sistem saat scan tiket" }, 5000);
+        console.error('Supabase scan error:', error);
       }
     } finally {
       isProcessingRef.current = false;
@@ -1298,8 +1556,6 @@ export default function Scanner() {
           lastScannedCodeRef.current = null;
         }
       }, 2500);
-      
-      setTimeout(() => setScanResult(null), 5000);
     }
   };
 
@@ -1310,55 +1566,68 @@ export default function Scanner() {
     // Safeguard: Guest must have checked in at gate first
     if (!guest.attended) {
       playErrorBuzz();
-      setScanResult({
+      showScanResult({
         status: 'error',
         message: `⛔ DITOLAK: Tamu "${guest.name}" BELUM check-in di gate depan! Tamu tidak boleh mengambil souvenir dan harus kembali ke meja check-in awal.`,
         guestName: guest.name,
         category: guest.category
-      });
+      }, 5000);
       return;
     }
 
     if ((activeSouvenir.remainingStock || 0) <= 0) {
       playErrorBuzz();
-      setScanResult({
+      showScanResult({
         status: 'error',
         message: `⚠️ STOK HABIS: Stok fisik souvenir "${activeSouvenir.name}" sudah habis.`
-      });
+      }, 5000);
       return;
     }
 
     setIsHandingOutId(guest.id);
     const nowIso = new Date().toISOString();
     const shouldUseOffline = !navigator.onLine || offlineSyncService.isForceOffline(eventId);
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     try {
       if (shouldUseOffline) {
         throw new Error('FORCE_LOCAL_QUEUE');
       }
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('HANDOUT_TIMEOUT')), 1500)
-      );
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('HANDOUT_TIMEOUT')), 2500);
+      });
 
-      await Promise.race([
-        supabaseDb.updateGuest(guest.id, {
-          souvenirTaken: true,
-          souvenirTakenAt: nowIso,
-          souvenirName: activeSouvenir.name,
-          souvenirTakenBy: currentOperator,
-          attended: true,
-          attendedAt: typeof guest.attendedAt === 'string' ? guest.attendedAt : nowIso,
-          checkInTime: typeof guest.attendedAt === 'string' ? guest.attendedAt : nowIso,
-          checkInStaff: guest.checkInStaff || currentOperator,
-        }),
+      // Atomic souvenir claim: only touches souvenir columns (preserves gate checkInStaff & checkInMethod)
+      const claimRes = await Promise.race([
+        supabaseDb.claimGuestScan(
+          guest.id,
+          eventId,
+          {
+            souvenirTaken: true,
+            souvenirTakenAt: nowIso,
+            souvenirName: activeSouvenir.name,
+            souvenirTakenBy: currentOperator,
+          },
+          { requireNotSouvenirTaken: true }
+        ),
         timeoutPromise
       ]);
 
+      if (!claimRes.claimed) {
+        const latest = await supabaseDb.getGuestById(guest.id, eventId).catch(() => null);
+        if (latest) applyDeltaGuestsToState([latest]);
+        playErrorBuzz();
+        showScanResult({
+          status: 'error',
+          message: `⚠️ PERINGATAN: Tamu "${guest.name}" SUDAH PERNAH mengambil souvenir${latest?.souvenirTakenBy ? ` (Petugas: ${latest.souvenirTakenBy})` : ''}! Penyerahan ditolak untuk mencegah klaim ganda.`,
+          guestName: guest.name,
+          operatorName: latest?.souvenirTakenBy
+        }, 5000);
+        return;
+      }
+
       offlineSyncService.updateGuestInSnapshot(eventId, guest.id, {
-        attended: true,
-        attendedAt: guest.attendedAt || nowIso,
-        checkInStaff: guest.checkInStaff || currentOperator,
         souvenirTaken: true,
         souvenirTakenAt: nowIso,
         souvenirId: activeSouvenir.id,
@@ -1389,14 +1658,14 @@ export default function Scanner() {
       });
 
       playSouvenirChime();
-      setScanResult({
+      showScanResult({
         status: 'success',
         message: `🎁 Souvenir "${activeSouvenir.name}" berhasil diserahkan kepada ${guest.name}!`,
         guestName: guest.name,
         category: guest.category,
         souvenirNotice: `Souvenir: ${activeSouvenir.name}`,
         operatorName: currentOperator
-      });
+      }, 5000);
 
       // Trigger VIP alert popup if applicable
       const guestCat = guest.category || '';
@@ -1423,9 +1692,7 @@ export default function Scanner() {
       applyDeltaGuestsToState([
         {
           ...guest,
-          attended: true,
-          attendedAt: guest.attendedAt || nowIso,
-          checkInStaff: guest.checkInStaff || currentOperator,
+          ...(claimRes.guest || {}),
           souvenirTaken: true,
           souvenirTakenAt: nowIso,
           souvenirId: activeSouvenir.id,
@@ -1441,10 +1708,6 @@ export default function Scanner() {
       const checkInStaffVal = guest.checkInStaff || currentOperator;
 
       offlineSyncService.updateGuestInSnapshot(eventId, guest.id, {
-        attended: true,
-        attendedAt: attendedAtVal,
-        checkInTime: attendedAtVal,
-        checkInStaff: checkInStaffVal,
         souvenirTaken: true,
         souvenirTakenAt: nowIso,
         souvenirId: activeSouvenir.id,
@@ -1491,12 +1754,12 @@ export default function Scanner() {
         performedBy: currentOperator
       });
       playSouvenirChime();
-      setScanResult({
+      showScanResult({
         status: 'success',
         message: `🎁 Souvenir "${activeSouvenir.name}" berhasil dicatat untuk ${guest.name}! [Tersimpan Lokal • Auto-Sync]`,
         guestName: guest.name,
         operatorName: currentOperator
-      });
+      }, 5000);
 
       const guestCatOffline = guest.category || '';
       const isVvipOffline = /vvip/i.test(guestCatOffline);
@@ -1516,9 +1779,6 @@ export default function Scanner() {
       applyDeltaGuestsToState([
         {
           ...guest,
-          attended: true,
-          attendedAt: attendedAtVal,
-          checkInStaff: checkInStaffVal,
           souvenirTaken: true,
           souvenirTakenAt: nowIso,
           souvenirId: activeSouvenir.id,
@@ -1529,6 +1789,7 @@ export default function Scanner() {
         },
       ]);
     } finally {
+      if (timeoutId) clearTimeout(timeoutId);
       setIsHandingOutId(null);
     }
   };
@@ -1595,14 +1856,43 @@ export default function Scanner() {
     }
 
     const currentList = allGuestsRef.current.length > 0 ? allGuestsRef.current : allGuests;
+
+    // 1. Auto-detect Souvenir Batch QR (SV:XXXXX) immediately in USB/Bluetooth scanner mode
+    const directBatchFromTool = parseSouvenirBatchQrPayload(inputVal);
+    if (directBatchFromTool) {
+      handleSouvenirBatchScan(directBatchFromTool, 'tool');
+      if (inputRef.current) inputRef.current.focus();
+      return;
+    }
+
+    const isLikelyUrlOrCode =
+      /^https?:\/\//i.test(inputVal) || inputVal.includes('/');
     const exactTicket = currentList.find(
       (g) => (g.ticketCode || '').trim().toUpperCase() === inputVal.toUpperCase() || g.id === inputVal
     );
 
     if (exactTicket) {
-      await processTicket(exactTicket.ticketCode || exactTicket.id || inputVal, { checkInMethod: 'manual' });
+      // Exact ticket code / ID submitted in USB Barcode Scanner mode counts as 'scan'
+      await processTicket(exactTicket.ticketCode || exactTicket.id || inputVal, { checkInMethod: 'scan' });
       if (inputRef.current) inputRef.current.focus();
       return;
+    }
+
+    if (isLikelyUrlOrCode) {
+      // Full QR URL shot by USB/Bluetooth barcode scanner
+      await processTicket(inputVal, { checkInMethod: 'scan' });
+      if (inputRef.current) inputRef.current.focus();
+      return;
+    }
+
+    // Check if operator typed a bare 5-char souvenir batch code (e.g. K7M9P) as fallback for damaged sticker
+    if (eventId && /^[A-Z0-9]{5}$/i.test(inputVal)) {
+      const matchedSouvenirByCode = souvenirStorage.findSouvenirByBatchCode(eventId, inputVal, currentList);
+      if (matchedSouvenirByCode && matchedSouvenirByCode.qrBatchCode) {
+        handleSouvenirBatchScan(matchedSouvenirByCode.qrBatchCode, 'tool');
+        if (inputRef.current) inputRef.current.focus();
+        return;
+      }
     }
 
     // Check if input matches guest name
@@ -1617,8 +1907,8 @@ export default function Scanner() {
       setScanMode('search');
       setManualGuestSearch(inputVal);
     } else {
-      // Fallback: send as raw code to trigger proper validation/not found message
-      await processTicket(inputVal, { checkInMethod: 'manual' });
+      // Fallback: send as raw ticket code to trigger proper validation/not found message
+      await processTicket(inputVal, { checkInMethod: 'scan' });
     }
 
     if (inputRef.current) {
@@ -1626,17 +1916,19 @@ export default function Scanner() {
     }
   };
 
-  // Calculations for differentiated statistics
-  const checkinPercentage = stats.total > 0 ? Math.round((stats.attended / stats.total) * 100) : 0;
-  const souvenirPercentage = stats.attended > 0 ? Math.round((stats.souvenirTaken / stats.attended) * 100) : 0;
-  const waitingForSouvenirCount = Math.max(0, stats.attended - stats.souvenirTaken);
-  const unattendedCount = Math.max(0, stats.total - stats.attended);
-
   // Waiting guests list for Souvenir Desk (guests attended at gate who haven't taken souvenir)
-  const waitingGuests = allGuests.filter(g => {
+  const allWaitingForSouvenir = allGuests.filter(g => {
     const isTaken = g.souvenirTaken || souvenirStorage.isGuestTaken(eventId || '', g.id || '');
     return g.attended && !isTaken;
-  }).filter(g => {
+  });
+
+  // Calculations for differentiated statistics
+  const checkinPercentage = stats.total > 0 ? Math.round((stats.attended / stats.total) * 100) : 0;
+  const souvenirPercentage = stats.attended > 0 ? Math.min(100, Math.round((stats.souvenirTaken / stats.attended) * 100)) : 0;
+  const waitingForSouvenirCount = allWaitingForSouvenir.length;
+  const unattendedCount = Math.max(0, stats.total - stats.attended);
+
+  const waitingGuests = allWaitingForSouvenir.filter(g => {
     if (!waitingSearch.trim()) return true;
     const term = waitingSearch.toLowerCase();
     return (
@@ -2213,10 +2505,19 @@ export default function Scanner() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 className="text-base font-bold">
                 {scanResult.status === 'success' 
-                  ? (stationMode === 'souvenir_only' ? '✓ Souvenir Berhasil Diserahkan' : '✓ Check-in Berhasil') 
+                  ? (scanResult.batchScanId
+                      ? '✓ Souvenir Fisik Diserahkan (-1 Stok)'
+                      : stationMode === 'souvenir_only'
+                      ? '✓ Souvenir Berhasil Diserahkan'
+                      : '✓ Check-in Berhasil') 
                   : (stationMode === 'souvenir_only' ? '✕ Penyerahan Souvenir Ditolak' : '✕ Verifikasi Gagal')}
               </h4>
               <div className="flex flex-wrap items-center gap-1.5">
+                {scanResult.batchCode && (
+                  <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">
+                    QR Batch: {scanResult.batchCode}
+                  </span>
+                )}
                 {scanResult.category && (
                   <span className={`text-xs font-bold px-2.5 py-0.5 rounded border ${
                     /vvip/i.test(scanResult.category)
@@ -2243,11 +2544,23 @@ export default function Scanner() {
             <p className="text-sm font-medium mt-1 leading-relaxed">
               {scanResult.message}
             </p>
-            {scanResult.operatorName && (
-              <p className="text-xs font-semibold mt-1.5 opacity-85">
-                👤 Dicatat oleh petugas: {scanResult.operatorName}
-              </p>
-            )}
+            <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
+              {scanResult.operatorName ? (
+                <p className="text-xs font-semibold opacity-85">
+                  👤 Dicatat oleh petugas: {scanResult.operatorName}
+                </p>
+              ) : <span />}
+              {scanResult.status === 'success' && scanResult.batchScanId && (
+                <button
+                  type="button"
+                  onClick={() => handleUndoLastBatchScan(scanResult.batchScanId!)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white hover:bg-rose-50 text-rose-700 border border-rose-300 text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Batalkan (+1 Stok)</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -2269,9 +2582,9 @@ export default function Scanner() {
               <div id="reader" className="w-full max-w-xl mx-auto min-h-[340px] overflow-hidden rounded-md border border-slate-200 [&>video]:object-cover [&_button]:px-4 [&_button]:py-2 [&_button]:bg-indigo-600 [&_button]:text-white [&_button]:rounded-md [&_button]:hover:bg-indigo-700 [&_button]:transition-colors [&_button]:mb-4 [&_button]:font-medium [&_a]:text-indigo-600 [&_a]:underline [&_a]:mt-4 [&_a]:block [&_a]:cursor-pointer [&_#html5-qrcode-anchor-scan-type-change]:mt-4 [&_span]:block [&_span]:mb-3"></div>
               <p className="text-center text-slate-500 text-xs mt-3">
                 {stationMode === 'souvenir_only'
-                  ? 'Arahkan kamera ke QR tiket tamu untuk menukarkan souvenir fisik.'
+                  ? 'Arahkan kamera ke QR tiket tamu ATAU langsung ke Stiker QR fisik souvenir (auto-deteksi, -1 stok otomatis).'
                   : stationMode === 'checkin_souvenir'
-                  ? 'Arahkan kamera ke QR tiket tamu untuk mencatat check-in sekaligus penyerahan souvenir.'
+                  ? 'Arahkan kamera ke QR tiket tamu (check-in + souvenir) atau Stiker QR fisik souvenir untuk potong stok langsung.'
                   : 'Arahkan kamera ke QR tiket tamu untuk memverifikasi tiket masuk ke gate.'}
               </p>
 
@@ -2297,7 +2610,11 @@ export default function Scanner() {
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900 mb-1">Mode Alat Barcode Scanner (Kasir)</h3>
-                  <p className="text-xs text-slate-500">Tembakkan laser pemindai USB/Bluetooth langsung ke tiket fisik atau ketik nama/kode tiket.</p>
+                  <p className="text-xs text-slate-500">
+                    {stationMode === 'checkin'
+                      ? 'Tembakkan laser pemindai USB/Bluetooth langsung ke tiket fisik atau ketik nama/kode tiket.'
+                      : 'Tembakkan laser USB/Bluetooth ke QR tiket tamu ATAU langsung ke Stiker QR Souvenir (SV:XXXXX) / kode batch 5 karakter.'}
+                  </p>
                 </div>
                 
                 <form onSubmit={handleManualSubmit}>
@@ -2307,7 +2624,7 @@ export default function Scanner() {
                     value={manualInput}
                     onChange={e => setManualInput(e.target.value)}
                     className="w-full text-center text-lg font-mono tracking-widest p-3.5 border border-indigo-300 rounded-md focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 transition-all outline-none placeholder:text-slate-400 placeholder:text-sm"
-                    placeholder="Scan kode tiket atau ketik nama tamu..."
+                    placeholder={stationMode === 'checkin' ? 'Scan kode tiket atau ketik nama tamu...' : 'Scan tiket tamu, Stiker QR Souvenir, atau nama...'}
                     autoFocus
                     disabled={isProcessing}
                   />
@@ -3180,14 +3497,20 @@ export default function Scanner() {
                       {matchedLogs.map((log, idx) => {
                         const logDate = log.timestamp ? parseFirestoreDate(log.timestamp) : null;
                         const timeStr = logDate ? logDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
+                        const isReturn = log.action === 'RETURN';
                         return (
-                          <div key={log.id || idx} className="p-2.5 bg-emerald-50/40 hover:bg-emerald-50 rounded-md border border-emerald-200/80 transition-colors flex items-center justify-between gap-3">
+                          <div key={log.id || idx} className={`p-2.5 rounded-md border transition-colors flex items-center justify-between gap-3 ${isReturn ? 'bg-rose-50/40 border-rose-200/80' : 'bg-emerald-50/40 hover:bg-emerald-50 border-emerald-200/80'}`}>
                             <div className="min-w-0">
                               <p className="text-xs font-bold text-slate-900 truncate">{log.guestName}</p>
-                              <div className="flex items-center gap-1.5 mt-0.5">
+                              <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                                 <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-100 truncate max-w-[140px]">
                                   🎁 {log.souvenirName}
                                 </span>
+                                {log.batchCode && (
+                                  <span className="text-[9px] font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-200">
+                                    Batch: {log.batchCode}
+                                  </span>
+                                )}
                               </div>
                               <p className="text-[10px] text-slate-400 mt-0.5">
                                 Petugas: {log.performedBy || 'Loket Souvenir'}
@@ -3197,9 +3520,15 @@ export default function Scanner() {
                               <span className="text-[11px] font-mono font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                                 {timeStr}
                               </span>
-                              <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200">
-                                <CheckCircle className="w-2.5 h-2.5 text-emerald-600" /> Diserahkan
-                              </span>
+                              {isReturn ? (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded border border-rose-200">
+                                  <RotateCcw className="w-2.5 h-2.5 text-rose-600" /> Batal (+1)
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200">
+                                  <CheckCircle className="w-2.5 h-2.5 text-emerald-600" /> Diserahkan
+                                </span>
+                              )}
                             </div>
                           </div>
                         );
@@ -3270,15 +3599,21 @@ export default function Scanner() {
                 souvenirLogs.slice(0, 15).map((log, idx) => {
                   const logDate = log.timestamp ? parseFirestoreDate(log.timestamp) : null;
                   const timeStr = logDate ? logDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
+                  const isReturn = log.action === 'RETURN';
                   
                   return (
-                    <div key={log.id || idx} className="p-2.5 bg-slate-50 hover:bg-emerald-50/40 rounded-md border border-slate-200/80 transition-colors flex items-center justify-between gap-3">
+                    <div key={log.id || idx} className={`p-2.5 rounded-md border transition-colors flex items-center justify-between gap-3 ${isReturn ? 'bg-rose-50/40 border-rose-200/80' : 'bg-slate-50 hover:bg-emerald-50/40 border-slate-200/80'}`}>
                       <div className="min-w-0">
                         <p className="text-xs font-bold text-slate-900 truncate">{log.guestName}</p>
-                        <div className="flex items-center gap-1.5 mt-0.5">
+                        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                           <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-100 truncate max-w-[140px]">
                             🎁 {log.souvenirName}
                           </span>
+                          {log.batchCode && (
+                            <span className="text-[9px] font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-200">
+                              Batch: {log.batchCode}
+                            </span>
+                          )}
                         </div>
                         <p className="text-[10px] text-slate-400 mt-0.5">
                           Petugas: {log.performedBy || 'Loket Souvenir'}
@@ -3288,9 +3623,15 @@ export default function Scanner() {
                         <span className="text-[11px] font-mono font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                           {timeStr}
                         </span>
-                        <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200">
-                          <CheckCircle className="w-2.5 h-2.5 text-emerald-600" /> Diserahkan
-                        </span>
+                        {isReturn ? (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded border border-rose-200">
+                            <RotateCcw className="w-2.5 h-2.5 text-rose-600" /> Batal (+1)
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200">
+                            <CheckCircle className="w-2.5 h-2.5 text-emerald-600" /> Diserahkan
+                          </span>
+                        )}
                       </div>
                     </div>
                   );

@@ -8,6 +8,74 @@
   font-family: 'Playfair Display', Georgia, serif;
 }
 
+.sales-display,
+.sales-body {
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+.sales-mono {
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (min-width: 1024px) {
+  .hero-blur-mask-ltr {
+    -webkit-mask-image: linear-gradient(
+      to right,
+      #000 0%,
+      #000 45%,
+      rgba(0, 0, 0, 0.78) 58%,
+      rgba(0, 0, 0, 0.25) 72%,
+      transparent 84%
+    );
+    mask-image: linear-gradient(
+      to right,
+      #000 0%,
+      #000 45%,
+      rgba(0, 0, 0, 0.78) 58%,
+      rgba(0, 0, 0, 0.25) 72%,
+      transparent 84%
+    );
+  }
+}
+
+@keyframes sales-marquee-scroll {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.sales-marquee-track {
+  display: flex;
+  width: max-content;
+  animation: sales-marquee-scroll 34s linear infinite;
+  will-change: transform;
+}
+
+.sales-marquee-wrap:hover .sales-marquee-track,
+.sales-marquee-wrap:focus-within .sales-marquee-track {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sales-marquee-track {
+    animation: none;
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .sales-marquee-clone {
+    display: none !important;
+  }
+}
+
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-great-vibes: "Great Vibes", cursive;

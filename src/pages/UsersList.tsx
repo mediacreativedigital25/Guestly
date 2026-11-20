@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, doc, deleteDoc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, doc, getDoc, deleteDoc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, createAuthUserSilently } from '../lib/firebase';
 import { User, Role, StaffType, EventRecord } from '../types';
 import {
@@ -20,14 +20,31 @@ import {
   Monitor,
   Radio,
   LogOut,
-  Laptop
+  Laptop,
+  MessageCircle,
+  Copy,
+  Check,
+  AlertTriangle,
+  Loader2,
+  StickyNote,
+  ExternalLink
 } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { useNavigate, useLocation, useParams, Link } from 'react-router-dom';
 import { Modal } from '../components/Modal';
 import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
-import { getRoleLabel, canUserAccessEvent, getUserBusinessId, shouldHideServiceInfo, isPartnerBusinessRegistered, isGreetingScreenUser } from '../lib/utils';
+import {
+  getRoleLabel,
+  canUserAccessEvent,
+  getUserBusinessId,
+  shouldHideServiceInfo,
+  isPartnerBusinessRegistered,
+  isGreetingScreenUser,
+  parseFirestoreDate
+} from '../lib/utils';
 import { isSessionExpired, formatRelativeActivity, normalizeUserDevices, getMaxDevicesForRole } from '../lib/deviceUtils';
+import { sendFonnteMessage, toWhatsAppInternational } from '../lib/fonnte';
+import { resolvePartnerGroupConfig, scheduleOrSendEventGroupReminders } from '../lib/waGroupReminder';
 
 export default function UsersList() {
   const [users, setUsers] = useState<User[]>([]);
@@ -62,6 +79,8 @@ export default function UsersList() {
   const [newUserEventCredit, setNewUserEventCredit] = useState<number>(0);
   const [newUserAllowManualEvent, setNewUserAllowManualEvent] = useState<boolean>(false);
   const [newUserHideServiceInfo, setNewUserHideServiceInfo] = useState<boolean>(true);
+  const [newUserAssignmentNotes, setNewUserAssignmentNotes] = useState('');
+  const [newUserSendAssignmentWa, setNewUserSendAssignmentWa] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -83,6 +102,21 @@ export default function UsersList() {
   const [editUserEventCredit, setEditUserEventCredit] = useState<number>(0);
   const [editUserAllowManualEvent, setEditUserAllowManualEvent] = useState<boolean>(false);
   const [editUserHideServiceInfo, setEditUserHideServiceInfo] = useState<boolean>(true);
+  const [editUserAssignmentNotes, setEditUserAssignmentNotes] = useState('');
+  const [editUserSendAssignmentWa, setEditUserSendAssignmentWa] = useState<boolean>(false);
+  const [editOriginalAssignedEventId, setEditOriginalAssignedEventId] = useState<string>('');
+
+  // Staff WA Resend & Manual Fallback state
+  const [resendingWaUserId, setResendingWaUserId] = useState<string | null>(null);
+  const [waFallbackModal, setWaFallbackModal] = useState<{
+    staffName: string;
+    phone: string;
+    message: string;
+    tokenSource: string;
+    error: string;
+    eventTitle?: string;
+  } | null>(null);
+  const [copiedFallbackMsg, setCopiedFallbackMsg] = useState(false);
 
   const { appUser } = useAuth();
   const navigate = useNavigate();
@@ -125,6 +159,201 @@ export default function UsersList() {
       if (foundBiz) return foundBiz.businessName;
     }
     return null;
+  };
+
+  // Format event date cleanly in Indonesian (Title Case) for WhatsApp briefing
+  const formatStaffEventDate = (dateInput?: any): string => {
+    if (!dateInput) return 'Menunggu konfirmasi';
+    const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const months = [
+      'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+    ];
+    const parsed = parseFirestoreDate(dateInput);
+    if (parsed && !isNaN(parsed.getTime())) {
+      return `${days[parsed.getDay()]}, ${parsed.getDate()} ${months[parsed.getMonth()]} ${parsed.getFullYear()}`;
+    }
+    const rawStr = String(dateInput).trim();
+    const parts = rawStr.split(/[-/]/);
+    if (parts.length === 3) {
+      const y = parseInt(parts[0], 10) > 31 ? parseInt(parts[0], 10) : parseInt(parts[2], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const d = parseInt(parts[0], 10) > 31 ? parseInt(parts[2], 10) : parseInt(parts[0], 10);
+      const dt = new Date(y, m, d);
+      if (!isNaN(dt.getTime())) {
+        return `${days[dt.getDay()]}, ${dt.getDate()} ${months[dt.getMonth()]} ${dt.getFullYear()}`;
+      }
+    }
+    return rawStr;
+  };
+
+  // Synchronous check for UI hint: does the target Vendor/Owner have a personal Fonnte token?
+  const hasVendorFonnteToken = (partnerId?: string | null): boolean => {
+    if (
+      appUser &&
+      (appUser.role === 'owner' || appUser.role === 'partner') &&
+      appUser.fonnteToken?.trim() &&
+      (!partnerId || partnerId === appUser.partnerId || partnerId === appUser.id)
+    ) {
+      return true;
+    }
+    if (partnerId) {
+      const ownerDoc = users.find(
+        u =>
+          (u.role === 'owner' || u.role === 'partner') &&
+          (u.id === partnerId || u.partnerId === partnerId)
+      );
+      if (ownerDoc?.fonnteToken?.trim()) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Resolve 3-tier Fonnte token: Tier 1 Vendor Token -> Tier 2 Global Guestly Token
+  const resolveVendorFonnteToken = async (
+    partnerId?: string | null
+  ): Promise<{ token: string | null; label: string }> => {
+    if (
+      appUser &&
+      (appUser.role === 'owner' || appUser.role === 'partner') &&
+      appUser.fonnteToken?.trim() &&
+      (!partnerId || partnerId === appUser.partnerId || partnerId === appUser.id)
+    ) {
+      return { token: appUser.fonnteToken.trim(), label: 'Token Fonnte Vendor' };
+    }
+
+    if (partnerId) {
+      const ownerDoc = users.find(
+        u =>
+          (u.role === 'owner' || u.role === 'partner') &&
+          (u.id === partnerId || u.partnerId === partnerId)
+      );
+      if (ownerDoc?.fonnteToken?.trim()) {
+        return { token: ownerDoc.fonnteToken.trim(), label: 'Token Fonnte Vendor' };
+      }
+
+      try {
+        const snap = await getDoc(doc(db, 'users', partnerId));
+        if (snap.exists()) {
+          const data = snap.data() as any;
+          if (data?.fonnteToken && String(data.fonnteToken).trim()) {
+            return { token: String(data.fonnteToken).trim(), label: 'Token Fonnte Vendor' };
+          }
+        }
+      } catch {
+        // Ignore lookup error and fall back to Global Token
+      }
+    }
+
+    return { token: null, label: 'Token Global Guestly' };
+  };
+
+  // Build standardized WhatsApp briefing message for Staff Assignment
+  const buildStaffAssignmentMessage = (params: {
+    staffName: string;
+    staffType?: StaffType;
+    email: string;
+    password?: string | null;
+    businessName?: string | null;
+    event?: EventRecord | null;
+    assignmentNotes?: string | null;
+    isUpdate?: boolean;
+  }): string => {
+    const {
+      staffName,
+      staffType,
+      email,
+      password,
+      businessName,
+      event,
+      assignmentNotes,
+      isUpdate = false,
+    } = params;
+
+    const loginUrl = `${window.location.origin}/auth/login`;
+    const roleLabel = getRoleLabel('staff', staffType || 'checkin');
+    const orgName = businessName?.trim() || 'Guestly';
+
+    const eventTitle = event?.title || 'Event Penugasan';
+    const formattedDate = event?.date ? formatStaffEventDate(event.date) : 'Menunggu konfirmasi';
+    const timePart = event?.time?.trim() ? ` · ${event.time.trim()}` : '';
+    const venueParts = [
+      event?.eInviteVenueName?.trim() || event?.location?.trim() || '',
+      event?.eInviteVenueAddress?.trim() || '',
+    ].filter(Boolean);
+    const venueText = venueParts.length > 0 ? Array.from(new Set(venueParts)).join(', ') : 'Menunggu konfirmasi';
+    const mapsUrl = (event?.mapsUrl || event?.eInviteMapsUrl || '').trim();
+    const cleanNotes = (assignmentNotes || '').trim();
+    const passwordDisplay = password?.trim()
+      ? password.trim()
+      : 'Gunakan password akun sebelumnya (atau hubungi koordinator)';
+
+    const lines: string[] = [
+      `📋 *PENUGASAN STAFF EVENT*`,
+      `🏢 *Penyelenggara* : ${orgName}`,
+      ``,
+      `Halo Kak *${staffName}* 👋,`,
+      `Anda telah ${isUpdate ? 'ditugaskan / diperbarui penugasannya' : 'ditugaskan'} sebagai *${roleLabel}* pada acara berikut:`,
+      ``,
+      `🎉 *Acara* : ${eventTitle}`,
+      `📅 *Tanggal* : ${formattedDate}${timePart}`,
+      `📍 *Lokasi* : ${venueText}`,
+    ];
+
+    if (mapsUrl) {
+      lines.push(`🗺️ *Google Maps* : ${mapsUrl}`);
+    }
+
+    if (cleanNotes) {
+      lines.push(``, `📝 *Catatan Koordinator* :`, cleanNotes);
+    }
+
+    lines.push(
+      ``,
+      `🔐 *Akses Login Aplikasi* :`,
+      `📧 *Email* : ${email}`,
+      `🔑 *Password* : ${passwordDisplay}`,
+      `🌐 *Link Login* : ${loginUrl}`,
+      ``,
+      `⚠️ *Ketentuan Keamanan (1 User = 1 Perangkat)* :`,
+      `Akun Staff hanya dapat aktif di *1 perangkat (HP/Tablet)* dalam satu waktu. Jika login di perangkat lain, sesi di perangkat sebelumnya akan otomatis terputus. Mohon tidak membagikan akun ini kepada pihak lain.`,
+      ``,
+      `Mohon hadir tepat waktu & pastikan perangkat siap digunakan. Terima kasih! 🙏`
+    );
+
+    return lines.join('\n');
+  };
+
+  // Dispatch Staff WA Assignment using 3-tier priority (Vendor Token -> Global Token -> Manual WA Fallback Modal)
+  const dispatchStaffAssignmentWa = async (params: {
+    staffName: string;
+    phone: string;
+    partnerId?: string | null;
+    message: string;
+    eventTitle?: string;
+  }): Promise<{ success: boolean; tokenSource: string; error?: string }> => {
+    const { staffName, phone, partnerId, message, eventTitle } = params;
+    const { token: vendorToken, label: tokenSource } = await resolveVendorFonnteToken(partnerId);
+
+    const res = vendorToken
+      ? await sendFonnteMessage(vendorToken, phone, message, undefined, { strictToken: true })
+      : await sendFonnteMessage(null, phone, message, undefined, { strictToken: false });
+
+    if (res.success) {
+      return { success: true, tokenSource };
+    }
+
+    setCopiedFallbackMsg(false);
+    setWaFallbackModal({
+      staffName,
+      phone,
+      message,
+      tokenSource,
+      error: res.error || 'Gagal mengirim pesan WhatsApp otomatis.',
+      eventTitle,
+    });
+    return { success: false, tokenSource, error: res.error };
   };
 
   // Strict RBAC check: Can current user edit/delete target user?
@@ -353,6 +582,8 @@ export default function UsersList() {
     setNewUserEventCredit(0);
     setNewUserAllowManualEvent(false);
     setNewUserHideServiceInfo(true);
+    setNewUserAssignmentNotes('');
+    setNewUserSendAssignmentWa(true);
 
     if (appUser?.role === 'owner' || appUser?.role === 'partner') {
       setNewUserPartnerId(appUser.partnerId || appUser.id || '');
@@ -421,12 +652,24 @@ export default function UsersList() {
     setEditUserEventCredit(user.eventCredit !== undefined ? user.eventCredit : (user.eventQuota || 0));
     setEditUserAllowManualEvent(Boolean(user.allowManualEvent ?? user.eventManual));
     setEditUserHideServiceInfo(shouldHideServiceInfo(user));
+    setEditUserAssignmentNotes(user.assignmentNotes || '');
+    setEditOriginalAssignedEventId(existingAssigned[0] || '');
+    setEditUserSendAssignmentWa(false);
     setEditUserPassword('');
     setIsEditingUser(true);
     if (!skipNavigate && user.id) {
       navigate(`/auth/login/users/${user.id}/edit`);
     }
   };
+
+  // Auto-check WA notification when Vendor changes/assigns an event for Staff in Edit Modal
+  useEffect(() => {
+    if (!isEditingUser || editUserRole !== 'staff') return;
+    const currentEventId = editUserAssignedEvents[0] || '';
+    if (currentEventId && currentEventId !== editOriginalAssignedEventId) {
+      setEditUserSendAssignmentWa(true);
+    }
+  }, [isEditingUser, editUserRole, editUserAssignedEvents, editOriginalAssignedEventId]);
 
   // Sync URL sub-routes (/users/add, /users/:userId/edit) with modal state
   useEffect(() => {
@@ -533,6 +776,7 @@ export default function UsersList() {
             ? 'greeting'
             : null,
         assignedEventIds: normalizedAssignedEvents,
+        assignmentNotes: effectiveEditRole === 'staff' ? editUserAssignmentNotes.trim() : null,
         partnerId: resolvedPartnerId,
         clientId: effectiveEditRole === 'client' ? (existingTargetUser?.clientId || editingUserId) : null,
         businessName: resolvedBizName,
@@ -563,25 +807,173 @@ export default function UsersList() {
 
       await updateDoc(doc(db, 'users', editingUserId), updateData);
 
-      setUsers(prev =>
-        prev.map(u => {
-          if (u.id !== editingUserId) return u;
-          const nextUser: any = { ...u, ...updateData };
-          if (!nextUser.staffType) delete nextUser.staffType;
-          if (!nextUser.businessName) delete nextUser.businessName;
-          if (!nextUser.businessAddress) delete nextUser.businessAddress;
-          if (!nextUser.businessCity) delete nextUser.businessCity;
-          return nextUser as User;
-        })
-      );
+      const updatedUsersSnapshot: User[] = users.map(u => {
+        if (u.id !== editingUserId) return u;
+        const nextUser: any = { ...u, ...updateData };
+        if (!nextUser.staffType) delete nextUser.staffType;
+        if (!nextUser.businessName) delete nextUser.businessName;
+        if (!nextUser.businessAddress) delete nextUser.businessAddress;
+        if (!nextUser.businessCity) delete nextUser.businessCity;
+        if (!nextUser.assignmentNotes) delete nextUser.assignmentNotes;
+        return nextUser as User;
+      });
+      setUsers(updatedUsersSnapshot);
       setIsEditingUser(false);
       navigate('/auth/login/users', { replace: true });
-      showAlert('Berhasil', 'Data pengguna, bisnis naungan & penugasan berhasil diperbarui!', 'success');
+
+      // Auto-sync H-3 & H-1 WhatsApp Group Reminder if Vendor enabled it
+      let groupScheduleNote = '';
+      if (effectiveEditRole === 'staff' && normalizedAssignedEvents.length > 0) {
+        const assignedEvent = events.find(ev => ev.id === normalizedAssignedEvents[0]) || null;
+        if (assignedEvent) {
+          try {
+            const partnerConfig = await resolvePartnerGroupConfig(
+              resolvedPartnerId || assignedEvent.partnerId,
+              updatedUsersSnapshot,
+              appUser
+            );
+            if (partnerConfig?.waGroupReminderEnabled && partnerConfig.waGroupId) {
+              const eventStaffRoster = updatedUsersSnapshot.filter(
+                u =>
+                  u.role === 'staff' &&
+                  !isGreetingScreenUser(u) &&
+                  Array.isArray(u.assignedEventIds) &&
+                  u.assignedEventIds.includes(assignedEvent.id!)
+              );
+              const grpRes = await scheduleOrSendEventGroupReminders({
+                event: assignedEvent,
+                staffList: eventStaffRoster,
+                partnerConfig,
+                mode: 'auto_schedule',
+              });
+              if (grpRes.updatedLog) {
+                setEvents(prev =>
+                  prev.map(ev =>
+                    ev.id === assignedEvent.id ? { ...ev, groupReminderLog: grpRes.updatedLog } : ev
+                  )
+                );
+              }
+              if (grpRes.scheduledH3 || grpRes.scheduledH1 || grpRes.scheduledH0) {
+                const slots = [
+                  grpRes.scheduledH3 ? `H-3 (${partnerConfig.waGroupReminderTime})` : '',
+                  grpRes.scheduledH1 ? `H-1 (${partnerConfig.waGroupReminderTime})` : '',
+                  grpRes.scheduledH0 ? `Hari H (${partnerConfig.waGroupReminderH0Time})` : '',
+                ]
+                  .filter(Boolean)
+                  .join(', ');
+                groupScheduleNote = ` Pengingat Grup WA tim (${slots} WIB) otomatis dijadwalkan.`;
+              }
+            }
+          } catch (grpErr) {
+            console.warn('Auto group reminder schedule notice:', grpErr);
+          }
+        }
+      }
+
+      // Send Staff WA Assignment Notification if role is Staff and checkbox enabled
+      if (effectiveEditRole === 'staff' && editUserSendAssignmentWa) {
+        const cleanPhone = editUserPhone.trim();
+        if (!cleanPhone) {
+          showAlert(
+            'Data Disimpan (WA Belum Terkirim)',
+            `Data & penugasan Staff berhasil diperbarui, namun No. WhatsApp Staff belum diisi sehingga notifikasi personal tidak terkirim.${groupScheduleNote}`,
+            'warning'
+          );
+        } else {
+          const assignedEvent = events.find(ev => ev.id === normalizedAssignedEvents[0]) || null;
+          const staffPassword = editUserPassword.trim() || existingTargetUser?._password || '';
+          const staffMessage = buildStaffAssignmentMessage({
+            staffName: editUserName.trim(),
+            staffType: editUserStaffType,
+            email: existingTargetUser?.email || '',
+            password: staffPassword,
+            businessName: resolvedBizName || (existingTargetUser ? getBusinessLabelForUser(existingTargetUser) : null),
+            event: assignedEvent,
+            assignmentNotes: editUserAssignmentNotes.trim(),
+            isUpdate: true,
+          });
+          const waRes = await dispatchStaffAssignmentWa({
+            staffName: editUserName.trim(),
+            phone: cleanPhone,
+            partnerId: resolvedPartnerId,
+            message: staffMessage,
+            eventTitle: assignedEvent?.title,
+          });
+          if (waRes.success) {
+            showAlert(
+              'Berhasil',
+              `Penugasan Staff diperbarui & notifikasi WhatsApp berhasil dikirim via ${waRes.tokenSource}!${groupScheduleNote}`,
+              'success'
+            );
+          }
+          // If failed, Manual WA Fallback Modal is automatically opened by dispatchStaffAssignmentWa
+        }
+      } else {
+        showAlert(
+          'Berhasil',
+          `Data pengguna, bisnis naungan & penugasan berhasil diperbarui!${groupScheduleNote}`,
+          'success'
+        );
+      }
     } catch (err: any) {
       console.error('Error editing user:', err);
       setError(err.message || 'Gagal memperbarui user');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Quick Resend WA Assignment Briefing from Staff Table Row
+  const handleResendStaffAssignmentWa = async (targetUser: User) => {
+    if (targetUser.role !== 'staff' || isGreetingScreenUser(targetUser)) return;
+    const assignedIds = Array.isArray(targetUser.assignedEventIds) ? targetUser.assignedEventIds : [];
+    const assignedEvent = events.find(ev => ev.id === assignedIds[0]) || null;
+    if (!assignedEvent) {
+      showAlert(
+        'Acara Tidak Ditemukan',
+        'Acara yang ditugaskan untuk Staff ini tidak ditemukan atau sudah diarsipkan. Klik "Edit / Tugaskan" untuk memilih acara aktif terlebih dahulu.',
+        'warning'
+      );
+      return;
+    }
+    const cleanPhone = (targetUser.phone || '').trim();
+    if (!cleanPhone) {
+      showAlert(
+        'Nomor WhatsApp Kosong',
+        `Nomor WhatsApp untuk ${targetUser.name} belum diisi. Klik "Edit / Tugaskan" untuk menambahkan nomor WhatsApp terlebih dahulu.`,
+        'warning'
+      );
+      return;
+    }
+
+    setResendingWaUserId(targetUser.id || null);
+    try {
+      const staffMessage = buildStaffAssignmentMessage({
+        staffName: targetUser.name || 'Staff',
+        staffType: targetUser.staffType,
+        email: targetUser.email || '',
+        password: targetUser._password || '',
+        businessName: getBusinessLabelForUser(targetUser),
+        event: assignedEvent,
+        assignmentNotes: targetUser.assignmentNotes || '',
+        isUpdate: false,
+      });
+      const waRes = await dispatchStaffAssignmentWa({
+        staffName: targetUser.name || 'Staff',
+        phone: cleanPhone,
+        partnerId: targetUser.partnerId,
+        message: staffMessage,
+        eventTitle: assignedEvent.title,
+      });
+      if (waRes.success) {
+        showAlert(
+          'Notifikasi Terkirim',
+          `Pesan penugasan untuk ${targetUser.name} berhasil dikirim ke WhatsApp via ${waRes.tokenSource}!`,
+          'success'
+        );
+      }
+    } finally {
+      setResendingWaUserId(null);
     }
   };
 
@@ -664,6 +1056,12 @@ export default function UsersList() {
             ? 'greeting'
             : undefined,
         assignedEventIds: normalizedNewAssignedEvents,
+        ...(effectiveNewRole === 'staff'
+          ? {
+              assignmentNotes: newUserAssignmentNotes.trim(),
+              _password: newUserPassword.trim(),
+            }
+          : {}),
         partnerId: resolvedPartnerId,
         businessName: resolvedBusinessName,
         businessAddress: (effectiveNewRole === 'owner' || effectiveNewRole === 'partner') ? newUserBusinessAddress.trim() : undefined,
@@ -685,25 +1083,115 @@ export default function UsersList() {
 
       await setDoc(doc(db, 'users', uid), newUserDoc);
 
-      setUsers([{ id: uid, ...newUserDoc }, ...users]);
+      const nextUsersList: User[] = [{ id: uid, ...newUserDoc }, ...users];
+      setUsers(nextUsersList);
 
       // 4. Send WhatsApp Notification
-      let waResult: { success: boolean; error?: string } | null = null;
-      if (newUserPhone) {
-        const { sendFonnteMessage } = await import('../lib/fonnte');
-        const loginUrl = `${window.location.origin}/auth/login`;
-        const roleLabel = getRoleLabel(effectiveNewRole, effectiveNewRole === 'staff' ? newUserStaffType : undefined);
-        const bizInfo = resolvedBusinessName ? `\n🏢 *Bisnis / WO* : ${resolvedBusinessName}` : '';
-        const assignedEventTitle =
-          normalizedNewAssignedEvents.length > 0
-            ? events.find(ev => ev.id === normalizedNewAssignedEvents[0])?.title
-            : undefined;
-        const eventInfo = assignedEventTitle ? `\n📅 *Acara Ditugaskan* : ${assignedEventTitle}` : '';
-        const autoRedirectNote =
-          effectiveNewRole === 'greeting'
-            ? `\n📺 *Akses Langsung* : Saat login, Anda akan otomatis masuk langsung ke layar monitor Layar Sapa TV acara tanpa melalui Dashboard.`
-            : '';
-        const message = `🔐 *Informasi Akun Guestly*
+      if (effectiveNewRole === 'staff') {
+        setIsAddingUser(false);
+        navigate('/auth/login/users', { replace: true });
+
+        // Auto-sync H-3 & H-1 WhatsApp Group Reminder if Vendor enabled it
+        let groupScheduleNote = '';
+        const assignedEvent = events.find(ev => ev.id === normalizedNewAssignedEvents[0]) || null;
+        if (assignedEvent) {
+          try {
+            const partnerConfig = await resolvePartnerGroupConfig(
+              resolvedPartnerId || assignedEvent.partnerId,
+              nextUsersList,
+              appUser
+            );
+            if (partnerConfig?.waGroupReminderEnabled && partnerConfig.waGroupId) {
+              const eventStaffRoster = nextUsersList.filter(
+                u =>
+                  u.role === 'staff' &&
+                  !isGreetingScreenUser(u) &&
+                  Array.isArray(u.assignedEventIds) &&
+                  u.assignedEventIds.includes(assignedEvent.id!)
+              );
+              const grpRes = await scheduleOrSendEventGroupReminders({
+                event: assignedEvent,
+                staffList: eventStaffRoster,
+                partnerConfig,
+                mode: 'auto_schedule',
+              });
+              if (grpRes.updatedLog) {
+                setEvents(prev =>
+                  prev.map(ev =>
+                    ev.id === assignedEvent.id ? { ...ev, groupReminderLog: grpRes.updatedLog } : ev
+                  )
+                );
+              }
+              if (grpRes.scheduledH3 || grpRes.scheduledH1 || grpRes.scheduledH0) {
+                const slots = [
+                  grpRes.scheduledH3 ? `H-3 (${partnerConfig.waGroupReminderTime})` : '',
+                  grpRes.scheduledH1 ? `H-1 (${partnerConfig.waGroupReminderTime})` : '',
+                  grpRes.scheduledH0 ? `Hari H (${partnerConfig.waGroupReminderH0Time})` : '',
+                ]
+                  .filter(Boolean)
+                  .join(', ');
+                groupScheduleNote = ` Pengingat Grup WA tim (${slots} WIB) otomatis dijadwalkan.`;
+              }
+            }
+          } catch (grpErr) {
+            console.warn('Auto group reminder schedule notice:', grpErr);
+          }
+        }
+
+        if (newUserSendAssignmentWa) {
+          const cleanPhone = newUserPhone.trim();
+          if (!cleanPhone) {
+            showAlert(
+              'Staff Dibuat (WA Belum Terkirim)',
+              `Akun Staff berhasil ditambahkan, namun No. WhatsApp kosong sehingga notifikasi penugasan personal belum dikirim.${groupScheduleNote}`,
+              'warning'
+            );
+          } else {
+            const staffMessage = buildStaffAssignmentMessage({
+              staffName: newUserName.trim(),
+              staffType: newUserStaffType,
+              email: newUserEmail.trim(),
+              password: newUserPassword.trim(),
+              businessName: resolvedBusinessName,
+              event: assignedEvent,
+              assignmentNotes: newUserAssignmentNotes.trim(),
+              isUpdate: false,
+            });
+            const waRes = await dispatchStaffAssignmentWa({
+              staffName: newUserName.trim(),
+              phone: cleanPhone,
+              partnerId: resolvedPartnerId,
+              message: staffMessage,
+              eventTitle: assignedEvent?.title,
+            });
+            if (waRes.success) {
+              showAlert(
+                'Berhasil',
+                `Staff berhasil ditambahkan & notifikasi penugasan telah dikirim ke WhatsApp via ${waRes.tokenSource}!${groupScheduleNote}`,
+                'success'
+              );
+            }
+            // If failed, Manual WA Fallback Modal is opened automatically
+          }
+        } else {
+          showAlert('Berhasil', `Petugas Staff berhasil ditambahkan!${groupScheduleNote}`, 'success');
+        }
+      } else {
+        let waResult: { success: boolean; error?: string } | null = null;
+        if (newUserPhone) {
+          const loginUrl = `${window.location.origin}/auth/login`;
+          const roleLabel = getRoleLabel(effectiveNewRole, undefined);
+          const bizInfo = resolvedBusinessName ? `\n🏢 *Bisnis / WO* : ${resolvedBusinessName}` : '';
+          const assignedEventTitle =
+            normalizedNewAssignedEvents.length > 0
+              ? events.find(ev => ev.id === normalizedNewAssignedEvents[0])?.title
+              : undefined;
+          const eventInfo = assignedEventTitle ? `\n📅 *Acara Ditugaskan* : ${assignedEventTitle}` : '';
+          const autoRedirectNote =
+            effectiveNewRole === 'greeting'
+              ? `\n📺 *Akses Langsung* : Saat login, Anda akan otomatis masuk langsung ke layar monitor Layar Sapa TV acara tanpa melalui Dashboard.`
+              : '';
+          const message = `🔐 *Informasi Akun Guestly*
 
 Halo Kak *${newUserName}*,
 
@@ -715,23 +1203,24 @@ Akun Anda telah terdaftar di sistem Guestly sebagai *${roleLabel}*. Berikut info
 🌐 *Login* : ${loginUrl}${autoRedirectNote}
 
 Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada pihak lain.`;
-        waResult = await sendFonnteMessage(null, newUserPhone, message);
-      }
-
-      setIsAddingUser(false);
-      navigate('/auth/login/users', { replace: true });
-      if (newUserPhone && waResult) {
-        if (waResult.success) {
-          showAlert('Berhasil', 'User / Petugas berhasil ditambahkan dan notifikasi akun telah dikirim ke WhatsApp!', 'success');
-        } else {
-          showAlert(
-            'User Dibuat (WA Belum Terkirim)',
-            `User berhasil ditambahkan, namun notifikasi WhatsApp gagal terkirim: ${waResult.error || 'Periksa pengaturan Token Fonnte.'}`,
-            'warning'
-          );
+          waResult = await sendFonnteMessage(null, newUserPhone, message);
         }
-      } else {
-        showAlert('Berhasil', 'User / Petugas berhasil ditambahkan!', 'success');
+
+        setIsAddingUser(false);
+        navigate('/auth/login/users', { replace: true });
+        if (newUserPhone && waResult) {
+          if (waResult.success) {
+            showAlert('Berhasil', 'User / Petugas berhasil ditambahkan dan notifikasi akun telah dikirim ke WhatsApp!', 'success');
+          } else {
+            showAlert(
+              'User Dibuat (WA Belum Terkirim)',
+              `User berhasil ditambahkan, namun notifikasi WhatsApp gagal terkirim: ${waResult.error || 'Periksa pengaturan Token Fonnte.'}`,
+              'warning'
+            );
+          }
+        } else {
+          showAlert('Berhasil', 'User / Petugas berhasil ditambahkan!', 'success');
+        }
       }
     } catch (err: any) {
       console.error('Error adding user:', err);
@@ -1337,6 +1826,57 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
               appUser?.role === 'superadmin' ? newUserPartnerId : (currentUserBizId || undefined)
             )}
 
+          {newUserRole === 'staff' && (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1.5">
+                  <StickyNote className="w-4 h-4 text-emerald-600" />
+                  Catatan Briefing untuk Staff <span className="text-xs font-normal text-gray-400">(Opsional)</span>
+                </label>
+                <textarea
+                  rows={2}
+                  value={newUserAssignmentNotes}
+                  onChange={e => setNewUserAssignmentNotes(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-emerald-500 focus:border-emerald-500"
+                  placeholder="Contoh: Hadir jam 07.00 WIB, dresscode batik/hitam, briefing di meja registrasi utama."
+                />
+              </div>
+
+              <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 space-y-2">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newUserSendAssignmentWa}
+                    onChange={e => setNewUserSendAssignmentWa(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded text-emerald-600 border-emerald-300 focus:ring-emerald-500"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
+                        <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                        Kirim notifikasi penugasan ke WhatsApp Staff
+                      </span>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white text-emerald-800 border border-emerald-200">
+                        {hasVendorFonnteToken(appUser?.role === 'superadmin' ? newUserPartnerId : currentUserBizId)
+                          ? 'Prioritas: Token Vendor'
+                          : 'Otomatis: Token Global Guestly'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-emerald-900/80 mt-1 leading-relaxed">
+                      Pesan mencakup detail acara, lokasi, catatan briefing, email &amp; password login, serta info ketentuan <strong>1 User = 1 Perangkat</strong>. Jika pengiriman otomatis gagal, opsi <strong>WA Manual</strong> akan otomatis muncul.
+                    </p>
+                  </div>
+                </label>
+                {newUserSendAssignmentWa && !newUserPhone.trim() && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>Isi kolom <strong>No. WhatsApp / HP</strong> di atas agar notifikasi penugasan bisa langsung terkirim.</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Pengaturan Kuota khusus Super Admin ketika menambah Owner / Partner / Client */}
           {(newUserRole === 'partner' || newUserRole === 'client' || newUserRole === 'owner') &&
             appUser?.role === 'superadmin' && (
@@ -1670,6 +2210,57 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
               appUser?.role === 'superadmin' ? editUserPartnerId : (currentUserBizId || undefined)
             )}
 
+          {editUserRole === 'staff' && (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1.5">
+                  <StickyNote className="w-4 h-4 text-emerald-600" />
+                  Catatan Briefing untuk Staff <span className="text-xs font-normal text-gray-400">(Opsional)</span>
+                </label>
+                <textarea
+                  rows={2}
+                  value={editUserAssignmentNotes}
+                  onChange={e => setEditUserAssignmentNotes(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-emerald-500 focus:border-emerald-500"
+                  placeholder="Contoh: Hadir jam 07.00 WIB, dresscode batik/hitam, briefing di meja registrasi utama."
+                />
+              </div>
+
+              <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 space-y-2">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editUserSendAssignmentWa}
+                    onChange={e => setEditUserSendAssignmentWa(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded text-emerald-600 border-emerald-300 focus:ring-emerald-500"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
+                        <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                        Kirim notifikasi penugasan ke WhatsApp Staff
+                      </span>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white text-emerald-800 border border-emerald-200">
+                        {hasVendorFonnteToken(appUser?.role === 'superadmin' ? editUserPartnerId : currentUserBizId)
+                          ? 'Prioritas: Token Vendor'
+                          : 'Otomatis: Token Global Guestly'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-emerald-900/80 mt-1 leading-relaxed">
+                      Otomatis aktif saat acara penugasan berubah. Pesan berisi detail acara, catatan briefing, email &amp; password, serta aturan <strong>1 User = 1 Perangkat</strong> (fallback ke WA Manual jika gagal).
+                    </p>
+                  </div>
+                </label>
+                {editUserSendAssignmentWa && !editUserPhone.trim() && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>Isi kolom <strong>No. WhatsApp / HP</strong> di atas agar notifikasi penugasan bisa dikirim.</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {(editUserRole === 'partner' || editUserRole === 'client' || editUserRole === 'owner') &&
             appUser?.role === 'superadmin' && (
               <div className="bg-indigo-50/50 p-4 rounded-lg border border-indigo-100 space-y-4">
@@ -1818,9 +2409,12 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
               <tbody className="bg-white divide-y divide-gray-200">
                 {filteredUsers.map(user => {
                   const assignedIds = Array.isArray(user.assignedEventIds) ? user.assignedEventIds : [];
-                  const assignedNames = assignedIds
-                    .map(id => events.find(e => e.id === id)?.title || id)
-                    .filter(Boolean);
+                  const resolvedEvents = assignedIds
+                    .map(id => events.find(e => e.id === id))
+                    .filter((e): e is EventRecord => Boolean(e));
+                  const hasOrphanedAssignment = assignedIds.length > 0 && resolvedEvents.length === 0;
+                  const assignedNames = resolvedEvents.map(e => e.title).filter(Boolean);
+                  const isRegularStaff = user.role === 'staff' && !isGreetingScreenUser(user);
                   const bizLabel = getBusinessLabelForUser(user);
                   const canModify = canModifyTargetUser(user);
                   const serviceHidden = shouldHideServiceInfo(user);
@@ -1835,7 +2429,13 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                           <div className="ml-3.5">
                             <div className="text-sm font-semibold text-gray-900">{user.name}</div>
                             <div className="text-xs text-gray-500">{user.email}</div>
-                            {user.phone && <div className="text-[11px] text-gray-400">{user.phone}</div>}
+                            {user.phone?.trim() ? (
+                              <div className="text-[11px] text-gray-400">{user.phone}</div>
+                            ) : isRegularStaff ? (
+                              <div className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded w-fit">
+                                <AlertTriangle className="w-2.5 h-2.5" /> No. WA belum diisi
+                              </div>
+                            ) : null}
                             {user.createdByName && (
                               <div className="text-[10px] text-gray-400 mt-0.5">
                                 Dibuat oleh: <span className="font-medium text-gray-600">{user.createdByName}</span>
@@ -1913,8 +2513,26 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                               >
                                 <CalendarDays className="w-3 h-3" /> {assignedNames.length} Acara Ditugaskan
                               </span>
-                              <p className="text-xs text-gray-600 truncate" title={assignedNames.join(', ')}>
+                              <p className="text-xs text-gray-700 font-medium truncate" title={assignedNames.join(', ')}>
                                 {assignedNames.join(', ')}
+                              </p>
+                              {isRegularStaff && user.assignmentNotes?.trim() && (
+                                <p
+                                  className="text-[11px] text-gray-500 truncate flex items-center gap-1"
+                                  title={user.assignmentNotes}
+                                >
+                                  <StickyNote className="w-3 h-3 text-amber-500 shrink-0" />
+                                  <span className="truncate">{user.assignmentNotes}</span>
+                                </p>
+                              )}
+                            </div>
+                          ) : hasOrphanedAssignment ? (
+                            <div className="space-y-1 max-w-xs">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                <AlertTriangle className="w-3 h-3" /> Acara tidak ditemukan / arsip
+                              </span>
+                              <p className="text-[11px] text-gray-400">
+                                Pilih ulang acara aktif melalui tombol Edit
                               </p>
                             </div>
                           ) : user.role === 'admin' ? (
@@ -1974,6 +2592,22 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                       <td className="px-5 py-4 whitespace-nowrap text-sm font-medium">
                         {canModify ? (
                           <div className="flex items-center gap-2">
+                            {isRegularStaff && resolvedEvents.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => handleResendStaffAssignmentWa(user)}
+                                disabled={resendingWaUserId === user.id}
+                                className="text-emerald-700 hover:text-emerald-900 flex items-center gap-1 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-md hover:bg-emerald-100 transition-colors text-xs font-semibold cursor-pointer disabled:opacity-60"
+                                title="Kirim / kirim ulang notifikasi penugasan & info login ke WhatsApp Staff"
+                              >
+                                {resendingWaUserId === user.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                )}
+                                Kirim WA
+                              </button>
+                            )}
                             {normalizeUserDevices(user).length > 0 && (
                               <button
                                 onClick={() => handleResetUserSession(user)}
@@ -2028,6 +2662,81 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
           )}
         </div>
       )}
+
+      {/* Manual WhatsApp Fallback Modal (Tier 3 when Fonnte fails) */}
+      <Modal
+        isOpen={Boolean(waFallbackModal)}
+        onClose={() => setWaFallbackModal(null)}
+        title="Kirim Penugasan via WhatsApp Manual"
+        maxWidth="max-w-lg"
+      >
+        {waFallbackModal && (
+          <div className="space-y-4">
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex items-start gap-2.5">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-xs text-amber-950 space-y-1">
+                <p className="font-bold">
+                  Pengiriman otomatis via {waFallbackModal.tokenSource} gagal.
+                </p>
+                <p className="text-amber-900/90">
+                  Alasan: <span className="font-medium">{waFallbackModal.error}</span>
+                </p>
+                <p className="text-amber-800/80">
+                  Data penugasan Staff <strong>{waFallbackModal.staffName}</strong> sudah tersimpan. Anda dapat langsung mengirim briefing di bawah ini lewat WhatsApp Manual.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-gray-600">
+                <span className="font-semibold text-gray-800">Pratinjau Pesan untuk {waFallbackModal.staffName}</span>
+                <span className="font-mono text-gray-500">{waFallbackModal.phone}</span>
+              </div>
+              <pre className="w-full max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-sans text-xs leading-relaxed bg-gray-50 border border-gray-200 rounded-xl p-3.5 text-gray-800">
+                {waFallbackModal.message}
+              </pre>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2.5 pt-3 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(waFallbackModal.message);
+                    setCopiedFallbackMsg(true);
+                    setTimeout(() => setCopiedFallbackMsg(false), 2500);
+                  } catch {
+                    showAlert('Info', 'Gagal menyalin otomatis. Silakan blok & salin teks pesan secara manual.', 'info');
+                  }
+                }}
+                className="px-3.5 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+              >
+                {copiedFallbackMsg ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-600" /> Tersalin
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4" /> Salin Pesan
+                  </>
+                )}
+              </button>
+
+              <a
+                href={`https://wa.me/${toWhatsAppInternational(waFallbackModal.phone)}?text=${encodeURIComponent(waFallbackModal.message)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setWaFallbackModal(null)}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors"
+              >
+                <MessageCircle className="w-4 h-4" />
+                Kirim via WhatsApp Manual
+                <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+              </a>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

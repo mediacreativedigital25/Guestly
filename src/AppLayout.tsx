@@ -45,6 +45,8 @@ import {
   Moon,
   PanelLeft,
   Check,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useCart } from './CartContext';
 import { cn, getRoleLabel, shouldHideServiceInfo, isGreetingScreenUser, canUserAccessEvent, getUserBusinessId, isVendorManagedClient, isSelfRegisteredClient } from './lib/utils';
@@ -52,6 +54,7 @@ import { CURRENT_APP_VERSION, LATEST_RELEASE } from './pages/Changelog';
 import { showConfirm } from './lib/alerts';
 import RouteBreadcrumbs from './components/RouteBreadcrumbs';
 import { Modal } from './components/Modal';
+import ForgotPasswordModal from './components/ForgotPasswordModal';
 import { auth, db } from './lib/firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc, getDocs, collection, query, where, setDoc, updateDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
@@ -622,11 +625,13 @@ export default function AppLayout() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
   const [lockedSessionInfo, setLockedSessionInfo] = useState<{
     email: string;
     name: string;
@@ -873,143 +878,181 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
 
   if (!currentUser || !appUser) {
     return (
-      <div className="flex min-h-screen bg-gray-50">
-        {/* Left Column - Image */}
-        <div className="hidden lg:flex lg:w-1/2 relative bg-gray-900">
-          <div className="absolute inset-0">
+      <div className="flex min-h-[100dvh] bg-gray-50">
+        {/* Left Column - Editorial Visual (Desktop) */}
+        <div className="hidden lg:flex lg:w-1/2 relative bg-gray-900 overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-gray-900 to-rose-950/60">
             <img
               src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?q=80&w=2070&auto=format&fit=crop"
               alt="Wedding Event"
+              referrerPolicy="no-referrer"
               className="w-full h-full object-cover"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-gray-900/90 via-gray-900/40 to-transparent"></div>
+            <div className="absolute inset-0 bg-gradient-to-t from-gray-950/90 via-gray-900/45 to-gray-900/20" />
           </div>
-          <div className="relative z-10 flex flex-col justify-between p-16 xl:p-24 h-full text-white w-full">
+          <div className="relative z-10 flex flex-col justify-between p-12 xl:p-16 h-full text-white w-full">
             <div>
               {settings?.logoUrl ? (
-                <img src={settings.logoUrl} alt="Logo" className="h-10 w-auto object-contain brightness-0 invert" />
+                <img src={settings.logoUrl} alt="Logo" className="h-9 xl:h-10 w-auto object-contain brightness-0 invert" />
               ) : (
-                <h1 className="text-3xl font-bold tracking-tight text-white">Guestly</h1>
+                <h1 className="text-2xl xl:text-3xl font-bold tracking-tight text-white">Guestly</h1>
               )}
             </div>
-            <blockquote className="space-y-6">
-              <p className="text-2xl font-medium leading-relaxed font-serif">
+            <blockquote className="space-y-4 max-w-lg">
+              <p className="text-xl xl:text-2xl font-medium leading-relaxed font-serif text-balance">
                 "Manajemen tamu yang modern dan elegan. Membuat hari spesial Anda lebih terorganisir dan bebas dari kekhawatiran."
               </p>
-              <footer className="text-sm text-gray-300">
+              <footer className="text-xs xl:text-sm text-gray-300">
                 — Guestly Smart Management
               </footer>
             </blockquote>
           </div>
         </div>
 
-        {/* Right Column - Form */}
-        <div className="w-full lg:w-1/2 flex flex-col justify-center px-4 sm:px-6 lg:px-20 xl:px-24 relative py-12 lg:py-0">
-          <div className="w-full max-w-md mx-auto space-y-6 mt-4 lg:mt-0 bg-white p-8 sm:p-10 rounded-2xl shadow-xl border border-gray-100">
-            <div className="flex justify-center mb-6">
+        {/* Right Column - Compact Login Card (Responsive Mobile / Tablet / Desktop) */}
+        <div className="w-full lg:w-1/2 flex flex-col justify-center items-center px-4 sm:px-8 lg:px-12 xl:px-16 py-6 sm:py-10">
+          <div className="w-full max-w-[400px] sm:max-w-[420px]">
+            {/* Brand Logo shown outside card on Mobile & Tablet only (desktop already shows logo on left panel) */}
+            <div className="flex justify-center mb-4 sm:mb-5 lg:hidden">
               {settings?.logoUrl ? (
-                <img src={settings.logoUrl} alt="Logo" className="h-10 sm:h-12 w-auto object-contain" />
+                <img src={settings.logoUrl} alt="Logo" className="h-9 sm:h-10 w-auto object-contain" />
               ) : (
-                <h1 className="text-3xl font-bold tracking-tight text-indigo-600">Guestly</h1>
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-indigo-600">Guestly</h1>
               )}
             </div>
 
-            <div className="text-center">
-              <h2 className="text-2xl font-bold tracking-tight text-gray-900">
-                {isRegistering ? 'Buat Akun Baru' : 'Selamat Datang'}
-              </h2>
-              <p className="mt-2 text-sm text-gray-500">
-                {isRegistering
-                  ? 'Daftar untuk mulai mengelola acara dan tamu Anda'
-                  : 'Masuk ke akun Anda untuk mengelola acara dan tamu'}
-              </p>
-            </div>
-
-            <form className="space-y-6" onSubmit={handleEmailAuth}>
-              {loginError && (
-                <div className="bg-red-50 border border-red-100 text-red-600 p-3 rounded-lg text-sm flex items-center">
-                  {loginError}
-                </div>
-              )}
-              <div className="space-y-5">
-                {isRegistering && (
-                  <>
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 block mb-1.5">Nama Lengkap</label>
-                      <input
-                        type="text"
-                        required
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
-                        placeholder="Nama Anda"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 block mb-1.5">No. WhatsApp / HP</label>
-                      <input
-                        type="tel"
-                        required
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                        className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
-                        placeholder="08123456789"
-                      />
-                    </div>
-                  </>
-                )}
-                <div>
-                  <label className="text-sm font-medium text-gray-700 block mb-1.5">Email</label>
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
-                    placeholder="email@example.com"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700 block mb-1.5">Password</label>
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
-                    placeholder="••••••••"
-                  />
-                </div>
+            <div className="bg-white px-5 py-6 sm:px-7 sm:py-7 rounded-2xl shadow-lg shadow-slate-900/[0.06] border border-gray-200/80">
+              <div className="text-center">
+                <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">
+                  {isRegistering ? 'Buat Akun Baru' : 'Selamat Datang'}
+                </h2>
+                <p className="mt-1 text-xs sm:text-sm text-gray-500">
+                  {isRegistering
+                    ? 'Daftar untuk mulai mengelola acara dan tamu Anda'
+                    : 'Masuk ke akun Anda untuk mengelola acara dan tamu'}
+                </p>
               </div>
 
-              <button
-                type="submit"
-                disabled={isLoggingIn}
-                className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition-colors"
-              >
-                {isLoggingIn ? 'Memproses...' : isRegistering ? 'Daftar' : 'Masuk'}
-              </button>
-            </form>
+              <form className="mt-5 space-y-4" onSubmit={handleEmailAuth}>
+                {loginError && (
+                  <div className="bg-red-50 border border-red-200/80 text-red-700 px-3 py-2.5 rounded-lg text-xs sm:text-sm leading-snug">
+                    {loginError}
+                  </div>
+                )}
 
-            <div className="text-center pt-2">
-              <button
-                type="button"
-                onClick={() => setIsRegistering(!isRegistering)}
-                className="text-sm text-gray-600 hover:text-indigo-600 font-medium transition-colors"
-              >
-                {isRegistering ? 'Sudah punya akun? Masuk' : 'Belum punya akun? Daftar'}
-              </button>
+                <div className="space-y-3.5">
+                  {isRegistering && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-semibold text-gray-700 block mb-1">Nama Lengkap</label>
+                        <input
+                          type="text"
+                          required
+                          autoComplete="name"
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                          className="w-full h-10 text-sm border border-gray-300 rounded-lg px-3.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
+                          placeholder="Nama Anda"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-gray-700 block mb-1">No. WhatsApp / HP</label>
+                        <input
+                          type="tel"
+                          required
+                          autoComplete="tel"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          className="w-full h-10 text-sm border border-gray-300 rounded-lg px-3.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
+                          placeholder="08123456789"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 block mb-1">Email</label>
+                    <input
+                      type="email"
+                      required
+                      autoComplete="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full h-10 text-sm border border-gray-300 rounded-lg px-3.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
+                      placeholder="email@example.com"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-semibold text-gray-700">Password</label>
+                      {!isRegistering && (
+                        <button
+                          type="button"
+                          onClick={() => setIsForgotPasswordOpen(true)}
+                          className="text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:underline transition-colors cursor-pointer"
+                        >
+                          Lupa kata sandi?
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        autoComplete={isRegistering ? 'new-password' : 'current-password'}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="w-full h-10 text-sm border border-gray-300 rounded-lg pl-3.5 pr-10 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
+                        placeholder="••••••••"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((prev) => !prev)}
+                        aria-label={showPassword ? 'Sembunyikan password' : 'Lihat password'}
+                        title={showPassword ? 'Sembunyikan password' : 'Lihat password'}
+                        className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30 transition-colors cursor-pointer"
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isLoggingIn}
+                  className="w-full h-10.5 flex items-center justify-center px-4 border border-transparent rounded-lg shadow-xs text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  {isLoggingIn ? 'Memproses...' : isRegistering ? 'Daftar' : 'Masuk'}
+                </button>
+              </form>
+
+              <div className="mt-4 pt-3.5 border-t border-gray-100 text-center text-xs sm:text-sm text-gray-500">
+                <span>{isRegistering ? 'Sudah punya akun?' : 'Belum punya akun?'} </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRegistering(!isRegistering);
+                    setLoginError('');
+                  }}
+                  className="text-indigo-600 hover:text-indigo-700 font-semibold hover:underline transition-colors cursor-pointer"
+                >
+                  {isRegistering ? 'Masuk' : 'Daftar'}
+                </button>
+              </div>
             </div>
 
-            <div className="pt-4 border-t border-gray-100 flex items-center justify-center gap-2 text-xs text-gray-500">
-              <span>Versi Saat Ini</span>
-              <span
-                className="inline-flex items-center gap-1 font-mono font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200/80 px-2 py-0.5 rounded-lg"
+            {/* Versi Aktif Saat Ini (matching Changelog indicator) */}
+            <div className="mt-4 flex justify-center">
+              <div
+                className="inline-flex items-center gap-2 text-xs text-slate-600 bg-rose-50/70 border border-rose-200/80 px-3 py-1.5 rounded-xl w-fit"
                 title={LATEST_RELEASE.date ? `Rilis ${LATEST_RELEASE.date}` : undefined}
               >
-                <Tag className="w-3 h-3" />
-                {CURRENT_APP_VERSION}
-              </span>
+                <Tag className="w-3.5 h-3.5 text-[#8C3A50] shrink-0" />
+                <span>Versi Aktif Saat Ini:</span>
+                <strong className="font-mono tabular-nums text-[#8C3A50]">{CURRENT_APP_VERSION}</strong>
+              </div>
             </div>
           </div>
         </div>
@@ -1139,6 +1182,19 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
             </div>
           )}
         </Modal>
+
+        {/* Forgot Password Modal (WhatsApp OTP + WA Admin Manual Fallback) */}
+        <ForgotPasswordModal
+          isOpen={isForgotPasswordOpen}
+          onClose={() => setIsForgotPasswordOpen(false)}
+          initialEmail={email}
+          adminPhone={settings?.adminPhone || '6285158636606'}
+          onResetSuccess={(resolvedEmail) => {
+            if (resolvedEmail) setEmail(resolvedEmail);
+            setPassword('');
+            setLoginError('');
+          }}
+        />
       </div>
     );
   }

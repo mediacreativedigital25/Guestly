@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import cron from "node-cron";
@@ -53,7 +54,12 @@ const upload = multer({
 });
 
 function normalizePhoneTarget(raw: string): string {
-  const cleaned = String(raw || '').trim().replace(/[\s\-().]/g, '');
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.toLowerCase().includes('@g.us')) {
+    return trimmed.replace(/\s+/g, '');
+  }
+  const cleaned = trimmed.replace(/[\s\-().]/g, '');
   if (!cleaned) return '';
   if (cleaned.startsWith('+62')) return '0' + cleaned.slice(3);
   if (cleaned.startsWith('62') && cleaned.length > 9) return '0' + cleaned.slice(2);
@@ -408,13 +414,79 @@ async function startServer() {
     }
   });
 
+  // Fetch WhatsApp group list from Fonnte safely from server-side
+  app.post('/api/fonnte/groups', async (req, res) => {
+    try {
+      const { token: customToken, useGlobal, refresh } = req.body || {};
+      const cleanCustom = customToken ? String(customToken).trim() : '';
+      const resolvedToken = cleanCustom
+        ? cleanCustom
+        : useGlobal
+        ? await resolveServerFonnteToken()
+        : '';
+
+      if (!resolvedToken) {
+        return res.json({
+          success: false,
+          groups: [],
+          error: 'Token Fonnte belum diatur. Pastikan Token Vendor atau Token Global Guestly sudah terhubung.',
+        });
+      }
+
+      if (refresh !== false) {
+        try {
+          await fetch('https://api.fonnte.com/fetch-group', {
+            method: 'POST',
+            headers: { Authorization: resolvedToken },
+          });
+        } catch {
+          // continue to get-whatsapp-group
+        }
+      }
+
+      const groupRes = await fetch('https://api.fonnte.com/get-whatsapp-group', {
+        method: 'POST',
+        headers: { Authorization: resolvedToken },
+      });
+      const result: any = await groupRes.json().catch(() => ({}));
+
+      if (result?.status && Array.isArray(result.data)) {
+        const groups = result.data
+          .filter((g: any) => g && g.id)
+          .map((g: any) => ({
+            id: String(g.id).trim(),
+            name: String(g.name || g.id).trim(),
+          }));
+        return res.json({
+          success: true,
+          groups,
+          tokenSource: cleanCustom ? 'Token Fonnte Vendor' : 'Token Global Guestly',
+        });
+      }
+
+      return res.json({
+        success: false,
+        groups: [],
+        error: result?.reason || 'Gagal mengambil daftar grup dari Fonnte. Pastikan device WhatsApp terhubung.',
+      });
+    } catch (error: any) {
+      console.error('Error fetching Fonnte groups:', error);
+      res.status(500).json({
+        success: false,
+        groups: [],
+        error: error?.message || 'Gagal menghubungi server Fonnte.',
+      });
+    }
+  });
+
   // Proxy endpoint for sending WhatsApp messages via Fonnte securely
   app.post('/api/send-whatsapp', async (req, res) => {
     try {
-      const { target, message, url, token: customToken, strictToken } = req.body;
+      const { target, message, url, token: customToken, strictToken, schedule } = req.body;
       const normalizedTarget = normalizePhoneTarget(target);
+      const isGroupTarget = normalizedTarget.toLowerCase().includes('@g.us');
       if (!normalizedTarget) {
-        return res.status(400).json({ success: false, error: 'Nomor WhatsApp tujuan tidak valid atau kosong.' });
+        return res.status(400).json({ success: false, error: 'Nomor atau ID Grup WhatsApp tujuan tidak valid atau kosong.' });
       }
 
       const cleanCustomToken = customToken ? String(customToken).trim() : '';
@@ -439,10 +511,15 @@ async function startServer() {
       const body = new URLSearchParams({
         "target": normalizedTarget,
         "message": message,
-        "countryCode": "62"
       });
+      if (!isGroupTarget) {
+        body.append("countryCode", "62");
+      }
       if (resolvedMediaUrl) {
         body.append("url", resolvedMediaUrl);
+      }
+      if (schedule && Number(schedule) > 0) {
+        body.append("schedule", String(Math.floor(Number(schedule))));
       }
 
       const response = await fetch("https://api.fonnte.com/send", {
@@ -465,6 +542,532 @@ async function startServer() {
     } catch (error: any) {
       console.error('Error proxying wa message:', error);
       res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // ================= FORGOT PASSWORD (WHATSAPP OTP + ADMIN FALLBACK) =================
+  function normalizePhoneDigits62(raw: string): string {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.startsWith('62')) return digits;
+    if (digits.startsWith('0')) return '62' + digits.slice(1);
+    if (digits.startsWith('8')) return '62' + digits;
+    return digits;
+  }
+
+  function maskPhoneForDisplay(raw: string): string {
+    const target = normalizePhoneTarget(raw);
+    const digits = target.replace(/\D/g, '');
+    if (digits.length <= 6) return digits;
+    const prefix = digits.slice(0, 4);
+    const suffix = digits.slice(-3);
+    const hidden = '•'.repeat(Math.max(3, digits.length - 7));
+    return `${prefix}${hidden}${suffix}`;
+  }
+
+  function extractUserPhone(userRow: any, meta: any): string {
+    const candidates = [
+      meta?.phone,
+      meta?.whatsapp,
+      meta?.whatsappNumber,
+      meta?.phoneNumber,
+      meta?.noWa,
+      userRow?.phone,
+      userRow?.whatsapp,
+    ];
+    for (const c of candidates) {
+      const str = String(c || '').trim();
+      const digits = str.replace(/\D/g, '');
+      if (digits.length >= 9) return str;
+    }
+    return '';
+  }
+
+  function hashResetOtp(userId: string, otp: string): string {
+    return crypto
+      .createHash('sha256')
+      .update(`${userId}:${otp.trim()}:guestly-otp-v1`)
+      .digest('hex');
+  }
+
+  async function resolveAdminWhatsappNumber(): Promise<string> {
+    try {
+      const { data: rows } = await supabase
+        .from('settings')
+        .select('id, data')
+        .in('id', ['global', 'doc:settings:global']);
+      for (const r of rows || []) {
+        const raw = r?.data?.adminPhone;
+        if (raw && String(raw).replace(/\D/g, '').length >= 9) {
+          return normalizePhoneDigits62(String(raw));
+        }
+      }
+    } catch {
+      // ignore fallback
+    }
+    return '6285158636606';
+  }
+
+  async function findUserForPasswordReset(identifier: string): Promise<{
+    id: string;
+    email: string;
+    name: string;
+    phone: string;
+    role: string;
+    meta: any;
+  } | null> {
+    const trimmed = String(identifier || '').trim();
+    if (!trimmed) return null;
+    const isEmail = trimmed.includes('@');
+    const cleanEmail = trimmed.toLowerCase();
+    const cleanPhone62 = !isEmail ? normalizePhoneDigits62(trimmed) : '';
+
+    if (isEmail) {
+      const { data: userRow } = await supabase
+        .from('users')
+        .select('*')
+        .ilike('email', cleanEmail)
+        .maybeSingle();
+
+      if (userRow) {
+        const { data: metaRow } = await supabase
+          .from('settings')
+          .select('data')
+          .eq('id', `doc:users:${userRow.id}`)
+          .maybeSingle();
+        const meta = metaRow?.data || {};
+        return {
+          id: userRow.id,
+          email: userRow.email || meta.email || cleanEmail,
+          name: meta.name || userRow.name || 'Pengguna',
+          phone: extractUserPhone(userRow, meta),
+          role: meta.role || userRow.role || 'client',
+          meta,
+        };
+      }
+    }
+
+    // Fallback full scan across settings doc:users:% (also handles phone lookup & migrated users)
+    const { data: metaRows } = await supabase
+      .from('settings')
+      .select('id, data')
+      .like('id', 'doc:users:%');
+
+    for (const row of metaRows || []) {
+      const d = row?.data || {};
+      const uid = String(row.id || '').replace('doc:users:', '');
+      if (!uid) continue;
+
+      if (isEmail) {
+        if (d.email && String(d.email).trim().toLowerCase() === cleanEmail) {
+          return {
+            id: uid,
+            email: d.email,
+            name: d.name || 'Pengguna',
+            phone: extractUserPhone(null, d),
+            role: d.role || 'client',
+            meta: d,
+          };
+        }
+      } else if (cleanPhone62.length >= 9) {
+        const extracted = extractUserPhone(null, d);
+        if (extracted && normalizePhoneDigits62(extracted) === cleanPhone62) {
+          return {
+            id: uid,
+            email: d.email || '',
+            name: d.name || 'Pengguna',
+            phone: extracted,
+            role: d.role || 'client',
+            meta: d,
+          };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  app.post('/api/auth/forgot-password/request', async (req, res) => {
+    try {
+      const { identifier } = req.body || {};
+      const trimmed = String(identifier || '').trim();
+      if (!trimmed) {
+        return res.status(400).json({
+          success: false,
+          error: 'Masukkan email atau nomor WhatsApp yang terdaftar.',
+        });
+      }
+
+      const adminPhone = await resolveAdminWhatsappNumber();
+      const user = await findUserForPasswordReset(trimmed);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          code: 'ACCOUNT_NOT_FOUND',
+          adminPhone,
+          error: 'Akun dengan email atau nomor WhatsApp tersebut tidak ditemukan. Periksa kembali ejaan Anda.',
+        });
+      }
+
+      if (!user.phone) {
+        return res.json({
+          success: false,
+          code: 'NO_WHATSAPP',
+          fallbackAdminWa: true,
+          adminPhone,
+          userName: user.name,
+          userEmail: user.email,
+          error:
+            'Akun ini belum mendaftarkan nomor WhatsApp, sehingga kode OTP tidak dapat dikirim otomatis. Silakan hubungi Admin via WhatsApp untuk bantuan reset kata sandi.',
+        });
+      }
+
+      const otpDocId = `doc:password_reset_otp:${user.id}`;
+      const { data: existingOtpRow } = await supabase
+        .from('settings')
+        .select('data')
+        .eq('id', otpDocId)
+        .maybeSingle();
+
+      const nowMs = Date.now();
+      const COOLDOWN_MS = 60 * 1000;
+      const EXPIRY_MS = 5 * 60 * 1000;
+      const maskedPhone = maskPhoneForDisplay(user.phone);
+
+      if (existingOtpRow?.data?.createdAtMs) {
+        const elapsed = nowMs - Number(existingOtpRow.data.createdAtMs);
+        if (elapsed < COOLDOWN_MS) {
+          const retryAfterSec = Math.max(1, Math.ceil((COOLDOWN_MS - elapsed) / 1000));
+          return res.status(429).json({
+            success: false,
+            code: 'COOLDOWN',
+            retryAfterSec,
+            maskedPhone,
+            error: `Kode OTP baru saja dikirim ke ${maskedPhone}. Tunggu ${retryAfterSec} detik untuk mengirim ulang.`,
+          });
+        }
+      }
+
+      const token = await resolveServerFonnteToken();
+      if (!token) {
+        return res.json({
+          success: false,
+          code: 'FONNTE_NOT_CONFIGURED',
+          fallbackAdminWa: true,
+          adminPhone,
+          userName: user.name,
+          userEmail: user.email,
+          error:
+            'Layanan pengiriman OTP WhatsApp otomatis sedang tidak tersedia. Silakan hubungi Admin via WhatsApp untuk reset kata sandi manual.',
+        });
+      }
+
+      const otpCode = String(crypto.randomInt(100000, 1000000));
+      const otpHash = hashResetOtp(user.id, otpCode);
+      const targetPhone = normalizePhoneTarget(user.phone);
+
+      const message = `🔐 *Kode Reset Kata Sandi Guestly*
+
+Halo Kak *${user.name}*,
+
+Kami menerima permintaan reset kata sandi untuk akun Guestly Anda (*${user.email || maskedPhone}*).
+
+Kode OTP Anda:
+*${otpCode}*
+
+⏱️ Berlaku selama *5 menit* (hanya dapat digunakan 1 kali).
+⚠️ *Jangan bagikan kode ini kepada siapa pun*, termasuk pihak yang mengaku admin.
+
+Jika Anda tidak merasa meminta reset kata sandi, abaikan pesan ini — kata sandi Anda tetap aman.
+
+─────────────────
+*Guestly* · Smart Guest Management`;
+
+      const waBody = new URLSearchParams({
+        target: targetPhone,
+        message,
+        countryCode: '62',
+      });
+
+      const waRes = await fetch('https://api.fonnte.com/send', {
+        method: 'POST',
+        headers: { Authorization: token },
+        body: waBody,
+      });
+      const waResult = await waRes.json().catch(() => ({}));
+
+      if (!waResult?.status) {
+        return res.json({
+          success: false,
+          code: 'FONNTE_FAILED',
+          fallbackAdminWa: true,
+          adminPhone,
+          userName: user.name,
+          userEmail: user.email,
+          error:
+            'Pengiriman OTP WhatsApp otomatis sedang terkendala. Silakan hubungi Admin via WhatsApp untuk bantuan reset kata sandi.',
+        });
+      }
+
+      await supabase.from('settings').upsert(
+        {
+          id: otpDocId,
+          data: {
+            userId: user.id,
+            email: user.email,
+            maskedPhone,
+            otpHash,
+            createdAtMs: nowMs,
+            expiresAtMs: nowMs + EXPIRY_MS,
+            attempts: 0,
+            maxAttempts: 5,
+          },
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' }
+      );
+
+      return res.json({
+        success: true,
+        maskedPhone,
+        expiresInSec: Math.floor(EXPIRY_MS / 1000),
+        cooldownSec: Math.floor(COOLDOWN_MS / 1000),
+        resolvedEmail: user.email,
+      });
+    } catch (error: any) {
+      console.error('Error requesting password reset OTP:', error);
+      const adminPhone = await resolveAdminWhatsappNumber();
+      return res.status(500).json({
+        success: false,
+        fallbackAdminWa: true,
+        adminPhone,
+        error: 'Terjadi kesalahan saat memproses permintaan reset kata sandi. Silakan coba lagi atau hubungi Admin via WhatsApp.',
+      });
+    }
+  });
+
+  app.post('/api/auth/forgot-password/confirm', async (req, res) => {
+    try {
+      const { identifier, otp, newPassword } = req.body || {};
+      const trimmedId = String(identifier || '').trim();
+      const cleanOtp = String(otp || '').replace(/\D/g, '').trim();
+      const cleanPassword = String(newPassword || '');
+
+      if (!trimmedId || !cleanOtp || !cleanPassword) {
+        return res.status(400).json({
+          success: false,
+          error: 'Lengkapi kode OTP dan kata sandi baru Anda.',
+        });
+      }
+
+      if (!/^\d{6}$/.test(cleanOtp)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Kode OTP harus berupa 6 digit angka.',
+        });
+      }
+
+      if (cleanPassword.length < 6) {
+        return res.status(400).json({
+          success: false,
+          error: 'Kata sandi baru minimal harus 6 karakter.',
+        });
+      }
+
+      const user = await findUserForPasswordReset(trimmedId);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: 'Akun tidak ditemukan. Silakan ulangi proses dari awal.',
+        });
+      }
+
+      const otpDocId = `doc:password_reset_otp:${user.id}`;
+      const { data: otpRow } = await supabase
+        .from('settings')
+        .select('data')
+        .eq('id', otpDocId)
+        .maybeSingle();
+
+      const otpData = otpRow?.data;
+      if (!otpData || !otpData.otpHash) {
+        return res.status(400).json({
+          success: false,
+          error: 'Kode OTP tidak ditemukan atau sudah digunakan. Silakan minta kode OTP baru.',
+        });
+      }
+
+      const nowMs = Date.now();
+      if (nowMs > Number(otpData.expiresAtMs || 0)) {
+        await supabase.from('settings').delete().eq('id', otpDocId);
+        return res.status(400).json({
+          success: false,
+          code: 'OTP_EXPIRED',
+          error: 'Kode OTP sudah kedaluwarsa (lebih dari 5 menit). Silakan minta kode OTP baru.',
+        });
+      }
+
+      const currentAttempts = Number(otpData.attempts || 0);
+      const maxAttempts = Number(otpData.maxAttempts || 5);
+      if (currentAttempts >= maxAttempts) {
+        await supabase.from('settings').delete().eq('id', otpDocId);
+        return res.status(400).json({
+          success: false,
+          code: 'OTP_LOCKED',
+          error: 'Terlalu banyak percobaan kode OTP yang salah. Silakan minta kode OTP baru.',
+        });
+      }
+
+      const expectedHashBuf = Buffer.from(String(otpData.otpHash), 'hex');
+      const incomingHashBuf = Buffer.from(hashResetOtp(user.id, cleanOtp), 'hex');
+      const isMatch =
+        expectedHashBuf.length === incomingHashBuf.length &&
+        crypto.timingSafeEqual(expectedHashBuf, incomingHashBuf);
+
+      if (!isMatch) {
+        const nextAttempts = currentAttempts + 1;
+        const remaining = Math.max(0, maxAttempts - nextAttempts);
+        if (remaining === 0) {
+          await supabase.from('settings').delete().eq('id', otpDocId);
+          return res.status(400).json({
+            success: false,
+            code: 'OTP_LOCKED',
+            error: 'Kode OTP salah dan batas percobaan habis. Silakan minta kode OTP baru.',
+          });
+        }
+        await supabase.from('settings').upsert(
+          {
+            id: otpDocId,
+            data: { ...otpData, attempts: nextAttempts },
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'id' }
+        );
+        return res.status(400).json({
+          success: false,
+          code: 'OTP_INVALID',
+          error: `Kode OTP tidak sesuai. Sisa percobaan: ${remaining}x.`,
+        });
+      }
+
+      // OTP valid: update password AND force-logout all old device sessions cleanly
+      const nowIso = new Date().toISOString();
+      const userDocId = `doc:users:${user.id}`;
+      const { data: latestUserMetaRow } = await supabase
+        .from('settings')
+        .select('data')
+        .eq('id', userDocId)
+        .maybeSingle();
+
+      const updatedUserMeta = {
+        ...(latestUserMetaRow?.data || user.meta || {}),
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        _password: cleanPassword,
+        activeDevices: [],
+        activeDeviceId: null,
+        activeDeviceName: null,
+        sessionRevoked: true,
+        passwordResetAt: nowIso,
+        updatedAt: nowIso,
+      };
+
+      const { error: updateErr } = await supabase.from('settings').upsert(
+        {
+          id: userDocId,
+          data: updatedUserMeta,
+          updated_at: nowIso,
+        },
+        { onConflict: 'id' }
+      );
+
+      if (updateErr) {
+        throw updateErr;
+      }
+
+      // Touch users table updated_at (non-fatal)
+      await supabase
+        .from('users')
+        .update({ updated_at: nowIso })
+        .eq('id', user.id);
+
+      // Delete OTP immediately (strict one-time use)
+      await supabase.from('settings').delete().eq('id', otpDocId);
+
+      // Send security confirmation notice via WhatsApp (Opsi 2: masked password, non-blocking)
+      if (user.phone) {
+        const maskPasswordForNotice = (pwd: string): string => {
+          const chars = Array.from(pwd);
+          if (chars.length >= 8) {
+            return `${chars.slice(0, 2).join('')}${'•'.repeat(Math.max(4, chars.length - 4))}${chars.slice(-2).join('')}`;
+          }
+          if (chars.length >= 3) {
+            return `${chars[0]}${'•'.repeat(Math.max(4, chars.length - 2))}${chars[chars.length - 1]}`;
+          }
+          return '••••••';
+        };
+
+        const formatLocalPhoneDisplay = (raw62: string): string => {
+          const d = String(raw62 || '').replace(/\D/g, '');
+          const local = d.startsWith('62') ? '0' + d.slice(2) : d;
+          if (local.length >= 10) {
+            return `${local.slice(0, 4)}-${local.slice(4, 8)}-${local.slice(8)}`;
+          }
+          return local || '0851-5863-6606';
+        };
+
+        const adminPhone62 = await resolveAdminWhatsappNumber();
+        const adminPhoneDisplay = formatLocalPhoneDisplay(adminPhone62);
+        const maskedPassword = maskPasswordForNotice(cleanPassword);
+        const charCount = Array.from(cleanPassword).length;
+        const origin = getPublicOrigin(req) || 'https://guestly.yulovi.com';
+        const loginUrl = `${origin.replace(/\/+$/, '')}/auth/login`;
+        const formattedTimeWib =
+          new Intl.DateTimeFormat('id-ID', {
+            timeZone: 'Asia/Jakarta',
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          })
+            .format(new Date())
+            .replace(/\./g, ':') + ' WIB';
+
+        const confirmMsg = `✅ *Kata Sandi Guestly Berhasil Diperbarui*
+
+Halo Kak *${user.name}*,
+
+Kata sandi akun Guestly Anda telah berhasil diperbarui pada *${formattedTimeWib}*. Berikut ringkasan akses akun Anda:
+
+📧 *Username / Email* : ${user.email || user.phone}
+🔑 *Kata Sandi Baru* : ${maskedPassword} _(${charCount} karakter — disamarkan demi keamanan)_
+🌐 *Link Login* : ${loginUrl}
+
+🔒 Demi keamanan akun, seluruh sesi login pada perangkat lama telah otomatis dikeluarkan. Silakan masuk kembali menggunakan kata sandi baru Anda.
+
+Jika Anda *tidak merasa* melakukan perubahan ini, segera hubungi Admin Guestly:
+📞 ${adminPhoneDisplay}
+
+─────────────────
+*Guestly*
+Smart Digital Guestbook & Event Management`;
+        sendWhatsAppNotification(user.phone, confirmMsg).catch(() => {});
+      }
+
+      return res.json({
+        success: true,
+        email: user.email,
+        message: 'Kata sandi berhasil diperbarui dan semua sesi perangkat lama telah dikeluarkan.',
+      });
+    } catch (error: any) {
+      console.error('Error confirming password reset:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Gagal memperbarui kata sandi. Silakan coba lagi beberapa saat.',
+      });
     }
   });
 
@@ -526,10 +1129,11 @@ async function startServer() {
 
     if (candidateKey) {
       const baseName = path.basename(candidateKey);
+      const uploadsResolvedBase = path.resolve(uploadsBaseDir);
       const localPaths = [
-        path.join(uploadsBaseDir, candidateKey),
-        path.join(uploadsBaseDir, baseName),
-      ];
+        path.resolve(uploadsResolvedBase, candidateKey),
+        path.resolve(uploadsResolvedBase, baseName),
+      ].filter((p) => p.startsWith(uploadsResolvedBase + path.sep));
       for (const p of localPaths) {
         try {
           if (fs.existsSync(p) && fs.statSync(p).isFile() && fs.statSync(p).size > 0) {
@@ -648,6 +1252,10 @@ async function startServer() {
   });
 
   app.post('/api/media/upload', (req, res) => {
+    const authHeader = String(req.headers['x-auth-token'] || req.headers.authorization || '').trim();
+    if (!authHeader) {
+      return res.status(401).json({ success: false, error: { message: 'Sesi autentikasi diperlukan untuk mengunggah file.' } });
+    }
     upload.single('file')(req, res, async (multerErr: any) => {
       if (multerErr) {
         console.error('Multer upload error:', multerErr);
@@ -662,35 +1270,98 @@ async function startServer() {
         }
 
         const rawCategory = String(req.body.category || 'attachment').trim();
-        const category =
+        const normalizedCategory =
           rawCategory === 'Layar Sapa'
             ? 'Layar Sapa'
+            : rawCategory === 'salespage'
+            ? 'super_admin_media'
             : rawCategory.replace(/[^a-zA-Z0-9_-]/g, '') || 'attachment';
-        const key = `${category}/${req.file.filename}`;
+
+        const uploadsResolvedBase = path.resolve(uploadsBaseDir);
+        let finalFileName = path.basename(req.file.filename);
+        let finalMimeType = req.file.mimetype || 'application/octet-stream';
+        let finalSizeBytes = req.file.size;
+        let fileContent: Buffer = fs.readFileSync(req.file.path);
+
+        // Automatically convert all raster images in super_admin_media to compact WebP via sharp
+        const isSuperAdminRasterImage =
+          normalizedCategory === 'super_admin_media' &&
+          finalMimeType !== 'image/svg+xml' &&
+          !finalMimeType.includes('icon') &&
+          (finalMimeType.startsWith('image/') ||
+            /\.(jpe?g|png|webp|gif|avif|tiff?|bmp)$/i.test(finalFileName));
+
+        if (isSuperAdminRasterImage) {
+          try {
+            const webpBuffer = await sharp(fileContent)
+              .rotate()
+              .resize({
+                width: 1920,
+                height: 1920,
+                fit: 'inside',
+                withoutEnlargement: true,
+              })
+              .webp({ quality: 82, effort: 4 })
+              .toBuffer();
+
+            const baseParsed = path.parse(finalFileName).name.replace(/[^a-zA-Z0-9_-]/g, '') || `${Date.now()}`;
+            const webpFileName = `${baseParsed}.webp`;
+            const webpDiskPath = path.resolve(uploadsResolvedBase, webpFileName);
+
+            if (webpDiskPath.startsWith(uploadsResolvedBase + path.sep)) {
+              fs.writeFileSync(webpDiskPath, webpBuffer);
+              const originalDiskPath = path.resolve(req.file.path);
+              if (
+                originalDiskPath !== webpDiskPath &&
+                originalDiskPath.startsWith(uploadsResolvedBase + path.sep) &&
+                fs.existsSync(originalDiskPath)
+              ) {
+                try {
+                  fs.unlinkSync(originalDiskPath);
+                } catch {
+                  // ignore cleanup error
+                }
+              }
+              finalFileName = webpFileName;
+              finalMimeType = 'image/webp';
+              finalSizeBytes = webpBuffer.length;
+              fileContent = webpBuffer;
+            }
+          } catch (sharpErr: any) {
+            console.warn('Sharp WebP conversion skipped, keeping original image:', sharpErr?.message);
+          }
+        }
+
+        const key = `${normalizedCategory}/${finalFileName}`;
         let finalUrl = `/api/media/r2/${key}`;
 
         const r2Client = getR2Client();
         if (r2Client) {
           try {
-            const fileContent = fs.readFileSync(req.file.path);
             await r2Client.send(new PutObjectCommand({
               Bucket: r2BucketName,
               Key: key,
               Body: fileContent,
-              ContentType: req.file.mimetype,
+              ContentType: finalMimeType,
+              CacheControl: 'public, max-age=31536000, immutable',
             }));
           } catch (r2Error: any) {
             console.warn('R2 upload failed, falling back to local server storage:', r2Error.message);
-            finalUrl = `/uploads/${req.file.filename}`;
+            finalUrl = `/uploads/${finalFileName}`;
           }
+        } else {
+          finalUrl = `/uploads/${finalFileName}`;
         }
 
         return res.json({
           success: true,
           data: {
             url: finalUrl,
-            key: key,
-            sizeBytes: req.file.size
+            key,
+            sizeBytes: finalSizeBytes,
+            mimeType: finalMimeType,
+            fileName: finalFileName,
+            category: normalizedCategory,
           }
         });
       } catch (err: any) {
@@ -702,11 +1373,16 @@ async function startServer() {
 
   app.delete('/api/media/delete', async (req, res) => {
     try {
+      const authHeader = String(req.headers['x-auth-token'] || req.headers.authorization || '').trim();
+      if (!authHeader) {
+        return res.status(401).json({ success: false, error: { message: 'Sesi autentikasi diperlukan untuk menghapus file.' } });
+      }
       const { key } = req.body;
-      if (key) {
+      if (key && typeof key === 'string' && !key.includes('..')) {
+        const uploadsResolvedBase = path.resolve(uploadsBaseDir);
         const localFileName = path.basename(key);
-        const filePath = path.join(uploadsBaseDir, localFileName);
-        if (fs.existsSync(filePath)) {
+        const filePath = path.resolve(uploadsResolvedBase, localFileName);
+        if (filePath.startsWith(uploadsResolvedBase + path.sep) && fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
         }
 
@@ -731,12 +1407,20 @@ async function startServer() {
 
   app.get('/api/media/info', (req, res) => {
     try {
-      const key = req.query.key as string;
-      if (!key) {
+      const key = String(req.query.key || '').trim();
+      if (!key || key.includes('..')) {
         return res.status(400).json({ success: false, error: { message: 'Key file diperlukan' } });
       }
-      const filePath = path.join(uploadsBaseDir, key);
-      if (!fs.existsSync(filePath)) {
+      const uploadsResolvedBase = path.resolve(uploadsBaseDir);
+      const candidatePath = path.resolve(uploadsResolvedBase, key);
+      const fallbackPath = path.resolve(uploadsResolvedBase, path.basename(key));
+      const filePath =
+        candidatePath.startsWith(uploadsResolvedBase + path.sep) && fs.existsSync(candidatePath)
+          ? candidatePath
+          : fallbackPath.startsWith(uploadsResolvedBase + path.sep) && fs.existsSync(fallbackPath)
+          ? fallbackPath
+          : null;
+      if (!filePath) {
         return res.status(404).json({ success: false, error: { message: 'File tidak ditemukan' } });
       }
       const stat = fs.statSync(filePath);
@@ -1424,6 +2108,62 @@ async function startServer() {
       ? path.join(process.cwd(), 'index.html')
       : path.join(process.cwd(), 'dist', 'index.html');
   }
+
+  // Upload browser-rendered 1200x675 personalized E-Invite JPEG to R2 / local OG cache
+  app.post('/api/og/einvite/upload', (req, res) => {
+    upload.single('file')(req, res, async (multerErr: any) => {
+      if (multerErr) {
+        return res.status(400).json({ success: false, error: multerErr.message });
+      }
+      try {
+        if (!req.file) {
+          return res.status(400).json({ success: false, error: 'File tidak ditemukan' });
+        }
+        const safeEventId = String(req.body?.eventId || '').replace(/[^a-zA-Z0-9_-]/g, '');
+        const safeTicketCode = String(req.body?.ticketCode || '').replace(/[^a-zA-Z0-9_-]/g, '');
+        if (!safeEventId || !safeTicketCode) {
+          return res.status(400).json({ success: false, error: 'Missing eventId or ticketCode' });
+        }
+
+        const key = `einvite-cards/${safeEventId}/${safeTicketCode}.jpg`;
+        const fileContent = fs.readFileSync(req.file.path);
+        const r2Client = getR2Client();
+        let finalUrl = `${getRequestOrigin(req)}/api/og/einvite/${encodeURIComponent(safeEventId)}/${encodeURIComponent(safeTicketCode)}.jpg`;
+
+        if (r2Client) {
+          try {
+            await r2Client.send(
+              new PutObjectCommand({
+                Bucket: r2BucketName,
+                Key: key,
+                Body: fileContent,
+                ContentType: 'image/jpeg',
+                CacheControl: 'public, max-age=3600',
+              })
+            );
+            const cdnDomain = (
+              process.env.CDN_DOMAIN ||
+              process.env.R2_PUBLIC_URL ||
+              'https://cdn.guestly.yulovi.com'
+            ).replace(/\/+$/, '');
+            finalUrl = `${cdnDomain}/${key}`;
+          } catch (r2Err: any) {
+            console.warn('E-Invite R2 upload failed, using server OG endpoint:', r2Err?.message);
+          }
+        }
+
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch {
+          // ignore temp cleanup error
+        }
+
+        return res.json({ success: true, key, url: finalUrl });
+      } catch (err: any) {
+        return res.status(500).json({ success: false, error: err?.message || 'Upload failed' });
+      }
+    });
+  });
 
   // E-Card Invitation OG Image endpoint (for WhatsApp Invitation Link Preview)
   app.get(['/api/og/einvite/:eventId', '/api/og/einvite/:eventId/:ticketCode'], async (req, res) => {

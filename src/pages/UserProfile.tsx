@@ -20,6 +20,8 @@ import {
 import { showAlert, showCancelAlert, showConfirm } from '../lib/alerts';
 import { getRoleLabel } from '../lib/utils';
 import { checkFonnteDevice, FonnteDeviceCheckResult } from '../lib/fonnte';
+import { WaGroupSettingsPanel, WaGroupSettingsValue } from '../components/WaGroupSettingsPanel';
+import { DEFAULT_GROUP_REMINDER_TIME, DEFAULT_GROUP_REMINDER_H0_TIME } from '../lib/waGroupReminder';
 
 export default function UserProfile() {
   const { currentUser, appUser } = useAuth();
@@ -37,13 +39,50 @@ export default function UserProfile() {
   const [isCheckingDevice, setIsCheckingDevice] = useState(false);
   const [deviceCheck, setDeviceCheck] = useState<FonnteDeviceCheckResult | null>(null);
 
+  // WhatsApp Group Reminder Settings (Owner / Partner)
+  const isBusinessOwner = appUser?.role === 'owner' || appUser?.role === 'partner';
+  const [waGroupSettings, setWaGroupSettings] = useState<WaGroupSettingsValue>({
+    waGroupId: appUser?.waGroupId || '',
+    waGroupName: appUser?.waGroupName || '',
+    waGroupReminderEnabled: Boolean(appUser?.waGroupReminderEnabled),
+    waGroupReminderH3: appUser?.waGroupReminderH3 !== false,
+    waGroupReminderH1: appUser?.waGroupReminderH1 !== false,
+    waGroupReminderH0: appUser?.waGroupReminderH0 !== false,
+    waGroupReminderTime: appUser?.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME,
+    waGroupReminderH0Time: appUser?.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME,
+  });
+  const [isSavingWaGroup, setIsSavingWaGroup] = useState(false);
+
   useEffect(() => {
     if (appUser) {
       setName(appUser.name || '');
       setPhone(appUser.phone || '');
       setFonnteToken(appUser.fonnteToken || '');
+      setWaGroupSettings({
+        waGroupId: appUser.waGroupId || '',
+        waGroupName: appUser.waGroupName || '',
+        waGroupReminderEnabled: Boolean(appUser.waGroupReminderEnabled),
+        waGroupReminderH3: appUser.waGroupReminderH3 !== false,
+        waGroupReminderH1: appUser.waGroupReminderH1 !== false,
+        waGroupReminderH0: appUser.waGroupReminderH0 !== false,
+        waGroupReminderTime: appUser.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME,
+        waGroupReminderH0Time: appUser.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME,
+      });
     }
-  }, [appUser?.id, appUser?.name, appUser?.phone, appUser?.fonnteToken]);
+  }, [
+    appUser?.id,
+    appUser?.name,
+    appUser?.phone,
+    appUser?.fonnteToken,
+    appUser?.waGroupId,
+    appUser?.waGroupName,
+    appUser?.waGroupReminderEnabled,
+    appUser?.waGroupReminderH3,
+    appUser?.waGroupReminderH1,
+    appUser?.waGroupReminderH0,
+    appUser?.waGroupReminderTime,
+    appUser?.waGroupReminderH0Time,
+  ]);
 
   useEffect(() => {
     if (appUser?.fonnteToken && appUser.fonnteToken.trim()) {
@@ -184,6 +223,49 @@ export default function UserProfile() {
       showAlert('Gagal', error?.message || 'Gagal menghapus token Fonnte.', 'error');
     } finally {
       setIsSavingFonnte(false);
+    }
+  };
+
+  const handleSaveWaGroupSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+
+    if (waGroupSettings.waGroupReminderEnabled && !waGroupSettings.waGroupId.trim()) {
+      showAlert(
+        'Kode Grup Kosong',
+        'Masukkan atau pilih Kode Grup WhatsApp terlebih dahulu sebelum mengaktifkan pengingat otomatis.',
+        'warning'
+      );
+      return;
+    }
+
+    setIsSavingWaGroup(true);
+    try {
+      await updateDoc(doc(db, 'users', currentUser.uid), {
+        waGroupId: waGroupSettings.waGroupId.trim(),
+        waGroupName: waGroupSettings.waGroupName.trim(),
+        waGroupReminderEnabled: Boolean(
+          waGroupSettings.waGroupReminderEnabled && waGroupSettings.waGroupId.trim()
+        ),
+        waGroupReminderH3: Boolean(waGroupSettings.waGroupReminderH3),
+        waGroupReminderH1: Boolean(waGroupSettings.waGroupReminderH1),
+        waGroupReminderH0: Boolean(waGroupSettings.waGroupReminderH0),
+        waGroupReminderTime: waGroupSettings.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME,
+        waGroupReminderH0Time: waGroupSettings.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME,
+        updatedAt: serverTimestamp(),
+      });
+      showAlert(
+        'Pengaturan Grup Disimpan',
+        waGroupSettings.waGroupReminderEnabled && waGroupSettings.waGroupId.trim()
+          ? `Pengingat otomatis Grup WA aktif (H-3 & H-1 pukul ${waGroupSettings.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME} WIB, Hari H pukul ${waGroupSettings.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME} WIB).`
+          : 'Pengaturan Grup WhatsApp tim berhasil disimpan.',
+        'success'
+      );
+    } catch (error: any) {
+      console.error(error);
+      showAlert('Gagal', error?.message || 'Gagal menyimpan pengaturan Grup WhatsApp.', 'error');
+    } finally {
+      setIsSavingWaGroup(false);
     }
   };
 
@@ -463,6 +545,50 @@ export default function UserProfile() {
           </div>
         </div>
       </div>
+
+      {/* Pengaturan Grup WhatsApp Tim (Khusus Owner / Partner) */}
+      {isBusinessOwner && (
+        <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
+          <div className="border-b border-slate-200 px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">
+                Pengingat Grup WhatsApp Tim (H-3, H-1 &amp; Hari H)
+              </h2>
+              <p className="text-xs text-slate-500">
+                Kirim pengingat jadwal acara dan konfirmasi daftar Staff bertugas otomatis ke Grup WA tim Anda via Fonnte.
+              </p>
+            </div>
+            {waGroupSettings.waGroupReminderEnabled && waGroupSettings.waGroupId.trim() ? (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                Aktif · {waGroupSettings.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME} / Hari H {waGroupSettings.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME} WIB
+              </span>
+            ) : (
+              <span className="text-xs text-slate-500">Belum diaktifkan</span>
+            )}
+          </div>
+
+          <form onSubmit={handleSaveWaGroupSettings} className="p-6 space-y-4">
+            <WaGroupSettingsPanel
+              value={waGroupSettings}
+              onChange={setWaGroupSettings}
+              vendorFonnteToken={fonnteToken.trim() || appUser.fonnteToken || null}
+              businessName={appUser.businessName || appUser.name}
+            />
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="submit"
+                disabled={isSavingWaGroup}
+                className="inline-flex items-center justify-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                {isSavingWaGroup ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                <span>{isSavingWaGroup ? 'Menyimpan...' : 'Simpan Pengaturan Grup WA'}</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

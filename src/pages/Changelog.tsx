@@ -54,10 +54,55 @@ const CATEGORY_BADGE_STYLES: Record<ChangeItem['category'], string> = {
 
 export const VERSIONS: ReleaseVersion[] = [
   {
+    version: 'V2.5.2',
+    date: '20 November 2026',
+    badge: 'Feature Drop',
+    isLatest: true,
+    summary:
+      'Fitur QR Batch Fisik Souvenir & cetak stiker PDF A4 hemat kertas, pengingat otomatis tugas Staff & Grup WhatsApp (H-3, H-1, dan Hari-H 05:30), serta penguatan penuh keandalan pipeline Scanner & sinkronisasi real-time ke Supabase.',
+    changes: [
+      {
+        icon: QrCode,
+        category: 'Fitur Baru',
+        title: 'QR Batch Fisik Souvenir & Cetak Stiker PDF A4 Hemat Kertas',
+        description:
+          'Setiap kategori souvenir kini memiliki kode batch unik 5 karakter huruf & angka (format SV:XXXXX) yang dapat dicetak ke stiker PDF A4 dalam ukuran Super Hemat (72 stiker/lembar) maupun Kecil Standar (42 stiker/lembar). Mendukung cetak per kategori atau semua kategori sekaligus.',
+        color: 'text-[#8C3A50]',
+        bgColor: 'bg-rose-50',
+      },
+      {
+        icon: Gift,
+        category: 'UI & UX',
+        title: 'Scan Stiker QR Souvenir Auto-Deteksi, Anti-Double-Scan & 1-Klik Undo',
+        description:
+          'Halaman Scanner (Kamera maupun Alat Barcode USB/Bluetooth) otomatis mengenali stiker QR fisik souvenir tanpa perlu pindah mode—1× scan langsung memotong stok -1 pcs, dilengkapi jeda anti-double-scan 2 detik, tombol 1-klik "Batalkan (+1 Stok)", serta rekap terpisah Keluar via Tamu vs Keluar via QR Fisik di Audit Trail, Excel, dan PDF Berita Acara.',
+        color: 'text-amber-700',
+        bgColor: 'bg-amber-50',
+      },
+      {
+        icon: Megaphone,
+        category: 'Fitur Baru',
+        title: 'Notifikasi Tugas Staff & Pengingat Otomatis Grup WA (H-3, H-1 & Hari-H 05:30)',
+        description:
+          'Penambahan kolom Catatan Tugas Staff dan pengiriman info login (termasuk password & kebijakan 1 user 1 perangkat) dengan 3 lapis fallback aman (Token Vendor → Token Global Guestly → WA Manual). Kini juga tersedia pengaturan Kode Grup WhatsApp untuk pengingat otomatis tim bertugas pada H-3 & H-1 (jam bisa diatur, default 07:00) serta pagi Hari-H pukul 05:30.',
+        color: 'text-[#8C3A50]',
+        bgColor: 'bg-rose-50',
+      },
+      {
+        icon: ShieldCheck,
+        category: 'Performa & Keandalan',
+        title: 'Penguatan Penuh Pipeline Scanner, Multi-Perangkat & Sinkronisasi Supabase',
+        description:
+          'Seluruh proses scan check-in, serah souvenir tamu, hingga scan QR batch fisik kini menggunakan klaim atomik dan sinkronisasi read–merge–write ke Supabase agar anti-duplikat di banyak perangkat secara bersamaan, tetap aman saat mode offline/darurat, serta menyempurnakan tampilan Layar Sapa TV (Greeting Screen).',
+        color: 'text-slate-700',
+        bgColor: 'bg-slate-100',
+      },
+    ],
+  },
+  {
     version: 'V2.5.1',
     date: '19 November 2026',
     badge: 'Feature Drop',
-    isLatest: true,
     summary:
       'Tema dashboard ramah mata (Pearl Rose White, Hybrid Contrast, dan Soft Dark Mode), pemisahan hak akses Client Mandiri vs Client Naungan Vendor, Wedding Planner berbasis Top-Up & paket, serta pengaturan paket Wedding Planner di Layanan & Invoice.',
     changes: [

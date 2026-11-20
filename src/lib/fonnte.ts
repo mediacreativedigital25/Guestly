@@ -17,6 +17,7 @@ export interface FonnteDeviceCheckResult {
 export interface SendFonnteOptions {
   strictToken?: boolean;
   fallbackTextOnMediaError?: boolean;
+  schedule?: number; // UNIX timestamp in seconds (WIB/UTC)
 }
 
 export interface SendFonnteResult {
@@ -26,8 +27,25 @@ export interface SendFonnteResult {
   usedTextFallback?: boolean;
 }
 
+export interface FonnteGroupItem {
+  id: string;
+  name: string;
+}
+
+export interface FetchFonnteGroupsResult {
+  success: boolean;
+  groups: FonnteGroupItem[];
+  tokenSource?: string;
+  error?: string;
+}
+
 export function normalizePhoneTarget(raw: string): string {
-  const cleaned = String(raw || '').trim().replace(/[\s\-().]/g, '');
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.toLowerCase().includes('@g.us')) {
+    return trimmed.replace(/\s+/g, '');
+  }
+  const cleaned = trimmed.replace(/[\s\-().]/g, '');
   if (!cleaned) return '';
   if (cleaned.startsWith('+62')) return '0' + cleaned.slice(3);
   if (cleaned.startsWith('62') && cleaned.length > 9) return '0' + cleaned.slice(2);
@@ -116,20 +134,108 @@ export async function checkFonnteDevice(
   }
 }
 
+export async function fetchFonnteGroups(
+  token?: string | null,
+  useGlobal = true,
+  refresh = true
+): Promise<FetchFonnteGroupsResult> {
+  try {
+    const cleanToken = token ? token.trim() : '';
+    const resolvedClientToken = cleanToken
+      ? cleanToken
+      : useGlobal
+      ? await resolveClientFonnteToken(null, false)
+      : '';
+    const user = auth.currentUser;
+    let idToken = '';
+    if (user) {
+      idToken = await user.getIdToken();
+    }
+
+    const response = await fetch('/api/fonnte/groups', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+      },
+      body: JSON.stringify({
+        token: cleanToken || resolvedClientToken || undefined,
+        useGlobal: !cleanToken && useGlobal,
+        refresh,
+      }),
+    });
+
+    if (response.status === 404 || response.status === 405) {
+      if (resolvedClientToken) {
+        if (refresh) {
+          try {
+            await fetch('https://api.fonnte.com/fetch-group', {
+              method: 'POST',
+              headers: { Authorization: resolvedClientToken },
+            });
+          } catch {
+            // ignore
+          }
+        }
+        const directRes = await fetch('https://api.fonnte.com/get-whatsapp-group', {
+          method: 'POST',
+          headers: { Authorization: resolvedClientToken },
+        });
+        const directData = await directRes.json().catch(() => ({}));
+        if (directData?.status && Array.isArray(directData.data)) {
+          return {
+            success: true,
+            groups: directData.data
+              .filter((g: any) => g && g.id)
+              .map((g: any) => ({ id: String(g.id).trim(), name: String(g.name || g.id).trim() })),
+            tokenSource: cleanToken ? 'Token Fonnte Vendor' : 'Token Global Guestly',
+          };
+        }
+        return {
+          success: false,
+          groups: [],
+          error: directData?.reason || 'Gagal mengambil daftar grup dari Fonnte.',
+        };
+      }
+      return {
+        success: false,
+        groups: [],
+        error: 'Token Fonnte belum diatur.',
+      };
+    }
+
+    const data = await response.json();
+    return data as FetchFonnteGroupsResult;
+  } catch (err: any) {
+    return {
+      success: false,
+      groups: [],
+      error: err?.message || 'Gagal mengambil daftar grup dari Fonnte.',
+    };
+  }
+}
+
 async function sendDirectToFonnte(
   token: string,
   target: string,
   message: string,
-  url?: string
+  url?: string,
+  schedule?: number
 ): Promise<SendFonnteResult> {
   try {
+    const isGroupTarget = target.toLowerCase().includes('@g.us');
     const body = new URLSearchParams({
       target,
       message,
-      countryCode: '62',
     });
+    if (!isGroupTarget) {
+      body.append('countryCode', '62');
+    }
     if (url && !url.includes('/api/thumbnail')) {
       body.append('url', url);
+    }
+    if (schedule && Number(schedule) > 0) {
+      body.append('schedule', String(Math.floor(Number(schedule))));
     }
     const directResponse = await fetch('https://api.fonnte.com/send', {
       method: 'POST',
@@ -159,8 +265,8 @@ export async function sendFonnteMessage(
 ): Promise<SendFonnteResult> {
   const normalizedTarget = normalizePhoneTarget(target);
   if (!normalizedTarget) {
-    console.warn('Target phone number is missing, cannot send message.');
-    return { success: false, error: 'Nomor HP tujuan kosong atau tidak valid' };
+    console.warn('Target phone number or group ID is missing, cannot send message.');
+    return { success: false, error: 'Nomor HP atau ID Grup tujuan kosong atau tidak valid' };
   }
 
   let resolvedUrl = url ? String(url).trim() : undefined;
@@ -169,6 +275,8 @@ export async function sendFonnteMessage(
   }
 
   const strictToken = Boolean(options?.strictToken);
+  const scheduleTs =
+    options?.schedule && Number(options.schedule) > 0 ? Math.floor(Number(options.schedule)) : undefined;
 
   try {
     const resolvedToken = await resolveClientFonnteToken(token, strictToken);
@@ -190,14 +298,27 @@ export async function sendFonnteMessage(
         url: resolvedUrl,
         token: resolvedToken || undefined,
         strictToken,
+        schedule: scheduleTs,
       }),
     });
 
     if (response.status === 404 || response.status === 405) {
       if (resolvedToken) {
-        const directRes = await sendDirectToFonnte(resolvedToken, normalizedTarget, message, resolvedUrl);
+        const directRes = await sendDirectToFonnte(
+          resolvedToken,
+          normalizedTarget,
+          message,
+          resolvedUrl,
+          scheduleTs
+        );
         if (!directRes.success && resolvedUrl && directRes.isMediaError && options?.fallbackTextOnMediaError) {
-          const retry = await sendDirectToFonnte(resolvedToken, normalizedTarget, message, undefined);
+          const retry = await sendDirectToFonnte(
+            resolvedToken,
+            normalizedTarget,
+            message,
+            undefined,
+            scheduleTs
+          );
           return { ...retry, usedTextFallback: retry.success };
         }
         return directRes;

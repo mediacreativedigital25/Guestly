@@ -55,12 +55,15 @@ import {
 import {
   canUserAccessEvent,
   formatGuestFullName,
+  getMediaFallbackUrls,
   getUserBusinessId,
   isEventExpired,
   isEventInactiveOrExpired,
+  renderCardToJpegBlob,
   resolveMediaUrl,
   shouldHideServiceInfo,
 } from '../lib/utils';
+import { EInvitationCard } from '../components/EInvitationCard';
 import {
   checkFonnteDevice,
   FonnteDeviceCheckResult,
@@ -162,6 +165,12 @@ export default function SendInvitations() {
   const [previewImgLoading, setPreviewImgLoading] = useState<boolean>(false);
   const [previewImgError, setPreviewImgError] = useState<boolean>(false);
   const [previewRetryCount, setPreviewRetryCount] = useState<number>(0);
+
+  // Off-screen 1200x675 E-Invitation Card render stage for guaranteed WhatsApp & Fonnte delivery
+  const hiddenEInviteRef = useRef<HTMLDivElement | null>(null);
+  const [cardRenderGuest, setCardRenderGuest] = useState<Guest | null>(null);
+  const uploadedCardCacheRef = useRef<Record<string, string>>({});
+  const [preparingManualGuestId, setPreparingManualGuestId] = useState<string | null>(null);
 
   // Filters & selection
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
@@ -605,21 +614,40 @@ export default function SendInvitations() {
 
   const previewPayload = useMemo(() => buildGuestPayload(previewGuest), [previewGuest, messageText, mediaMode, event, clientName]);
 
-  const previewImgSrc = useMemo(() => {
-    if (mediaMode === 'text' || !previewPayload.mediaUrl) return '';
+  const thumbnailPreviewCandidates = useMemo(() => {
+    if (mediaMode !== 'thumbnail') return [];
     const vTag = encodeURIComponent(String(event?.updatedAt || 'v3'));
-    return `${previewPayload.mediaUrl}?v=${vTag}&r=${previewRetryCount}`;
-  }, [mediaMode, previewPayload.mediaUrl, previewRetryCount, event?.updatedAt]);
+    const urls = getMediaFallbackUrls([
+      event?.thumbnailUrl,
+      (event as any)?.coverImage,
+      event?.eInvitePhotoUrl,
+      event?.frameOverlayUrl,
+    ]);
+
+    if (previewPayload.mediaUrl) {
+      const serverUrl = `${previewPayload.mediaUrl}?v=${vTag}&r=${previewRetryCount}`;
+      if (!urls.includes(serverUrl)) urls.push(serverUrl);
+    }
+    return urls;
+  }, [mediaMode, event, previewPayload.mediaUrl, previewRetryCount]);
+
+  const [thumbnailCandidateIdx, setThumbnailCandidateIdx] = useState(0);
+
+  const previewImgSrc = useMemo(() => {
+    if (mediaMode !== 'thumbnail') return '';
+    return thumbnailPreviewCandidates[thumbnailCandidateIdx] || '';
+  }, [mediaMode, thumbnailPreviewCandidates, thumbnailCandidateIdx]);
 
   useEffect(() => {
-    if (previewImgSrc) {
+    setThumbnailCandidateIdx(0);
+    if (mediaMode === 'thumbnail' && thumbnailPreviewCandidates.length > 0) {
       setPreviewImgLoading(true);
       setPreviewImgError(false);
     } else {
       setPreviewImgLoading(false);
       setPreviewImgError(false);
     }
-  }, [previewImgSrc]);
+  }, [mediaMode, thumbnailPreviewCandidates]);
 
   const handleSelectTemplate = (tplId: string) => {
     setSelectedTemplateId(tplId);
@@ -631,6 +659,55 @@ export default function SendInvitations() {
     } else {
       setMessageText(DEFAULT_WA_MESSAGE);
       setIsMessageCustomized(false);
+    }
+  };
+
+  // Render the guest's exact 1200x675 Kartu E-Invite in-browser and upload to R2 CDN
+  // so both Fonnte image attachment AND WhatsApp OG link preview display the real personalized card
+  const ensureGuestEInviteCardUrl = async (guest: Guest): Promise<string> => {
+    const fallbackUrl = `${window.location.origin}/api/og/einvite/${encodeURIComponent(eventId!)}/${encodeURIComponent(guest.ticketCode)}.jpg`;
+    if (!eventId || !event || !guest.ticketCode) return fallbackUrl;
+
+    const cacheKey = `${eventId}_${guest.ticketCode}_${String(event.updatedAt || '')}_${guest.name || ''}_${event.eInviteTemplateId || ''}_${event.eInviteTheme || ''}`;
+    if (uploadedCardCacheRef.current[cacheKey]) {
+      return uploadedCardCacheRef.current[cacheKey];
+    }
+
+    try {
+      setCardRenderGuest(guest);
+      // Wait for React commit + QR SVG + image decode inside the offscreen 1200x675 card
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 220)))
+      );
+
+      const cardEl = hiddenEInviteRef.current;
+      if (!cardEl) return fallbackUrl;
+
+      const jpegBlob = await renderCardToJpegBlob(cardEl, 0.88);
+      if (!jpegBlob || jpegBlob.size === 0) return fallbackUrl;
+
+      const formData = new FormData();
+      formData.append('file', jpegBlob, `${guest.ticketCode}.jpg`);
+      formData.append('eventId', eventId);
+      formData.append('ticketCode', guest.ticketCode);
+
+      const uploadRes = await fetch('/api/og/einvite/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (uploadRes.ok) {
+        const data = await uploadRes.json().catch(() => null);
+        if (data?.success && data?.url) {
+          const freshUrl = `${data.url}?v=${Date.now()}`;
+          uploadedCardCacheRef.current[cacheKey] = freshUrl;
+          return freshUrl;
+        }
+      }
+      return fallbackUrl;
+    } catch (err) {
+      console.warn('Auto-render E-Invite card failed, using server fallback:', err);
+      return fallbackUrl;
     }
   };
 
@@ -663,12 +740,16 @@ export default function SendInvitations() {
 
     setSendingGuestId(guest.id);
     try {
-      const { message, mediaUrl } = buildGuestPayload(guest);
+      const payload = buildGuestPayload(guest);
+      let finalMediaUrl = payload.mediaUrl;
+      if (mediaMode === 'einvite') {
+        finalMediaUrl = await ensureGuestEInviteCardUrl(guest);
+      }
       const res = await sendFonnteMessage(
         resolvedTokenInfo.isOwnToken ? resolvedTokenInfo.token : null,
         guest.phone!,
-        message,
-        mediaUrl,
+        payload.message,
+        finalMediaUrl,
         {
           strictToken: resolvedTokenInfo.isOwnToken,
           fallbackTextOnMediaError: true,
@@ -731,7 +812,7 @@ export default function SendInvitations() {
     }
   };
 
-  // Single-guest Manual WhatsApp (opens wa.me directly to target phone & records sent status)
+  // Single-guest Manual WhatsApp (pre-renders E-Invite OG card to R2 so WA link preview shows the real card)
   const handleSendManualWA = async (guest: Guest) => {
     if (!eventId || !guest.id) return;
     const { message } = buildGuestPayload(guest);
@@ -740,7 +821,35 @@ export default function SendInvitations() {
       ? `https://wa.me/${intlPhone}?text=${encodeURIComponent(message)}`
       : `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
 
-    window.open(waUrl, '_blank', 'noopener,noreferrer');
+    if (mediaMode === 'einvite') {
+      // Open tab synchronously inside click gesture so browsers never block the popup
+      const waTab = window.open('about:blank', '_blank');
+      if (waTab && !waTab.closed) {
+        try {
+          waTab.document.write(
+            '<!doctype html><html><head><meta charset="utf-8"><title>Menyiapkan Kartu E-Invite...</title></head><body style="font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#F5F3F4;color:#272426;"><div style="text-align:center;padding:24px;"><p style="font-size:15px;font-weight:600;margin:0 0 6px;">Menyiapkan Kartu E-Invite personal...</p><p style="font-size:12px;color:#6E666B;margin:0;">Otomatis membuka WhatsApp dalam sesaat.</p></div></body></html>'
+          );
+          waTab.document.close();
+        } catch {
+          // ignore cross-origin write errors
+        }
+      }
+      setPreparingManualGuestId(guest.id);
+      try {
+        await ensureGuestEInviteCardUrl(guest);
+      } catch {
+        // continue to WhatsApp even if card upload fails
+      } finally {
+        setPreparingManualGuestId(null);
+      }
+      if (waTab && !waTab.closed) {
+        waTab.location.href = waUrl;
+      } else {
+        window.open(waUrl, '_blank', 'noopener,noreferrer');
+      }
+    } else {
+      window.open(waUrl, '_blank', 'noopener,noreferrer');
+    }
 
     const nowIso = new Date().toISOString();
     await saveGuestWaStatus(eventId, guest.id, {
@@ -748,7 +857,7 @@ export default function SendInvitations() {
       sentAt: nowIso,
       method: 'manual',
       tokenSource: 'manual',
-      mediaMode: 'text',
+      mediaMode: mediaMode === 'einvite' ? 'einvite' : 'text',
       lastError: '',
     });
   };
@@ -844,12 +953,16 @@ export default function SendInvitations() {
           currentGuestName: guest.name,
         });
 
-        const { message, mediaUrl } = buildGuestPayload(guest);
+        const payload = buildGuestPayload(guest);
+        let finalMediaUrl = payload.mediaUrl;
+        if (mediaMode === 'einvite') {
+          finalMediaUrl = await ensureGuestEInviteCardUrl(guest);
+        }
         const res = await sendFonnteMessage(
           resolvedTokenInfo.isOwnToken ? resolvedTokenInfo.token : null,
           guest.phone!,
-          message,
-          mediaUrl,
+          payload.message,
+          finalMediaUrl,
           {
             strictToken: resolvedTokenInfo.isOwnToken,
             fallbackTextOnMediaError: true,
@@ -1466,42 +1579,66 @@ export default function SendInvitations() {
 
               <div className="flex-1 rounded-xl border border-slate-200 bg-[#EFEAE2] p-3.5 max-h-[430px] overflow-y-auto">
                 <div className="bg-white rounded-xl rounded-tl-xs shadow-xs border border-black/5 p-2.5 max-w-full space-y-2">
-                  {mediaMode !== 'text' && previewImgSrc && (
-                    <div
-                      className={`relative rounded-lg overflow-hidden border border-slate-200 bg-[#FAF6F2] flex items-center justify-center ${
-                        mediaMode === 'einvite' ? 'aspect-[1200/675]' : 'aspect-video'
-                      }`}
-                    >
-                      {previewImgLoading && !previewImgError && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-slate-100 text-slate-500 z-10">
-                          <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
-                          <span className="text-[11px] font-medium">Memuat pratinjau...</span>
-                        </div>
-                      )}
-                      {previewImgError ? (
-                        <div className="flex flex-col items-center justify-center gap-2 p-4 text-center text-slate-500">
-                          <ImageIcon className="w-6 h-6 text-slate-400" />
-                          <span className="text-[11px]">Pratinjau gambar gagal dimuat.</span>
-                          <button
-                            type="button"
-                            onClick={() => setPreviewRetryCount((c) => c + 1)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-md cursor-pointer"
-                          >
-                            <RefreshCw className="w-3 h-3" />
-                            <span>Muat Ulang</span>
-                          </button>
-                        </div>
+                  {mediaMode === 'einvite' && event && (
+                    <div className="relative rounded-lg overflow-hidden border border-slate-200 bg-[#FAF6F2] aspect-[1200/675]">
+                      <EInvitationCard
+                        event={event}
+                        guest={previewGuest}
+                        className="w-full h-full"
+                      />
+                    </div>
+                  )}
+
+                  {mediaMode === 'thumbnail' && (
+                    <div className="relative rounded-lg overflow-hidden border border-slate-200 bg-[#FAF6F2] flex items-center justify-center aspect-video">
+                      {previewImgSrc ? (
+                        <>
+                          {previewImgLoading && !previewImgError && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-slate-100 text-slate-500 z-10">
+                              <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
+                              <span className="text-[11px] font-medium">Memuat pratinjau...</span>
+                            </div>
+                          )}
+                          {previewImgError ? (
+                            <div className="flex flex-col items-center justify-center gap-2 p-4 text-center text-slate-500">
+                              <ImageIcon className="w-6 h-6 text-slate-400" />
+                              <span className="text-[11px]">Pratinjau gambar gagal dimuat.</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setThumbnailCandidateIdx(0);
+                                  setPreviewImgError(false);
+                                  setPreviewImgLoading(true);
+                                  setPreviewRetryCount((c) => c + 1);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-md cursor-pointer"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                                <span>Muat Ulang</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <img
+                              src={previewImgSrc}
+                              alt="Pratinjau Thumbnail Acara"
+                              onLoad={() => setPreviewImgLoading(false)}
+                              onError={() => {
+                                if (thumbnailCandidateIdx + 1 < thumbnailPreviewCandidates.length) {
+                                  setThumbnailCandidateIdx((idx) => idx + 1);
+                                } else {
+                                  setPreviewImgLoading(false);
+                                  setPreviewImgError(true);
+                                }
+                              }}
+                              className="w-full h-full object-cover"
+                            />
+                          )}
+                        </>
                       ) : (
-                        <img
-                          src={previewImgSrc}
-                          alt="Pratinjau Undangan"
-                          onLoad={() => setPreviewImgLoading(false)}
-                          onError={() => {
-                            setPreviewImgLoading(false);
-                            setPreviewImgError(true);
-                          }}
-                          className="w-full h-full object-cover"
-                        />
+                        <div className="flex flex-col items-center justify-center gap-1.5 p-4 text-center text-slate-500">
+                          <ImageIcon className="w-6 h-6 text-slate-400" />
+                          <span className="text-[11px]">Belum ada foto thumbnail pada acara ini.</span>
+                        </div>
                       )}
                     </div>
                   )}
@@ -1834,13 +1971,17 @@ export default function SendInvitations() {
 
                           <button
                             type="button"
-                            disabled={isBlasting}
+                            disabled={isBlasting || preparingManualGuestId === guest.id}
                             onClick={() => handleSendManualWA(guest)}
                             className="h-8 px-2.5 text-xs font-semibold rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-40"
                             title="Buka WhatsApp Manual dan tandai sudah dikirim"
                           >
-                            <MessageCircle className="w-3.5 h-3.5" />
-                            <span>Manual</span>
+                            {preparingManualGuestId === guest.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <MessageCircle className="w-3.5 h-3.5" />
+                            )}
+                            <span>{preparingManualGuestId === guest.id ? 'Siapkan...' : 'Manual'}</span>
                           </button>
 
                           <button
@@ -1907,6 +2048,20 @@ export default function SendInvitations() {
               <X className="w-4 h-4" />
             </button>
           </div>
+        </div>
+      )}
+      {/* Off-screen 1200x675 E-Invitation Card render stage (auto-captured to JPEG & uploaded to R2) */}
+      {event && (
+        <div
+          aria-hidden="true"
+          className="fixed -left-[9999px] top-0 pointer-events-none select-none z-[-1]"
+        >
+          <EInvitationCard
+            event={event}
+            guest={cardRenderGuest || previewGuest}
+            cardRef={hiddenEInviteRef}
+            fixedWidthPx={1200}
+          />
         </div>
       )}
     </div>

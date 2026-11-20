@@ -12,12 +12,21 @@ async function optimizeImageIfNeeded(file: File, category: string): Promise<File
   if (typeof window === 'undefined' || !file.type.startsWith('image/')) {
     return file;
   }
-  // Skip SVG or GIF or small icons
-  if (file.type === 'image/svg+xml' || file.type === 'image/gif' || file.type.includes('icon')) {
+  const forceWebpCategory = category === 'super_admin_media' || category === 'salespage';
+
+  // Skip vector SVG or favicon; skip GIF unless forced WebP is needed (keep SVG crisp)
+  if (file.type === 'image/svg+xml' || file.type.includes('icon')) {
     return file;
   }
-  const shouldCompress =
-    category === 'thumbnail' ? file.size > 600 * 1024 : file.size > 2 * 1024 * 1024;
+  if (!forceWebpCategory && file.type === 'image/gif') {
+    return file;
+  }
+
+  const shouldCompress = forceWebpCategory
+    ? true
+    : category === 'thumbnail'
+    ? file.size > 600 * 1024
+    : file.size > 2 * 1024 * 1024;
   if (!shouldCompress) {
     return file;
   }
@@ -47,16 +56,30 @@ async function optimizeImageIfNeeded(file: File, category: string): Promise<File
           resolve(file);
           return;
         }
-        // Fill white background for JPEG if thumbnail
-        const outMime = category === 'thumbnail' || file.type === 'image/jpeg' ? 'image/jpeg' : 'image/webp';
+        const outMime = forceWebpCategory
+          ? 'image/webp'
+          : category === 'thumbnail' || file.type === 'image/jpeg'
+          ? 'image/jpeg'
+          : 'image/webp';
         if (outMime === 'image/jpeg') {
           ctx.fillStyle = '#FFFFFF';
           ctx.fillRect(0, 0, width, height);
         }
         ctx.drawImage(img, 0, 0, width, height);
+        const quality = forceWebpCategory ? 0.82 : 0.85;
         canvas.toBlob(
           (blob) => {
-            if (!blob || blob.size >= file.size) {
+            if (!blob) {
+              resolve(file);
+              return;
+            }
+            // For non-forced categories, skip if compression didn't reduce size.
+            // For super_admin_media/salespage, always convert non-WebP images to WebP.
+            if (!forceWebpCategory && blob.size >= file.size) {
+              resolve(file);
+              return;
+            }
+            if (forceWebpCategory && file.type === 'image/webp' && blob.size >= file.size && width === img.width && height === img.height) {
               resolve(file);
               return;
             }
@@ -69,7 +92,7 @@ async function optimizeImageIfNeeded(file: File, category: string): Promise<File
             resolve(optimizedFile);
           },
           outMime,
-          0.85
+          quality
         );
       } catch {
         resolve(file);
@@ -136,9 +159,9 @@ export const mediaService = {
               url: data.data.url,
               key: data.data.key,
               sizeBytes: data.data.sizeBytes,
-              fileName: processedFile.name,
-              mimeType: processedFile.type,
-              category: category,
+              fileName: data.data.fileName || processedFile.name,
+              mimeType: data.data.mimeType || processedFile.type,
+              category: data.data.category || category,
               uploadedAt: serverTimestamp(),
               uploadedBy: auth.currentUser?.uid || null
             };

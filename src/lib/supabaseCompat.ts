@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { encodeCheckInStaff, decodeCheckInStaff } from './checkInUtils';
+import { encodeCheckInStaff, decodeCheckInStaff, encodeSouvenirMeta, decodeSouvenirMeta } from './checkInUtils';
 
 export class Timestamp {
   seconds: number;
@@ -466,8 +466,9 @@ function rowToGuestModel(row: any): any {
     checkInMethod: decodeCheckInStaff(row.check_in_staff).method || (row.attended ? 'scan' : undefined),
     souvenirTaken: Boolean(row.souvenir_taken),
     souvenirClaimed: Boolean(row.souvenir_taken),
-    souvenirName: row.souvenir_type || null,
+    souvenirName: decodeSouvenirMeta(row.souvenir_type).souvenirName || null,
     souvenirTakenAt: row.souvenir_time || null,
+    souvenirTakenBy: decodeSouvenirMeta(row.souvenir_type).souvenirTakenBy || null,
     wishes: row.wishes || '',
     stickerUrl: row.sticker_url || '',
     address: row.notes || '',
@@ -522,7 +523,12 @@ function guestModelToRow(id: string, eventId: string, data: any, existingRow?: a
         : s.souvenirClaimed !== undefined
         ? Boolean(s.souvenirClaimed)
         : Boolean(existingRow?.souvenir_taken),
-    souvenir_type: s.souvenirName !== undefined ? s.souvenirName : existingRow?.souvenir_type ?? null,
+    souvenir_type: (() => {
+      const existingSouv = decodeSouvenirMeta(existingRow?.souvenir_type);
+      const nextName = s.souvenirName !== undefined ? s.souvenirName : existingSouv.souvenirName ?? null;
+      const nextBy = s.souvenirTakenBy !== undefined ? s.souvenirTakenBy : existingSouv.souvenirTakenBy ?? null;
+      return encodeSouvenirMeta(nextName, nextBy);
+    })(),
     souvenir_time: souvenirTimeRaw ? new Date(souvenirTimeRaw).toISOString() : null,
     wishes: s.wishes !== undefined ? s.wishes : existingRow?.wishes ?? null,
     sticker_url: s.stickerUrl !== undefined ? s.stickerUrl : existingRow?.sticker_url ?? null,

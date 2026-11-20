@@ -31,9 +31,28 @@ export default function GreetingScreen() {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastGreetedRef = useRef<{ key: string; ts: number }>({ key: '', ts: 0 });
 
-  const triggerGreetingDisplay = (newRecord: any) => {
+  const triggerGreetingDisplay = (newRecord: any, options?: { skipDedupe?: boolean }) => {
     if (!newRecord || !newRecord.attended) return;
+
+    const checkInTimestamp =
+      newRecord.check_in_time ||
+      newRecord.attendedAt ||
+      new Date().toISOString();
+
+    if (!options?.skipDedupe && newRecord.id) {
+      const dedupeKey = `${newRecord.id}_${checkInTimestamp}`;
+      const now = Date.now();
+      if (
+        lastGreetedRef.current.key === dedupeKey &&
+        now - lastGreetedRef.current.ts < 8000
+      ) {
+        return;
+      }
+      lastGreetedRef.current = { key: dedupeKey, ts: now };
+    }
+
     const guest: Guest = {
       id: newRecord.id,
       eventId: newRecord.event_id || eventId || '',
@@ -45,10 +64,7 @@ export default function GreetingScreen() {
       session: newRecord.session,
       rsvpStatus: newRecord.rsvp_status || newRecord.rsvpStatus,
       attended: true,
-      attendedAt:
-        newRecord.check_in_time ||
-        newRecord.attendedAt ||
-        new Date().toISOString(),
+      attendedAt: checkInTimestamp,
       wishes: newRecord.wishes,
       createdAt: newRecord.created_at,
       updatedAt: newRecord.updated_at,
@@ -133,7 +149,34 @@ export default function GreetingScreen() {
 
     // 2. Realtime WebSocket subscription to Supabase guests table
     const unsubscribeGuests = supabaseDb.subscribeToGuests(eventId, (payload) => {
-      triggerGreetingDisplay(payload.new);
+      const rec = payload?.new;
+      if (!rec || !rec.attended) return;
+
+      // Broadcast payloads come directly from gate check-in scanners -> always display
+      if (payload?.eventType === 'BROADCAST') {
+        triggerGreetingDisplay(rec);
+        return;
+      }
+
+      // For Postgres Changes (UPDATE/INSERT), ignore routine edits & souvenir desk hand-outs
+      if (payload?.old?.attended === true) {
+        return;
+      }
+
+      const checkInMs = rec.check_in_time ? Date.parse(rec.check_in_time) : NaN;
+      const souvenirMs = rec.souvenir_time ? Date.parse(rec.souvenir_time) : NaN;
+
+      // If souvenir was handed out strictly after check-in, this is a souvenir desk update
+      if (rec.souvenir_taken && !Number.isNaN(souvenirMs) && !Number.isNaN(checkInMs) && souvenirMs - checkInMs > 2000) {
+        return;
+      }
+
+      // Only trigger greeting on Postgres UPDATE if check-in happened within the last 30 seconds
+      if (!Number.isNaN(checkInMs) && Math.abs(Date.now() - checkInMs) > 30000) {
+        return;
+      }
+
+      triggerGreetingDisplay(rec);
     });
 
     // 3. Offline same-device BroadcastChannel & Storage listener
@@ -297,13 +340,16 @@ export default function GreetingScreen() {
             if (showGreeting) {
               setShowGreeting(false);
             } else {
-              triggerGreetingDisplay({
-                id: 'demo-guest',
-                name: latestGuest?.name || 'Iklas Padli',
-                category: latestGuest?.category || '',
-                seat: latestGuest?.tableNumber || '',
-                attended: true,
-              });
+              triggerGreetingDisplay(
+                {
+                  id: 'demo-guest',
+                  name: latestGuest?.name || 'Iklas Padli',
+                  category: latestGuest?.category || '',
+                  seat: latestGuest?.tableNumber || '',
+                  attended: true,
+                },
+                { skipDedupe: true }
+              );
             }
           }}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/90 hover:bg-white text-slate-800 text-xs font-semibold shadow-lg border border-slate-200 backdrop-blur-md cursor-pointer"

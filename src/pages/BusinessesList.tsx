@@ -32,6 +32,19 @@ import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { Modal } from '../components/Modal';
 import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 import { getRoleLabel, isPartnerBusinessRegistered } from '../lib/utils';
+import { WaGroupSettingsPanel, WaGroupSettingsValue } from '../components/WaGroupSettingsPanel';
+import { DEFAULT_GROUP_REMINDER_TIME, DEFAULT_GROUP_REMINDER_H0_TIME } from '../lib/waGroupReminder';
+
+const createDefaultWaGroupSettings = (): WaGroupSettingsValue => ({
+  waGroupId: '',
+  waGroupName: '',
+  waGroupReminderEnabled: false,
+  waGroupReminderH3: true,
+  waGroupReminderH1: true,
+  waGroupReminderH0: true,
+  waGroupReminderTime: DEFAULT_GROUP_REMINDER_TIME,
+  waGroupReminderH0Time: DEFAULT_GROUP_REMINDER_H0_TIME,
+});
 
 export default function BusinessesList() {
   const { appUser } = useAuth();
@@ -62,6 +75,7 @@ export default function BusinessesList() {
   const [clientCredit, setClientCredit] = useState<number>(0);
   const [eventCredit, setEventCredit] = useState<number>(0);
   const [allowManualEvent, setAllowManualEvent] = useState<boolean>(false);
+  const [addWaGroup, setAddWaGroup] = useState<WaGroupSettingsValue>(createDefaultWaGroupSettings());
 
   // Edit Business Modal State
   const [isEditing, setIsEditing] = useState(false);
@@ -76,6 +90,7 @@ export default function BusinessesList() {
   const [editClientCredit, setEditClientCredit] = useState<number>(0);
   const [editEventCredit, setEditEventCredit] = useState<number>(0);
   const [editAllowManualEvent, setEditAllowManualEvent] = useState<boolean>(false);
+  const [editWaGroup, setEditWaGroup] = useState<WaGroupSettingsValue>(createDefaultWaGroupSettings());
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -188,6 +203,7 @@ export default function BusinessesList() {
     setClientCredit(5);
     setEventCredit(5);
     setAllowManualEvent(false);
+    setAddWaGroup(createDefaultWaGroupSettings());
     setIsAdding(true);
     if (!location.pathname.endsWith('/businesses/add')) {
       navigate('/auth/login/businesses/add');
@@ -227,6 +243,16 @@ export default function BusinessesList() {
     setEditClientCredit(owner.clientCredit !== undefined ? owner.clientCredit : (owner.clientQuota || 0));
     setEditEventCredit(owner.eventCredit !== undefined ? owner.eventCredit : (owner.eventQuota || 0));
     setEditAllowManualEvent(Boolean(owner.allowManualEvent ?? owner.eventManual));
+    setEditWaGroup({
+      waGroupId: owner.waGroupId || '',
+      waGroupName: owner.waGroupName || '',
+      waGroupReminderEnabled: Boolean(owner.waGroupReminderEnabled),
+      waGroupReminderH3: owner.waGroupReminderH3 !== false,
+      waGroupReminderH1: owner.waGroupReminderH1 !== false,
+      waGroupReminderH0: owner.waGroupReminderH0 !== false,
+      waGroupReminderTime: owner.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME,
+      waGroupReminderH0Time: owner.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME,
+    });
     setIsEditing(true);
     if (!skipNavigate && owner.id) {
       navigate(`/auth/login/businesses/${owner.id}/edit`);
@@ -313,6 +339,14 @@ export default function BusinessesList() {
           eventQuota: Number(eventCredit) || 0,
           allowManualEvent: Boolean(allowManualEvent),
           eventManual: Boolean(allowManualEvent),
+          waGroupId: addWaGroup.waGroupId.trim(),
+          waGroupName: addWaGroup.waGroupName.trim(),
+          waGroupReminderEnabled: Boolean(addWaGroup.waGroupReminderEnabled && addWaGroup.waGroupId.trim()),
+          waGroupReminderH3: Boolean(addWaGroup.waGroupReminderH3),
+          waGroupReminderH1: Boolean(addWaGroup.waGroupReminderH1),
+          waGroupReminderH0: Boolean(addWaGroup.waGroupReminderH0),
+          waGroupReminderTime: addWaGroup.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME,
+          waGroupReminderH0Time: addWaGroup.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME,
           updatedAt: serverTimestamp()
         };
 
@@ -347,6 +381,14 @@ export default function BusinessesList() {
           eventQuota: Number(eventCredit) || 0,
           allowManualEvent: Boolean(allowManualEvent),
           eventManual: Boolean(allowManualEvent),
+          waGroupId: addWaGroup.waGroupId.trim(),
+          waGroupName: addWaGroup.waGroupName.trim(),
+          waGroupReminderEnabled: Boolean(addWaGroup.waGroupReminderEnabled && addWaGroup.waGroupId.trim()),
+          waGroupReminderH3: Boolean(addWaGroup.waGroupReminderH3),
+          waGroupReminderH1: Boolean(addWaGroup.waGroupReminderH1),
+          waGroupReminderH0: Boolean(addWaGroup.waGroupReminderH0),
+          waGroupReminderTime: addWaGroup.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME,
+          waGroupReminderH0Time: addWaGroup.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME,
           hideServiceInfo: false,
           createdBy: appUser.id,
           createdByName: `${appUser.name || appUser.email} (Super Admin)`,
@@ -420,6 +462,14 @@ Anda kini dapat membuat dan mengelola acara serta menambahkan tim Admin & Staff 
         eventQuota: Number(editEventCredit) || 0,
         allowManualEvent: Boolean(editAllowManualEvent),
         eventManual: Boolean(editAllowManualEvent),
+        waGroupId: editWaGroup.waGroupId.trim(),
+        waGroupName: editWaGroup.waGroupName.trim(),
+        waGroupReminderEnabled: Boolean(editWaGroup.waGroupReminderEnabled && editWaGroup.waGroupId.trim()),
+        waGroupReminderH3: Boolean(editWaGroup.waGroupReminderH3),
+        waGroupReminderH1: Boolean(editWaGroup.waGroupReminderH1),
+        waGroupReminderH0: Boolean(editWaGroup.waGroupReminderH0),
+        waGroupReminderTime: editWaGroup.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME,
+        waGroupReminderH0Time: editWaGroup.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME,
         updatedAt: serverTimestamp()
       };
 
@@ -660,6 +710,17 @@ Anda kini dapat membuat dan mengelola acara serta menambahkan tim Admin & Staff 
                                 <span>{owner.phone}</span>
                               </div>
                             )}
+                            {owner.waGroupReminderEnabled && owner.waGroupId?.trim() && (
+                              <div
+                                className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded w-fit"
+                                title={`ID Grup: ${owner.waGroupId} · H-3/H-1 ${owner.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME} WIB · Hari H ${owner.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME} WIB`}
+                              >
+                                <Users className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                <span className="truncate max-w-[200px]">
+                                  Grup WA: {owner.waGroupName?.trim() || 'Aktif'} ({owner.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME} / H {owner.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME})
+                                </span>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-50 text-red-700 border border-red-200 text-xs font-medium">
@@ -808,6 +869,16 @@ Anda kini dapat membuat dan mengelola acara serta menambahkan tim Admin & Staff 
                     setClientCredit(found.clientCredit ?? found.clientQuota ?? 0);
                     setEventCredit(found.eventCredit ?? found.eventQuota ?? 0);
                     setAllowManualEvent(Boolean(found.allowManualEvent ?? found.eventManual));
+                    setAddWaGroup({
+                      waGroupId: found.waGroupId || '',
+                      waGroupName: found.waGroupName || '',
+                      waGroupReminderEnabled: Boolean(found.waGroupReminderEnabled),
+                      waGroupReminderH3: found.waGroupReminderH3 !== false,
+                      waGroupReminderH1: found.waGroupReminderH1 !== false,
+                      waGroupReminderH0: found.waGroupReminderH0 !== false,
+                      waGroupReminderTime: found.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME,
+                      waGroupReminderH0Time: found.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME,
+                    });
                   }
                 }}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white font-medium"
@@ -990,6 +1061,19 @@ Anda kini dapat membuat dan mengelola acara serta menambahkan tim Admin & Staff 
             </div>
           </div>
 
+          {/* Pengaturan Grup WhatsApp Tim (H-3 & H-1) */}
+          <WaGroupSettingsPanel
+            value={addWaGroup}
+            onChange={setAddWaGroup}
+            vendorFonnteToken={
+              registerMode === 'existing_owner'
+                ? partnerBusinesses.find(u => u.id === selectedExistingOwnerId)?.fonnteToken || null
+                : null
+            }
+            businessName={businessName}
+            compact
+          />
+
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
             <button
               type="button"
@@ -1163,6 +1247,15 @@ Anda kini dapat membuat dan mengelola acara serta menambahkan tim Admin & Staff 
               />
             </div>
           </div>
+
+          {/* Pengaturan Grup WhatsApp Tim (H-3 & H-1) */}
+          <WaGroupSettingsPanel
+            value={editWaGroup}
+            onChange={setEditWaGroup}
+            vendorFonnteToken={users.find(u => u.id === editingOwnerId)?.fonnteToken || null}
+            businessName={editBusinessName}
+            compact
+          />
 
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
             <button

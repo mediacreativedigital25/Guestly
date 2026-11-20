@@ -23,6 +23,7 @@ import SouvenirManagement from '../components/SouvenirManagement';
 import { souvenirStorage } from '../services/souvenirStorage';
 import { subscribeWaDispatch, saveGuestWaStatus, clearWaDispatchMap, WaDispatchMap } from '../services/waDispatchService';
 import { toWhatsAppInternational } from '../lib/fonnte';
+import { EventGroupReminderModal } from '../components/EventGroupReminderModal';
 
 export default function EventDetails() {
   const { eventId, guestId: routeGuestId } = useParams<{ eventId: string; guestId?: string }>();
@@ -147,6 +148,7 @@ export default function EventDetails() {
   const [isSavingThumbnail, setIsSavingThumbnail] = useState(false);
   const [isOptionsDropdownOpen, setIsOptionsDropdownOpen] = useState(false);
   const [isConfigExpanded, setIsConfigExpanded] = useState(false);
+  const [isGroupReminderModalOpen, setIsGroupReminderModalOpen] = useState(false);
   const [eInviteTemplates, setEInviteTemplates] = useState<EInviteTemplate[]>(DEFAULT_EINVITE_TEMPLATES);
 
   useEffect(() => {
@@ -2327,6 +2329,19 @@ export default function EventDetails() {
                       <Monitor className="w-4 h-4 text-indigo-600" />
                       <span>Layar Sapa</span>
                     </Link>
+                  )}
+
+                  {/* Pengingat Grup WA Tim (H-3 & H-1) untuk Vendor / Admin / Super Admin */}
+                  {appUser && ['superadmin', 'owner', 'partner', 'admin'].includes(appUser.role) && (
+                    <button
+                      type="button"
+                      onClick={() => setIsGroupReminderModalOpen(true)}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg font-medium text-xs sm:text-sm transition-colors shadow-2xs cursor-pointer"
+                      title="Jadwalkan / Kirim Pengingat Grup WhatsApp Tim (H-3, H-1 & Hari H)"
+                    >
+                      <MessageCircle className="w-4 h-4 text-emerald-600" />
+                      <span>Grup Tim</span>
+                    </button>
                   )}
                 </>
               )}
@@ -5134,6 +5149,19 @@ export default function EventDetails() {
           </div>,
           document.body
         )}
+
+      {/* Modal Pengingat Grup WhatsApp Tim (H-3 & H-1) */}
+      {event && (
+        <EventGroupReminderModal
+          isOpen={isGroupReminderModalOpen}
+          onClose={() => setIsGroupReminderModalOpen(false)}
+          event={event}
+          currentAppUser={appUser}
+          onEventUpdated={(updatedLog) => {
+            setEvent((prev) => (prev ? { ...prev, groupReminderLog: updatedLog } : prev));
+          }}
+        />
+      )}
     </div>
   );
 }

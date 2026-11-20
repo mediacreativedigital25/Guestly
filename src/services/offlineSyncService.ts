@@ -1,5 +1,3 @@
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { supabaseDb } from '../lib/supabaseDb';
 import { EventRecord, Guest, SouvenirItem } from '../types';
 import { souvenirStorage } from './souvenirStorage';
@@ -279,17 +277,19 @@ export const offlineSyncService = {
 
     this.saveSyncQueue(eventId, queue);
 
-    // Broadcast immediately to same-device tabs (e.g. GreetingScreen on same laptop)
-    broadcastLocalGreeting(eventId, {
-      id: item.guestId,
-      event_id: eventId,
-      name: item.guestName,
-      ticket_code: item.ticketCode,
-      category: item.category,
-      session: item.session,
-      attended: true,
-      check_in_time: item.attendedAt,
-    });
+    // Broadcast immediately to same-device tabs (e.g. GreetingScreen on same laptop) — gate check-ins only
+    if (item.mode !== 'souvenir_only') {
+      broadcastLocalGreeting(eventId, {
+        id: item.guestId,
+        event_id: eventId,
+        name: item.guestName,
+        ticket_code: item.ticketCode,
+        category: item.category,
+        session: item.session,
+        attended: true,
+        check_in_time: item.attendedAt,
+      });
+    }
 
     return newItem;
   },
@@ -567,18 +567,19 @@ export const offlineSyncService = {
   ): Promise<{ synced: number; remaining: number }> {
     if (!eventId || typeof window === 'undefined') return { synced: 0, remaining: 0 };
     const queue = this.getSyncQueue(eventId);
-    if (queue.length === 0) return { synced: 0, remaining: 0 };
+    const pendingBatchCount = souvenirStorage.getPendingBatchScanCount(eventId);
+    if (queue.length === 0 && pendingBatchCount === 0) return { synced: 0, remaining: 0 };
 
     if (!navigator.onLine) {
-      return { synced: 0, remaining: queue.length };
+      return { synced: 0, remaining: queue.length + pendingBatchCount };
     }
 
     if (!options.ignoreForceOffline && this.isForceOffline(eventId)) {
-      return { synced: 0, remaining: queue.length };
+      return { synced: 0, remaining: queue.length + pendingBatchCount };
     }
 
     if (activeFlushLocks.has(eventId)) {
-      return { synced: 0, remaining: queue.length };
+      return { synced: 0, remaining: queue.length + pendingBatchCount };
     }
 
     activeFlushLocks.add(eventId);
@@ -586,29 +587,76 @@ export const offlineSyncService = {
     const remainingQueue: OfflineSyncItem[] = [];
 
     try {
+      // 0. Flush any pending direct QR batch souvenir scans first
+      if (pendingBatchCount > 0) {
+        const batchSynced = await souvenirStorage.syncPendingBatchScansToSupabase(eventId);
+        syncedCount += batchSynced;
+      }
+
       for (const item of queue) {
         try {
           // 1. Single direct update to Supabase guests table by primary key
-          await supabaseDb.updateGuest(item.guestId, {
-            attended: item.attended,
-            attendedAt: item.attendedAt,
-            checkInTime: item.attendedAt,
-            checkInStaff: item.checkInStaff,
-            checkInMethod: item.checkInMethod || 'scan',
-            ...(item.souvenirGiven
-              ? {
-                  souvenirTaken: true,
-                  souvenirName: item.souvenirName,
-                  souvenirTakenAt: item.souvenirTakenAt,
-                  souvenirTakenBy: item.souvenirTakenBy,
-                }
-              : {}),
-          });
+          if (item.mode === 'souvenir_only') {
+            // Preserve existing gate check-in timestamp, staff, and method (Scan QR vs Manual)
+            await supabaseDb.updateGuest(item.guestId, {
+              souvenirTaken: true,
+              souvenirName: item.souvenirName,
+              souvenirTakenAt: item.souvenirTakenAt || item.createdAt,
+              souvenirTakenBy: item.souvenirTakenBy,
+            });
+          } else {
+            await supabaseDb.updateGuest(item.guestId, {
+              attended: item.attended,
+              attendedAt: item.attendedAt,
+              checkInTime: item.attendedAt,
+              checkInStaff: item.checkInStaff,
+              checkInMethod: item.checkInMethod || 'scan',
+              ...(item.souvenirGiven
+                ? {
+                    souvenirTaken: true,
+                    souvenirName: item.souvenirName,
+                    souvenirTakenAt: item.souvenirTakenAt,
+                    souvenirTakenBy: item.souvenirTakenBy,
+                  }
+                : {}),
+            });
+          }
 
-          // 2. Only broadcast to Greeting Screen TV if scan happened within the last 25 seconds
-          // (prevents flooding the TV with old arrivals when syncing a batch later)
+          // 2. Also sync offline souvenir guest map & audit log to Supabase
+          if (item.souvenirGiven && item.souvenirName) {
+            await souvenirStorage.syncOfflineSouvenirToSupabase(
+              eventId,
+              item.guestId,
+              {
+                souvenirId: item.souvenirId || '',
+                souvenirName: item.souvenirName,
+                takenAt: item.souvenirTakenAt || item.createdAt,
+                takenBy: item.souvenirTakenBy || item.checkInStaff,
+              },
+              {
+                id: `log_offline_${item.id}`,
+                timestamp: item.souvenirTakenAt || item.createdAt,
+                eventId,
+                souvenirId: item.souvenirId || '',
+                souvenirName: item.souvenirName,
+                guestId: item.guestId,
+                guestName: item.guestName,
+                ticketCode: item.ticketCode,
+                quantity: 1,
+                action: 'TAKE',
+                notes:
+                  item.mode === 'souvenir_only'
+                    ? 'Penukaran souvenir (Sinkronisasi Offline)'
+                    : 'Check-in & serah souvenir (Sinkronisasi Offline)',
+                performedBy: item.souvenirTakenBy || item.checkInStaff,
+              }
+            );
+          }
+
+          // 3. Only broadcast to Greeting Screen TV for gate check-ins within the last 25 seconds
+          // (prevents flooding the TV with old arrivals or souvenir desk hand-outs)
           const itemAgeMs = Date.now() - (new Date(item.createdAt || item.attendedAt).getTime() || 0);
-          if (itemAgeMs >= 0 && itemAgeMs <= 25000) {
+          if (item.mode !== 'souvenir_only' && itemAgeMs >= 0 && itemAgeMs <= 25000) {
             await supabaseDb.broadcastGuestArrival(eventId, {
               id: item.guestId,
               event_id: eventId,

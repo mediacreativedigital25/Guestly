@@ -790,7 +790,8 @@ export default function AdminSettings() {
               </div>
               <AdminSalespageSettings 
                 data={salespageData} 
-                updateData={updateSP} 
+                updateData={updateSP}
+                onReplaceData={setSalespageData}
               />
               <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
                 <button

@@ -21,7 +21,9 @@ import {
   TrendingDown,
   PackageCheck,
   Boxes,
-  Lock
+  Lock,
+  QrCode,
+  Printer
 } from 'lucide-react';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -29,6 +31,7 @@ import { SouvenirItem, SouvenirLog, Guest, EventRecord } from '../types';
 import { parseFirestoreDate } from '../lib/utils';
 import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 import { souvenirStorage } from '../services/souvenirStorage';
+import SouvenirBatchQrModal from './SouvenirBatchQrModal';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -72,6 +75,8 @@ export default function SouvenirManagement({
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [isBatchQrModalOpen, setIsBatchQrModalOpen] = useState(false);
+  const [batchQrInitialItem, setBatchQrInitialItem] = useState<SouvenirItem | null>(null);
   const [selectedSouvenir, setSelectedSouvenir] = useState<SouvenirItem | null>(null);
 
   // Form states
@@ -140,6 +145,7 @@ export default function SouvenirManagement({
   // Overall totals calculation
   const totalInitial = souvenirs.reduce((sum, s) => sum + (s.initialStock || 0), 0);
   const totalDistributed = souvenirs.reduce((sum, s) => sum + (s.totalDistributed || 0), 0);
+  const totalDirectQrOut = souvenirs.reduce((sum, s) => sum + (s.directQrOutCount || 0), 0);
   const totalRemainingSystem = souvenirs.reduce((sum, s) => sum + (s.remainingStock || 0), 0);
   const totalPhysicalAudit = souvenirs.reduce((sum, s) => sum + (s.physicalStockAudit ?? s.remainingStock), 0);
   const overallDiscrepancy = totalPhysicalAudit - totalRemainingSystem;
@@ -553,12 +559,17 @@ export default function SouvenirManagement({
     const stockSummaryData = souvenirs.map((s, index) => {
       const auditVal = s.physicalStockAudit ?? s.remainingStock;
       const discrepancy = auditVal - s.remainingStock;
+      const directQr = s.directQrOutCount || 0;
+      const guestOut = Math.max(0, (s.totalDistributed || 0) - directQr);
       return {
         'No': index + 1,
         'Nama Souvenir': s.name,
         'Kategori / Target': s.category || 'Semua',
+        'Kode Batch QR': s.qrBatchCode || '-',
         'Stok Awal Fisik (Pcs)': s.initialStock,
-        'Pengambilan / Keluar (Pcs)': s.totalDistributed,
+        'Keluar via Tamu (Pcs)': guestOut,
+        'Keluar via QR Fisik (Pcs)': directQr,
+        'Total Keluar (Pcs)': s.totalDistributed,
         'Sisa Stok Sistem (Pcs)': s.remainingStock,
         'Hasil Hitung Fisik Meja (Pcs)': auditVal,
         'Selisih Fisik vs Sistem': discrepancy === 0 ? 'COCOK (0)' : `${discrepancy > 0 ? '+' : ''}${discrepancy} pcs`,
@@ -574,8 +585,11 @@ export default function SouvenirManagement({
       'No': 999 as any,
       'Nama Souvenir': 'TOTAL KESELURUHAN',
       'Kategori / Target': '-',
+      'Kode Batch QR': '-',
       'Stok Awal Fisik (Pcs)': totalInitial,
-      'Pengambilan / Keluar (Pcs)': totalDistributed,
+      'Keluar via Tamu (Pcs)': Math.max(0, totalDistributed - totalDirectQrOut),
+      'Keluar via QR Fisik (Pcs)': totalDirectQrOut,
+      'Total Keluar (Pcs)': totalDistributed,
       'Sisa Stok Sistem (Pcs)': totalRemainingSystem,
       'Hasil Hitung Fisik Meja (Pcs)': totalPhysicalAudit,
       'Selisih Fisik vs Sistem': overallDiscrepancy === 0 ? 'COCOK (0)' : `${overallDiscrepancy} pcs`,
@@ -649,11 +663,14 @@ export default function SouvenirManagement({
     const tableData = souvenirs.map(s => {
       const auditVal = s.physicalStockAudit ?? s.remainingStock;
       const discrepancy = auditVal - s.remainingStock;
+      const directQr = s.directQrOutCount || 0;
+      const guestOut = Math.max(0, (s.totalDistributed || 0) - directQr);
       return [
         s.name,
         s.category || 'Semua',
+        s.qrBatchCode || '-',
         s.initialStock.toString(),
-        s.totalDistributed.toString(),
+        directQr > 0 ? `${s.totalDistributed} (${guestOut}+${directQr} QR)` : s.totalDistributed.toString(),
         s.remainingStock.toString(),
         auditVal.toString(),
         discrepancy === 0 ? '0 (Cocok)' : `${discrepancy > 0 ? '+' : ''}${discrepancy} pcs`,
@@ -664,8 +681,11 @@ export default function SouvenirManagement({
     tableData.push([
       'TOTAL KESELURUHAN',
       '-',
+      '-',
       totalInitial.toString(),
-      totalDistributed.toString(),
+      totalDirectQrOut > 0
+        ? `${totalDistributed} (${Math.max(0, totalDistributed - totalDirectQrOut)}+${totalDirectQrOut} QR)`
+        : totalDistributed.toString(),
       totalRemainingSystem.toString(),
       totalPhysicalAudit.toString(),
       overallDiscrepancy === 0 ? '0 (Cocok)' : `${overallDiscrepancy} pcs`,
@@ -674,11 +694,11 @@ export default function SouvenirManagement({
 
     autoTable(doc, {
       startY: 52,
-      head: [['Nama Souvenir', 'Kategori', 'Stok Awal', 'Keluar', 'Sisa Sistem', 'Cek Fisik', 'Selisih', 'Status']],
+      head: [['Nama Souvenir', 'Kategori', 'Batch QR', 'Awal', 'Keluar', 'Sisa', 'Fisik', 'Selisih', 'Status']],
       body: tableData,
       theme: 'grid',
       headStyles: { fillColor: [79, 70, 229] },
-      styles: { fontSize: 8 },
+      styles: { fontSize: 7.5 },
       footStyles: { fillColor: [243, 244, 246], textColor: [17, 24, 39], fontStyle: 'bold' }
     });
 
@@ -816,7 +836,11 @@ export default function SouvenirManagement({
               ({totalInitial > 0 ? Math.round((totalDistributed / totalInitial) * 100) : 0}%)
             </span>
           </div>
-          <p className="text-[11px] text-gray-400 mt-1">{guestsTakenCount} dari {guests.length} tamu</p>
+          <p className="text-[11px] text-gray-400 mt-1">
+            {totalDirectQrOut > 0
+              ? `${guestsTakenCount} tamu + ${totalDirectQrOut} scan QR fisik`
+              : `${guestsTakenCount} dari ${guests.length} tamu`}
+          </p>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
@@ -889,26 +913,43 @@ export default function SouvenirManagement({
         </div>
 
         {viewTab === 'overview' && (
-          <button
-            onClick={() => {
-              if (isLocked) {
-                showSouvenirLockedAlert();
-                return;
-              }
-              resetForm();
-              setIsAddModalOpen(true);
-            }}
-            disabled={isLocked}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors mb-2 ${
-              isLocked
-                ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
-                : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-            }`}
-            title={isLocked ? 'Tambah souvenir dikunci — lakukan Top-Up Paket untuk membuka' : undefined}
-          >
-            {isLocked ? <Lock className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-            <span>Tambah Jenis Souvenir</span>
-          </button>
+          <div className="flex items-center gap-2 mb-2">
+            {souvenirs.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBatchQrInitialItem(null);
+                  setIsBatchQrModalOpen(true);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors cursor-pointer"
+                title="Cetak stiker QR Batch hemat kertas untuk semua kategori souvenir"
+              >
+                <Printer className="w-4 h-4" />
+                <span className="hidden sm:inline">Cetak Stiker QR</span>
+                <span className="sm:hidden">Stiker QR</span>
+              </button>
+            )}
+            <button
+              onClick={() => {
+                if (isLocked) {
+                  showSouvenirLockedAlert();
+                  return;
+                }
+                resetForm();
+                setIsAddModalOpen(true);
+              }}
+              disabled={isLocked}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors ${
+                isLocked
+                  ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
+                  : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+              }`}
+              title={isLocked ? 'Tambah souvenir dikunci — lakukan Top-Up Paket untuk membuka' : undefined}
+            >
+              {isLocked ? <Lock className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              <span>Tambah Jenis Souvenir</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -963,11 +1004,20 @@ export default function SouvenirManagement({
                     <div>
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <h4 className="font-semibold text-gray-900 text-base">{item.name}</h4>
                             <span className="text-[11px] font-medium px-2 py-0.5 bg-gray-100 text-gray-700 rounded-full">
                               {item.category || 'Semua Tamu'}
                             </span>
+                            {item.qrBatchCode && (
+                              <span
+                                className="inline-flex items-center gap-1 text-[11px] font-mono font-bold px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md"
+                                title={`Kode QR Batch: SV:${item.qrBatchCode}`}
+                              >
+                                <QrCode className="w-3 h-3" />
+                                {item.qrBatchCode}
+                              </span>
+                            )}
                           </div>
                           {item.notes && (
                             <p className="text-xs text-gray-500 mt-1">{item.notes}</p>
@@ -997,7 +1047,14 @@ export default function SouvenirManagement({
                       {/* Distribution Progress Bar */}
                       <div className="mt-4">
                         <div className="flex justify-between text-xs text-gray-600 mb-1">
-                          <span>Terdistribusi: <strong>{item.totalDistributed}</strong> pcs</span>
+                          <span>
+                            Terdistribusi: <strong>{item.totalDistributed}</strong> pcs
+                            {(item.directQrOutCount || 0) > 0 && (
+                              <span className="text-[11px] text-indigo-600 ml-1">
+                                ({item.directQrOutCount} via QR fisik)
+                              </span>
+                            )}
+                          </span>
                           <span>Stok Awal: <strong>{item.initialStock}</strong> pcs ({percentage}%)</span>
                         </div>
                         <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
@@ -1041,8 +1098,8 @@ export default function SouvenirManagement({
                       </div>
                     </div>
 
-                    {/* Stock Opname Action Button */}
-                    <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
+                    {/* Action Buttons: QR Batch Sticker & Stock Opname */}
+                    <div className="mt-4 pt-3 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2">
                       <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
                         discrepancy === 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
                       }`}>
@@ -1050,23 +1107,38 @@ export default function SouvenirManagement({
                         {discrepancy === 0 ? 'Sesuai dengan Fisik' : 'Perlu Penyelarasan Fisik'}
                       </span>
 
-                      <button
-                        onClick={() => openAuditModal(item)}
-                        disabled={isLocked}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                          isLocked
-                            ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
-                            : 'bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700'
-                        }`}
-                        title={isLocked ? 'Stock Opname dikunci — lakukan Top-Up Paket' : undefined}
-                      >
-                        {isLocked ? (
-                          <Lock className="w-3.5 h-3.5 text-slate-400" />
-                        ) : (
-                          <ClipboardCheck className="w-3.5 h-3.5 text-indigo-600" />
-                        )}
-                        <span>Hitung Fisik (Stock Opname)</span>
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBatchQrInitialItem(item);
+                            setIsBatchQrModalOpen(true);
+                          }}
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 transition-colors cursor-pointer"
+                          title={`Lihat & cetak stiker QR Batch (${item.qrBatchCode})`}
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                          <span>QR Stiker</span>
+                        </button>
+
+                        <button
+                          onClick={() => openAuditModal(item)}
+                          disabled={isLocked}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                            isLocked
+                              ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
+                              : 'bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700 cursor-pointer'
+                          }`}
+                          title={isLocked ? 'Stock Opname dikunci — lakukan Top-Up Paket' : undefined}
+                        >
+                          {isLocked ? (
+                            <Lock className="w-3.5 h-3.5 text-slate-400" />
+                          ) : (
+                            <ClipboardCheck className="w-3.5 h-3.5 text-indigo-600" />
+                          )}
+                          <span>Stock Opname</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -1302,9 +1374,38 @@ export default function SouvenirManagement({
                       </div>
                     </div>
 
-                    <div className="text-right text-xs text-gray-400 flex-shrink-0">
+                    <div className="text-right text-xs text-gray-400 flex-shrink-0 flex flex-col items-end gap-1">
                       <div>{date ? date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</div>
                       <div className="text-[10px]">{log.performedBy || 'Petugas'}</div>
+                      {!isLocked &&
+                        isTake &&
+                        log.batchScanId &&
+                        !souvenirStorage.getBatchScansMap(eventId)[log.batchScanId]?.voided && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const confirmed = await showConfirm(
+                                'Batalkan Scan QR Batch?',
+                                `Batalkan 1 pcs "${log.souvenirName}" (Batch ${log.batchCode || '-'}) dan kembalikan +1 stok?`
+                              );
+                              if (!confirmed) return;
+                              const res = souvenirStorage.undoBatchScan(
+                                eventId,
+                                log.batchScanId!,
+                                currentUserName || currentUserEmail || 'Admin'
+                              );
+                              if (res.undone) {
+                                setSouvenirs(souvenirStorage.getSouvenirs(eventId, guests));
+                                setLogs(souvenirStorage.getLogs(eventId));
+                                showAlert('Berhasil Dibatalkan', 'Stok sistem dipulihkan +1 pcs.', 'success');
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded cursor-pointer"
+                          >
+                            <RotateCcw className="w-2.5 h-2.5" />
+                            <span>Batal (+1)</span>
+                          </button>
+                        )}
                     </div>
                   </div>
                 );
@@ -1634,6 +1735,23 @@ export default function SouvenirManagement({
           </div>
         </div>
       )}
+
+      {/* MODAL: QR BATCH SOUVENIR & CETAK STIKER */}
+      <SouvenirBatchQrModal
+        isOpen={isBatchQrModalOpen}
+        onClose={() => setIsBatchQrModalOpen(false)}
+        eventId={eventId}
+        eventTitle={event?.title}
+        souvenirs={souvenirs}
+        initialItem={batchQrInitialItem}
+        guests={guests}
+        currentOperator={currentUserName || currentUserEmail || 'Admin'}
+        isLocked={isLocked}
+        onUpdated={() => {
+          setSouvenirs(souvenirStorage.getSouvenirs(eventId, guests));
+          setLogs(souvenirStorage.getLogs(eventId));
+        }}
+      />
     </div>
   );
 }

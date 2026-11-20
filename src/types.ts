@@ -15,6 +15,8 @@ export interface User {
   role: Role;
   staffType?: StaffType;
   assignedEventIds?: string[];
+  assignmentNotes?: string;
+  _password?: string;
   name: string;
   email: string;
   package?: string;
@@ -31,6 +33,14 @@ export interface User {
   brandingImageUrl?: string;
   phone?: string;
   fonnteToken?: string;
+  waGroupId?: string;
+  waGroupName?: string;
+  waGroupReminderEnabled?: boolean;
+  waGroupReminderH3?: boolean;
+  waGroupReminderH1?: boolean;
+  waGroupReminderH0?: boolean;
+  waGroupReminderTime?: string;
+  waGroupReminderH0Time?: string;
   eventQuota?: number;
   clientQuota?: number;
   guestQuota?: number;
@@ -160,6 +170,20 @@ export interface EventRecord {
   greetingShowLogo?: boolean;
   greetingShowFooterStrip?: boolean;
   fonnteToken?: string;
+  groupReminderLog?: {
+    h3ScheduledAt?: string;
+    h3TargetTimestamp?: number;
+    h1ScheduledAt?: string;
+    h1TargetTimestamp?: number;
+    h0ScheduledAt?: string;
+    h0TargetTimestamp?: number;
+    lastManualSentAt?: string;
+    lastStaffSignature?: string;
+    groupId?: string;
+    groupName?: string;
+    reminderTime?: string;
+    reminderH0Time?: string;
+  };
   createdAt: any;
   updatedAt: any;
 }
@@ -264,8 +288,10 @@ export interface SouvenirItem {
   eventId: string;
   name: string;
   category?: string;
+  qrBatchCode?: string;
   initialStock: number;
   totalDistributed: number;
+  directQrOutCount?: number;
   remainingStock: number;
   physicalStockAudit?: number;
   lastAuditAt?: any;
@@ -273,6 +299,20 @@ export interface SouvenirItem {
   notes?: string;
   createdAt: any;
   updatedAt: any;
+}
+
+export interface SouvenirBatchScanRecord {
+  id: string;
+  eventId: string;
+  souvenirId: string;
+  souvenirName: string;
+  category?: string;
+  batchCode: string;
+  scannedAt: string;
+  scannedBy: string;
+  voided?: boolean;
+  voidedAt?: string;
+  voidedBy?: string;
 }
 
 export interface SouvenirLog {
@@ -283,6 +323,8 @@ export interface SouvenirLog {
   guestId?: string;
   guestName: string;
   ticketCode?: string;
+  batchCode?: string;
+  batchScanId?: string;
   quantity: number;
   action: 'TAKE' | 'RETURN' | 'ADJUSTMENT';
   notes?: string;

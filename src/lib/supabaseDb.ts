@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { EventRecord, Guest, User } from '../types';
-import { encodeCheckInStaff, decodeCheckInStaff } from './checkInUtils';
+import { encodeCheckInStaff, decodeCheckInStaff, encodeSouvenirMeta, decodeSouvenirMeta } from './checkInUtils';
 
 const activeBroadcastChannels = new Map<string, ReturnType<typeof supabase.channel>>();
 const subscribedChannels = new Set<string>();
@@ -104,14 +104,16 @@ export const supabaseDb = {
     return data ? rowToGuest(data) : null;
   },
 
-  async getGuestById(guestId: string): Promise<Guest | null> {
+  async getGuestById(guestId: string, eventId?: string): Promise<Guest | null> {
     if (!guestId) return null;
-    const { data, error } = await supabase
+    let q = supabase
       .from('guests')
       .select('*')
-      .eq('id', guestId)
-      .limit(1)
-      .maybeSingle();
+      .eq('id', guestId);
+    if (eventId) {
+      q = q.eq('event_id', eventId);
+    }
+    const { data, error } = await q.limit(1).maybeSingle();
 
     if (error) {
       console.warn(`Error fetching guest by id ${guestId}:`, error);
@@ -205,28 +207,7 @@ export const supabaseDb = {
   },
 
   async updateGuest(guestId: string, updates: Partial<Guest>): Promise<Guest> {
-    const rowUpdates: any = { updated_at: new Date().toISOString() };
-    if (updates.name !== undefined) rowUpdates.name = updates.name;
-    if (updates.phone !== undefined) rowUpdates.phone = updates.phone;
-    if (updates.email !== undefined) rowUpdates.email = updates.email;
-    if (updates.category !== undefined) rowUpdates.category = updates.category;
-    if (updates.invitationType !== undefined) rowUpdates.qr_code = updates.invitationType || null;
-    if (updates.tableNumber !== undefined) rowUpdates.seat = updates.tableNumber;
-    if (updates.pax !== undefined) rowUpdates.pax = updates.pax;
-    if (updates.session !== undefined) rowUpdates.session = updates.session;
-    if (updates.rsvpStatus !== undefined) rowUpdates.rsvp_status = updates.rsvpStatus;
-    if (updates.attended !== undefined) rowUpdates.attended = updates.attended;
-    if (updates.checkInTime !== undefined) rowUpdates.check_in_time = updates.checkInTime ? new Date(updates.checkInTime as any).toISOString() : null;
-    if (updates.attendedAt !== undefined) rowUpdates.check_in_time = updates.attendedAt ? new Date(updates.attendedAt as any).toISOString() : null;
-    if (updates.checkInStaff !== undefined || updates.checkInMethod !== undefined) {
-      rowUpdates.check_in_staff = encodeCheckInStaff(updates.checkInStaff, updates.checkInMethod);
-    }
-    if (updates.souvenirTaken !== undefined) rowUpdates.souvenir_taken = updates.souvenirTaken;
-    if (updates.souvenirName !== undefined) rowUpdates.souvenir_type = updates.souvenirName;
-    if (updates.souvenirTakenAt !== undefined) rowUpdates.souvenir_time = updates.souvenirTakenAt ? new Date(updates.souvenirTakenAt as any).toISOString() : null;
-    if (updates.wishes !== undefined) rowUpdates.wishes = updates.wishes;
-    if (updates.stickerUrl !== undefined) rowUpdates.sticker_url = updates.stickerUrl;
-    if (updates.address !== undefined) rowUpdates.notes = updates.address;
+    const rowUpdates = buildGuestRowUpdates(updates);
 
     const { data, error } = await supabase
       .from('guests')
@@ -245,6 +226,50 @@ export const supabaseDb = {
       );
     }
     return rowToGuest(data);
+  },
+
+  /**
+   * Atomic conditional update for QR / manual check-in and souvenir claims.
+   * Returns `{ claimed: true, guest }` if this device won the DB guard,
+   * or `{ claimed: false, guest: null }` if another device already claimed it concurrently.
+   */
+  async claimGuestScan(
+    guestId: string,
+    eventId: string,
+    updates: Partial<Guest>,
+    guard: { requireNotAttended?: boolean; requireNotSouvenirTaken?: boolean }
+  ): Promise<{ claimed: boolean; guest: Guest | null }> {
+    const rowUpdates = buildGuestRowUpdates(updates);
+
+    let q = supabase
+      .from('guests')
+      .update(rowUpdates)
+      .eq('id', guestId)
+      .eq('event_id', eventId);
+
+    if (guard.requireNotAttended) {
+      q = q.or('attended.is.null,attended.eq.false');
+    } else if (guard.requireNotSouvenirTaken) {
+      q = q.or('souvenir_taken.is.null,souvenir_taken.eq.false');
+    }
+
+    const { data, error } = await q.select().maybeSingle();
+
+    if (error) {
+      console.error(`Error claiming guest scan ${guestId}:`, error);
+      throw error;
+    }
+
+    if (!data) {
+      return { claimed: false, guest: null };
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('supabase-compat-change', { detail: { collectionName: 'guests', docId: guestId } })
+      );
+    }
+    return { claimed: true, guest: rowToGuest(data) };
   },
 
   async deleteGuest(guestId: string): Promise<void> {
@@ -358,9 +383,9 @@ export const supabaseDb = {
       checkInTime: raw.checkInTime || raw.attendedAt || raw.check_in_time,
       checkInStaff: raw.checkInStaff || raw.check_in_staff,
       souvenirTaken: Boolean(raw.souvenirTaken ?? raw.souvenir_taken),
-      souvenirName: raw.souvenirName || raw.souvenir_type,
+      souvenirName: raw.souvenirName || decodeSouvenirMeta(raw.souvenir_type).souvenirName,
       souvenirTakenAt: raw.souvenirTakenAt || raw.souvenir_time,
-      souvenirTakenBy: raw.souvenirTakenBy,
+      souvenirTakenBy: raw.souvenirTakenBy || decodeSouvenirMeta(raw.souvenir_type).souvenirTakenBy,
       wishes: raw.wishes,
       stickerUrl: raw.stickerUrl || raw.sticker_url,
       createdAt: raw.createdAt || raw.created_at,
@@ -414,6 +439,34 @@ export const supabaseDb = {
 };
 
 // ================= HELPERS (ROW <-> MODEL) =================
+function buildGuestRowUpdates(updates: Partial<Guest>): any {
+  const rowUpdates: any = { updated_at: new Date().toISOString() };
+  if (updates.name !== undefined) rowUpdates.name = updates.name;
+  if (updates.phone !== undefined) rowUpdates.phone = updates.phone;
+  if (updates.email !== undefined) rowUpdates.email = updates.email;
+  if (updates.category !== undefined) rowUpdates.category = updates.category;
+  if (updates.invitationType !== undefined) rowUpdates.qr_code = updates.invitationType || null;
+  if (updates.tableNumber !== undefined) rowUpdates.seat = updates.tableNumber;
+  if (updates.pax !== undefined) rowUpdates.pax = updates.pax;
+  if (updates.session !== undefined) rowUpdates.session = updates.session;
+  if (updates.rsvpStatus !== undefined) rowUpdates.rsvp_status = updates.rsvpStatus;
+  if (updates.attended !== undefined) rowUpdates.attended = updates.attended;
+  if (updates.checkInTime !== undefined) rowUpdates.check_in_time = updates.checkInTime ? new Date(updates.checkInTime as any).toISOString() : null;
+  if (updates.attendedAt !== undefined) rowUpdates.check_in_time = updates.attendedAt ? new Date(updates.attendedAt as any).toISOString() : null;
+  if (updates.checkInStaff !== undefined || updates.checkInMethod !== undefined) {
+    rowUpdates.check_in_staff = encodeCheckInStaff(updates.checkInStaff, updates.checkInMethod);
+  }
+  if (updates.souvenirTaken !== undefined) rowUpdates.souvenir_taken = updates.souvenirTaken;
+  if (updates.souvenirName !== undefined || updates.souvenirTakenBy !== undefined) {
+    rowUpdates.souvenir_type = encodeSouvenirMeta(updates.souvenirName, updates.souvenirTakenBy);
+  }
+  if (updates.souvenirTakenAt !== undefined) rowUpdates.souvenir_time = updates.souvenirTakenAt ? new Date(updates.souvenirTakenAt as any).toISOString() : null;
+  if (updates.wishes !== undefined) rowUpdates.wishes = updates.wishes;
+  if (updates.stickerUrl !== undefined) rowUpdates.sticker_url = updates.stickerUrl;
+  if (updates.address !== undefined) rowUpdates.notes = updates.address;
+  return rowUpdates;
+}
+
 function rowToEvent(row: any): EventRecord {
   const extra = row.settings && typeof row.settings === 'object' ? row.settings : {};
   return {
@@ -509,8 +562,9 @@ function rowToGuest(row: any): Guest {
     checkInStaff: decodeCheckInStaff(row.check_in_staff).staff || undefined,
     checkInMethod: decodeCheckInStaff(row.check_in_staff).method || (row.attended ? 'scan' : undefined),
     souvenirTaken: Boolean(row.souvenir_taken),
-    souvenirName: row.souvenir_type,
+    souvenirName: decodeSouvenirMeta(row.souvenir_type).souvenirName,
     souvenirTakenAt: row.souvenir_time,
+    souvenirTakenBy: decodeSouvenirMeta(row.souvenir_type).souvenirTakenBy,
     wishes: row.wishes,
     stickerUrl: row.sticker_url,
     address: row.notes,
@@ -546,7 +600,7 @@ function guestToRow(guest: any): any {
     check_in_time: guest.checkInTime || guest.attendedAt ? new Date(guest.checkInTime || guest.attendedAt).toISOString() : null,
     check_in_staff: encodeCheckInStaff(guest.checkInStaff, guest.checkInMethod),
     souvenir_taken: Boolean(guest.souvenirTaken),
-    souvenir_type: guest.souvenirName || null,
+    souvenir_type: encodeSouvenirMeta(guest.souvenirName, guest.souvenirTakenBy),
     souvenir_time: guest.souvenirTakenAt ? new Date(guest.souvenirTakenAt).toISOString() : null,
     wishes: guest.wishes || null,
     sticker_url: guest.stickerUrl || null,

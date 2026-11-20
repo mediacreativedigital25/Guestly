@@ -493,7 +493,10 @@ function drawImageFit(
   }
 }
 
-export async function exportCardToPng(element: HTMLElement, fileName: string): Promise<void> {
+async function renderCardToCanvas(
+  element: HTMLElement,
+  pixelRatio = 2.5
+): Promise<HTMLCanvasElement> {
   const htmlToImage = await import('html-to-image');
   const images = Array.from(element.querySelectorAll('img'));
   const originalSrcs: { img: HTMLImageElement; src: string; crossOrigin: string | null }[] = [];
@@ -628,7 +631,6 @@ export async function exportCardToPng(element: HTMLElement, fileName: string): P
       return true;
     };
 
-    const pixelRatio = 2.5;
     const exportWidth = Number(element.dataset?.exportWidth) || Math.round(elRect.width) || 320;
     const exportHeight = Number(element.dataset?.exportHeight) || Math.round(elRect.height) || 400;
     const exportOptions: any = {
@@ -731,11 +733,7 @@ export async function exportCardToPng(element: HTMLElement, fileName: string): P
       }
     }
 
-    const dataUrl = canvas.toDataURL('image/png', 1.0);
-    const link = document.createElement('a');
-    link.download = fileName;
-    link.href = dataUrl;
-    link.click();
+    return canvas;
   } finally {
     element.style.transform = originalTransform;
     for (const item of originalTextStyles) {
@@ -751,6 +749,25 @@ export async function exportCardToPng(element: HTMLElement, fileName: string): P
       }
     }
   }
+}
+
+export async function exportCardToPng(element: HTMLElement, fileName: string): Promise<void> {
+  const canvas = await renderCardToCanvas(element, 2.5);
+  const dataUrl = canvas.toDataURL('image/png', 1.0);
+  const link = document.createElement('a');
+  link.download = fileName;
+  link.href = dataUrl;
+  link.click();
+}
+
+export async function renderCardToJpegBlob(
+  element: HTMLElement,
+  quality = 0.88
+): Promise<Blob | null> {
+  const canvas = await renderCardToCanvas(element, 1);
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
+  });
 }
 
 
