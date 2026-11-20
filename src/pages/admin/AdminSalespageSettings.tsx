@@ -27,6 +27,7 @@ import {
   resolveSalespageConfig,
 } from '../../lib/salespageDefaults';
 import { SalespageImageField } from '../../components/admin/SalespageImageField';
+import { SalespageVideoField } from '../../components/admin/SalespageVideoField';
 import { getHeroVideoSourceLabel } from '../../components/salespage/HeroMediaStage';
 import { showConfirm, showAlert } from '../../lib/alerts';
 
@@ -101,6 +102,9 @@ export default function AdminSalespageSettings({ data, updateData, onReplaceData
         title: '',
         description: '',
         imageUrl: '',
+        videoUrl: '',
+        videoMode: 'click',
+        videoFit: 'auto',
         span: 'normal',
       },
     ]);
@@ -133,7 +137,10 @@ export default function AdminSalespageSettings({ data, updateData, onReplaceData
   const setCarouselList = (next: SalespageCarouselItem[]) => updateData('featuresCarouselData', next);
 
   const addCarouselItem = () => {
-    setCarouselList([...carouselList, { title: '', description: '', img: '', link: '' }]);
+    setCarouselList([
+      ...carouselList,
+      { title: '', description: '', img: '', videoUrl: '', videoMode: 'click', videoFit: 'auto', link: '' },
+    ]);
   };
 
   const updateCarouselItem = (index: number, field: keyof SalespageCarouselItem, value: string) => {
@@ -566,15 +573,30 @@ export default function AdminSalespageSettings({ data, updateData, onReplaceData
             </label>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Judul Label Partner</label>
-            <input
-              type="text"
-              value={data?.partnersTitle ?? ''}
-              onChange={(e) => updateData('partnersTitle', e.target.value)}
-              placeholder={DEFAULT_SALESPAGE_CONFIG.partnersTitle}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white"
-            />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Judul Label Partner</label>
+              <input
+                type="text"
+                value={data?.partnersTitle ?? ''}
+                onChange={(e) => updateData('partnersTitle', e.target.value)}
+                placeholder={DEFAULT_SALESPAGE_CONFIG.partnersTitle}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Ukuran Tampil Logo</label>
+              <select
+                value={resolved.partnersLogoSize}
+                onChange={(e) => updateData('partnersLogoSize', e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white"
+              >
+                <option value="sm">Ringkas (56–80 px)</option>
+                <option value="md">Standar Ideal (80–112 px)</option>
+                <option value="lg">Ekstra Besar (96–144 px)</option>
+              </select>
+            </div>
           </div>
 
           <div className="space-y-3">
@@ -896,11 +918,21 @@ export default function AdminSalespageSettings({ data, updateData, onReplaceData
                 </div>
 
                 <SalespageImageField
-                  label="Foto Fitur (Opsional)"
+                  label="Foto / Poster Fitur (Opsional)"
                   value={item.imageUrl || ''}
                   onChange={(url) => updateBentoItem(index, 'imageUrl', url)}
                   fallbackPreview={getDefaultBentoFallback(item.id)}
-                  helperText="Opsional. Kosongkan jika kartu ingin tampil bersih berbasis tipografi (atau memakai gambar default bawaan)."
+                  helperText="Jika Mode Video diisi, foto ini otomatis menjadi cover/poster sebelum video diputar."
+                />
+
+                <SalespageVideoField
+                  label="Video Kartu Fitur (Opsional)"
+                  videoUrl={item.videoUrl || ''}
+                  videoMode={item.videoMode === 'autoplay' ? 'autoplay' : 'click'}
+                  videoFit={item.videoFit || 'auto'}
+                  onChangeUrl={(url) => updateBentoItem(index, 'videoUrl', url)}
+                  onChangeMode={(mode) => updateBentoItem(index, 'videoMode', mode)}
+                  onChangeFit={(fit) => updateBentoItem(index, 'videoFit', fit)}
                 />
               </div>
             ))}
@@ -944,11 +976,21 @@ export default function AdminSalespageSettings({ data, updateData, onReplaceData
             </div>
 
             <SalespageImageField
-              label="Foto Visual Bab Gelap"
+              label="Foto / Poster Bab Gelap"
               value={data?.problemImage || ''}
               onChange={(url) => updateData('problemImage', url)}
               fallbackPreview={SALESPAGE_DEFAULT_ASSETS.darkBallroom}
-              helperText="Upload foto suasana ballroom/resepsi bernuansa hangat atau gelap."
+              helperText="Upload foto suasana ballroom/resepsi bernuansa hangat atau gelap (menjadi poster jika video diisi)."
+            />
+
+            <SalespageVideoField
+              label="Video Bab Gelap Masalah & Solusi (Opsional)"
+              videoUrl={data?.problemVideoUrl || ''}
+              videoMode={resolved.problemVideoMode}
+              videoFit={resolved.problemVideoFit}
+              onChangeUrl={(url) => updateData('problemVideoUrl', url)}
+              onChangeMode={(mode) => updateData('problemVideoMode', mode)}
+              onChangeFit={(fit) => updateData('problemVideoFit', fit)}
             />
 
             <div>
@@ -1080,7 +1122,7 @@ export default function AdminSalespageSettings({ data, updateData, onReplaceData
                   </div>
 
                   <SalespageImageField
-                    label="Gambar Preview Slide"
+                    label="Gambar / Poster Preview Slide"
                     value={item.img || ''}
                     onChange={(url) => updateCarouselItem(index, 'img', url)}
                     fallbackPreview={
@@ -1088,6 +1130,16 @@ export default function AdminSalespageSettings({ data, updateData, onReplaceData
                         index % DEFAULT_SALESPAGE_CONFIG.featuresCarouselData.length
                       ]?.img
                     }
+                  />
+
+                  <SalespageVideoField
+                    label="Video Preview Slide (Opsional)"
+                    videoUrl={item.videoUrl || ''}
+                    videoMode={item.videoMode === 'autoplay' ? 'autoplay' : 'click'}
+                    videoFit={item.videoFit || 'auto'}
+                    onChangeUrl={(url) => updateCarouselItem(index, 'videoUrl', url)}
+                    onChangeMode={(mode) => updateCarouselItem(index, 'videoMode', mode)}
+                    onChangeFit={(fit) => updateCarouselItem(index, 'videoFit', fit)}
                   />
                 </div>
               ))}

@@ -4,7 +4,6 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useSettings } from '../../SettingsContext';
 import { showAlert, showConfirm, showCancelAlert } from '../../lib/alerts';
-import AdminSalespageSettings from './AdminSalespageSettings';
 import { MediaUploader } from '../../components/media/MediaUploader';
 import { sendFonnteMessage } from '../../lib/fonnte';
 import { scanQrisFromImageFile } from '../../utils/qrisParser';
@@ -89,9 +88,6 @@ export default function AdminSettings() {
     }
   };
 
-  // Salespage settings
-  const [salespageData, setSalespageData] = useState<any>({});
-
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -113,11 +109,6 @@ export default function AdminSettings() {
       setQrisNmid(settings.qrisPayment?.nmid || '');
       setQrisImageUrl(settings.qrisPayment?.qrisImageUrl || '');
       setQrisInstructions(settings.qrisPayment?.instructions || '');
-      
-      // Load salespage settings
-      if (settings.salespage) {
-        setSalespageData(settings.salespage);
-      }
     }
   }, [settings]);
 
@@ -155,10 +146,6 @@ export default function AdminSettings() {
     } finally {
       setIsTestingWa(false);
     }
-  };
-
-  const updateSP = (key: string, value: any) => {
-    setSalespageData((prev: any) => ({ ...prev, [key]: value }));
   };
 
   const handleSave = async (tab: string) => {
@@ -202,12 +189,6 @@ export default function AdminSettings() {
           },
         }, { merge: true });
         showAlert('Berhasil', 'Metode Pembayaran berhasil disimpan!', 'success');
-      } else if (tab === 'salespage') {
-        await setDoc(globalSettingsRef, {
-          ...currentData,
-          salespage: salespageData
-        }, { merge: true });
-        showAlert('Berhasil', 'Halaman Salespage berhasil disimpan!', 'success');
       }
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -238,12 +219,6 @@ export default function AdminSettings() {
             className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${activeTab === 'payment_methods' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
           >
             Metode Pembayaran
-          </button>
-          <button
-            onClick={() => setActiveTab('salespage')}
-            className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${activeTab === 'salespage' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-          >
-            Halaman Salespage
           </button>
         </div>
 
@@ -775,40 +750,6 @@ export default function AdminSettings() {
                 </button>
                 <button type="button" onClick={() => handleSave('payment_methods')} disabled={isSaving} className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors disabled:opacity-50">
                   {isSaving ? 'Menyimpan...' : 'Simpan Pengaturan Pembayaran'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'salespage' && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-900">Pengaturan Salespage</h2>
-                <button type="button" onClick={() => handleSave('salespage')} disabled={isSaving} className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors disabled:opacity-50">
-                  {isSaving ? 'Menyimpan...' : 'Simpan Perubahan'}
-                </button>
-              </div>
-              <AdminSalespageSettings 
-                data={salespageData} 
-                updateData={updateSP}
-                onReplaceData={setSalespageData}
-              />
-              <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
-                <button
-                  type="button"
-                  disabled={isSaving}
-                  onClick={() => {
-                    if (settings?.salespage) {
-                      setSalespageData(settings.salespage);
-                    }
-                    showCancelAlert('Perubahan pengaturan Salespage telah dibatalkan.');
-                  }}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
-                >
-                  Batal
-                </button>
-                <button type="button" onClick={() => handleSave('salespage')} disabled={isSaving} className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors disabled:opacity-50">
-                  {isSaving ? 'Menyimpan...' : 'Simpan Halaman Salespage'}
                 </button>
               </div>
             </div>

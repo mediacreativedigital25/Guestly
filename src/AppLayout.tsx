@@ -47,6 +47,7 @@ import {
   Check,
   Eye,
   EyeOff,
+  Globe,
 } from 'lucide-react';
 import { useCart } from './CartContext';
 import { cn, getRoleLabel, shouldHideServiceInfo, isGreetingScreenUser, canUserAccessEvent, getUserBusinessId, isVendorManagedClient, isSelfRegisteredClient } from './lib/utils';
@@ -2683,6 +2684,24 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                       </div>
                     </div>
                   </div>
+                )}
+
+                {appUser.role === 'superadmin' && (
+                  <Link
+                    to="/auth/login/salespage-settings"
+                    title={isSidebarCollapsed ? "Setting Salespage" : undefined}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className={cn(
+                      "mt-1 flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                      isSidebarCollapsed ? "justify-center px-0" : "",
+                      location.pathname.startsWith('/auth/login/salespage-settings')
+                        ? navActiveClass
+                        : navIdleClass
+                    )}
+                  >
+                    <Globe className={cn("flex-shrink-0", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                    {!isSidebarCollapsed && <span className="truncate">Setting Salespage</span>}
+                  </Link>
                 )}
               </>
             )}

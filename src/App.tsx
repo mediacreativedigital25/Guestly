@@ -28,6 +28,7 @@ import UserProfile from './pages/UserProfile';
 import AdminServices from './pages/admin/AdminServices';
 import AdminInvoice from './pages/admin/AdminInvoice';
 import AdminSettings from './pages/admin/AdminSettings';
+import AdminSalespagePage from './pages/admin/AdminSalespagePage';
 import AdminCalendar from './pages/admin/AdminCalendar';
 import AdminWATemplates from './pages/admin/AdminWATemplates';
 import AdminEInviteTemplates from './pages/admin/AdminEInviteTemplates';
@@ -104,6 +105,8 @@ export default function App() {
             <Route path="admin/services" element={<AdminServices />} />
             <Route path="admin/invoice" element={<AdminInvoice />} />
             <Route path="admin/settings" element={<AdminSettings />} />
+            <Route path="salespage-settings" element={<AdminSalespagePage />} />
+            <Route path="admin/salespage" element={<Navigate to="/auth/login/salespage-settings" replace />} />
             <Route path="admin/calendar" element={<AdminCalendar />} />
             <Route path="admin/wa-templates" element={<AdminWATemplates />} />
             <Route path="admin/e-invitation-templates" element={<AdminEInviteTemplates />} />

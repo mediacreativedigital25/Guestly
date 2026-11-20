@@ -345,24 +345,38 @@ export default function ServicesCatalog() {
                             </div>
                           </div>
 
-                          {/* Standard Included Features List */}
+                          {/* Included Features List (Dynamic from Repeater, fallback to standard defaults) */}
                           <div className="mt-5 pt-4 border-t border-slate-100 space-y-2 text-xs text-slate-600">
-                            <div className="flex items-center gap-2">
-                              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                              <span>Buku Tamu Digital QR &amp; Undangan Terintegrasi</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                              <span>Layar Sapa TV (*Greeting Display Ready*)</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                              <span>Scanner Petugas (Check-in &amp; Souvenir)</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                              <span>Ekspor Rekap Kehadiran Realtime Excel</span>
-                            </div>
+                            {Array.isArray(service.features) && service.features.length > 0 ? (
+                              service.features
+                                .map((f) => f.trim())
+                                .filter(Boolean)
+                                .map((feat, idx) => (
+                                  <div key={idx} className="flex items-start gap-2">
+                                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                                    <span>{feat}</span>
+                                  </div>
+                                ))
+                            ) : (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                                  <span>Buku Tamu Digital QR &amp; Undangan Terintegrasi</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                                  <span>Layar Sapa TV (*Greeting Display Ready*)</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                                  <span>Scanner Petugas (Check-in &amp; Souvenir)</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                                  <span>Ekspor Rekap Kehadiran Realtime Excel</span>
+                                </div>
+                              </>
+                            )}
                             {service.includeWeddingPlanner && (
                               <div className="flex items-center gap-2 text-[#8C3A50] font-semibold">
                                 <CheckCircle2 className="w-4 h-4 text-[#8C3A50] shrink-0" />

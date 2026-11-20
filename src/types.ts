@@ -364,6 +364,7 @@ export interface GuestlyService {
   waBlastQuota?: number;
   price: number;
   normalPrice?: number;
+  features?: string[];
   includeWeddingPlanner?: boolean;
   isActive: boolean;
   createdAt: any;

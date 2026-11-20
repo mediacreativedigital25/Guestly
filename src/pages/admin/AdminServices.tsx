@@ -3,7 +3,7 @@ import { collection, query, getDocs, addDoc, updateDoc, doc, deleteDoc, serverTi
 import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
 import { GuestlyService } from '../../types';
 import { Modal } from '../../components/Modal';
-import { Plus, Edit, Trash2 } from 'lucide-react';
+import { Plus, Edit, Trash2, ArrowUp, ArrowDown, CheckCircle2 } from 'lucide-react';
 import { showAlert, showConfirm, showCancelAlert } from '../../lib/alerts';
 
 export default function AdminServices() {
@@ -28,6 +28,7 @@ export default function AdminServices() {
   const [isActive, setIsActive] = useState(true);
   const [includeWeddingPlanner, setIncludeWeddingPlanner] = useState(false);
   const [targetRole, setTargetRole] = useState<'client' | 'partner' | 'all'>('all');
+  const [features, setFeatures] = useState<string[]>(['']);
 
   useEffect(() => {
     const fetchServices = async () => {
@@ -60,6 +61,7 @@ export default function AdminServices() {
     setNormalPrice(0);
     setIsActive(true);
     setIncludeWeddingPlanner(false);
+    setFeatures(['']);
     setEditingServiceId(null);
   };
 
@@ -82,8 +84,36 @@ export default function AdminServices() {
     setNormalPrice(service.normalPrice || 0);
     setIsActive(service.isActive);
     setIncludeWeddingPlanner(Boolean(service.includeWeddingPlanner));
+    setFeatures(
+      Array.isArray(service.features) && service.features.length > 0 ? [...service.features] : ['']
+    );
     setEditingServiceId(service.id!);
     setIsCreating(true);
+  };
+
+  const addFeatureRow = () => {
+    setFeatures((prev) => [...prev, '']);
+  };
+
+  const updateFeatureRow = (index: number, value: string) => {
+    setFeatures((prev) => prev.map((item, i) => (i === index ? value : item)));
+  };
+
+  const removeFeatureRow = (index: number) => {
+    setFeatures((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      return next.length > 0 ? next : [''];
+    });
+  };
+
+  const moveFeatureRow = (index: number, direction: -1 | 1) => {
+    setFeatures((prev) => {
+      const target = index + direction;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -95,9 +125,11 @@ export default function AdminServices() {
 
     setIsSaving(true);
     try {
+      const cleanedFeatures = features.map((f) => f.trim()).filter(Boolean);
       const payload: any = {
         name,
         description,
+        features: cleanedFeatures,
         type,
         targetRole,
         activePeriodDays: Number(activePeriodDays),
@@ -326,7 +358,14 @@ export default function AdminServices() {
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-gray-500 truncate max-w-xs">{service.description}</div>
+                      <div className="text-xs text-gray-500 truncate max-w-xs">
+                        {service.description}
+                        {Array.isArray(service.features) && service.features.length > 0 && (
+                          <span className="ml-1.5 text-indigo-600 font-medium">
+                            ({service.features.length} fitur)
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       <span className={`inline-flex px-2 py-1 rounded-full text-xs font-semibold capitalize ${
@@ -596,6 +635,79 @@ export default function AdminServices() {
                     className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-center bg-white"
                  />
                  <p className="text-[10px] text-gray-400 mt-1.5 leading-tight">Total kuota pengiriman WA Blast otomatis.</p>
+              </div>
+            </div>
+
+            {/* Repeater Daftar Fitur Layanan */}
+            <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-100">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">
+                    Daftar Fitur Layanan ({features.filter((f) => f.trim()).length})
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Tambahkan poin fitur paket yang akan tampil otomatis di Sales Page &amp; Katalog Layanan.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={addFeatureRow}
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#8C3A50] text-white hover:bg-[#702C3E] transition-colors shrink-0 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Tambah Fitur
+                </button>
+              </div>
+
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {features.map((feature, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-rose-50 text-[#8C3A50] text-xs font-semibold shrink-0">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    </span>
+                    <input
+                      type="text"
+                      value={feature}
+                      onChange={(e) => updateFeatureRow(index, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addFeatureRow();
+                        }
+                      }}
+                      placeholder={`Fitur #${index + 1} (cth: Scan QR Check-in < 1 Detik & Mode Offline)`}
+                      className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all bg-white"
+                    />
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        disabled={index === 0}
+                        onClick={() => moveFeatureRow(index, -1)}
+                        title="Pindah ke atas"
+                        className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-30 transition-colors"
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={index === features.length - 1}
+                        onClick={() => moveFeatureRow(index, 1)}
+                        title="Pindah ke bawah"
+                        className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-30 transition-colors"
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeFeatureRow(index)}
+                        title="Hapus fitur"
+                        className="p-1.5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 

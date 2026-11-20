@@ -367,40 +367,28 @@ export const HeroMediaSurface: React.FC<HeroBackgroundMediaProps> = ({
         </>
       )}
 
-      {/* Ambient Controls for Autoplay Direct Video (or Open Full Video for YT/Vimeo) */}
-      {shouldAutoplayBg && (
+      {/* Ambient Controls for Autoplay Direct Video */}
+      {shouldAutoplayBg && parsed.type === 'direct' && (
         <div
           className={`absolute z-20 flex items-center gap-1.5 ${
             controlsPosition === 'top-right' ? 'top-3.5 right-3.5' : 'bottom-4 right-4'
           }`}
         >
-          {parsed.type === 'direct' && (
-            <>
-              <button
-                type="button"
-                aria-label={isPaused ? 'Putar video' : 'Jeda video'}
-                onClick={() => setIsPaused((p) => !p)}
-                className="w-9 h-9 rounded-lg bg-[#181316]/72 hover:bg-[#181316]/90 backdrop-blur-md border border-white/15 text-white inline-flex items-center justify-center transition-colors"
-              >
-                {isPaused ? <Play className="w-4 h-4 fill-white" /> : <Pause className="w-4 h-4" />}
-              </button>
-              <button
-                type="button"
-                aria-label={isMuted ? 'Aktifkan suara' : 'Bisukan suara'}
-                onClick={() => setIsMuted((m) => !m)}
-                className="w-9 h-9 rounded-lg bg-[#181316]/72 hover:bg-[#181316]/90 backdrop-blur-md border border-white/15 text-white inline-flex items-center justify-center transition-colors"
-              >
-                {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-              </button>
-            </>
-          )}
           <button
             type="button"
-            onClick={onOpenLightbox}
-            className="h-9 px-3 rounded-lg bg-[#181316]/72 hover:bg-[#181316]/90 backdrop-blur-md border border-white/15 text-white text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+            aria-label={isPaused ? 'Putar video' : 'Jeda video'}
+            onClick={() => setIsPaused((p) => !p)}
+            className="w-9 h-9 rounded-lg bg-[#181316]/72 hover:bg-[#181316]/90 backdrop-blur-md border border-white/15 text-white inline-flex items-center justify-center transition-colors"
           >
-            <Play className="w-3.5 h-3.5 fill-white" />
-            <span>Tonton Penuh</span>
+            {isPaused ? <Play className="w-4 h-4 fill-white" /> : <Pause className="w-4 h-4" />}
+          </button>
+          <button
+            type="button"
+            aria-label={isMuted ? 'Aktifkan suara' : 'Bisukan suara'}
+            onClick={() => setIsMuted((m) => !m)}
+            className="w-9 h-9 rounded-lg bg-[#181316]/72 hover:bg-[#181316]/90 backdrop-blur-md border border-white/15 text-white inline-flex items-center justify-center transition-colors"
+          >
+            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
         </div>
       )}
@@ -429,6 +417,7 @@ interface HeroVideoLightboxProps {
   videoUrl?: string;
   posterSrc: string;
   videoFit?: HeroVideoFitMode;
+  title?: string;
 }
 
 export const HeroVideoLightbox: React.FC<HeroVideoLightboxProps> = ({
@@ -437,6 +426,7 @@ export const HeroVideoLightbox: React.FC<HeroVideoLightboxProps> = ({
   videoUrl,
   posterSrc,
   videoFit = 'auto',
+  title = 'Video Preview Guestly',
 }) => {
   const parsed = parseHeroVideoUrl(videoUrl);
   const [detectedPortrait, setDetectedPortrait] = useState<boolean>(
@@ -471,8 +461,8 @@ export const HeroVideoLightbox: React.FC<HeroVideoLightboxProps> = ({
         }`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-4 py-3 bg-[#181316] border-b border-white/10 shrink-0">
-          <span className="text-[13px] font-medium text-[#E5DFE2]">Video Preview Guestly</span>
+        <div className="flex items-center justify-between px-4 py-3 bg-[#181316] border-b border-white/10 shrink-0 gap-3">
+          <span className="text-[13px] font-medium text-[#E5DFE2] truncate">{title}</span>
           <button
             type="button"
             onClick={onClose}

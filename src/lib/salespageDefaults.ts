@@ -17,12 +17,18 @@ export interface SalespageStatItem {
   caption: string;
 }
 
+export type SalespageVideoMode = 'autoplay' | 'click';
+export type SalespageVideoFit = 'auto' | 'portrait' | 'contain' | 'cover';
+
 export interface SalespageBentoItem {
   id: string;
   category: string;
   title: string;
   description: string;
   imageUrl?: string;
+  videoUrl?: string;
+  videoMode?: SalespageVideoMode;
+  videoFit?: SalespageVideoFit;
   span: 'wide' | 'normal';
 }
 
@@ -30,6 +36,9 @@ export interface SalespageCarouselItem {
   title: string;
   description?: string;
   img: string;
+  videoUrl?: string;
+  videoMode?: SalespageVideoMode;
+  videoFit?: SalespageVideoFit;
   link?: string;
 }
 
@@ -66,6 +75,7 @@ export interface SalespageConfig {
   // Our Partner Section
   partnersEnabled: boolean;
   partnersTitle: string;
+  partnersLogoSize: 'sm' | 'md' | 'lg';
   partners: SalespagePartnerItem[];
 
   // Stats Section
@@ -93,6 +103,9 @@ export interface SalespageConfig {
   darkSectionKicker: string;
   problemTitle: string;
   problemImage: string;
+  problemVideoUrl: string;
+  problemVideoMode: SalespageVideoMode;
+  problemVideoFit: SalespageVideoFit;
   problemItems: string;
   solutionTitle: string;
   solutionDesc: string;
@@ -170,6 +183,7 @@ export const DEFAULT_SALESPAGE_CONFIG: SalespageConfig = {
 
   partnersEnabled: true,
   partnersTitle: 'Dipercaya oleh Wedding Organizer, Venue & Event Planner Pilihan',
+  partnersLogoSize: 'md',
   partners: [
     { id: 'p-1', name: 'Aurelia Ballroom', logoUrl: '' },
     { id: 'p-2', name: 'Nusantara Wedding House', logoUrl: '' },
@@ -248,6 +262,9 @@ export const DEFAULT_SALESPAGE_CONFIG: SalespageConfig = {
   darkSectionKicker: 'Transformasi Operasional',
   problemTitle: 'Tinggalkan Antrean Panjang & Buku Tamu Kertas yang Rentan Selisih',
   problemImage: darkBallroomDefault,
+  problemVideoUrl: '',
+  problemVideoMode: 'click',
+  problemVideoFit: 'auto',
   problemItems:
     'Antrean menumpuk di pintu masuk karena tamu menulis manual\nTulisan tangan sulit dibaca saat rekap daftar hadir & ucapan\nStok souvenir dan angpau sering selisih tanpa catatan serah terima\nKoordinasi kedatangan tamu VIP terlambat sampai ke MC & penerima tamu',
   solutionTitle: 'Satu Sistem Tenang untuk Tim yang Bekerja Tanpa Panik',
@@ -393,6 +410,9 @@ export function resolveSalespageConfig(raw?: Record<string, any> | null): Salesp
     'bento-souvenir': bentoSouvenirDefault,
   };
 
+  const normalizeVideoFit = (val: any): SalespageVideoFit =>
+    val === 'portrait' || val === 'contain' || val === 'cover' ? val : 'auto';
+
   const bentoItems: SalespageBentoItem[] =
     Array.isArray(src.bentoItems) && src.bentoItems.length > 0
       ? src.bentoItems.map((item: any, idx: number) => {
@@ -404,6 +424,9 @@ export function resolveSalespageConfig(raw?: Record<string, any> | null): Salesp
             title: item.title || '',
             description: item.description || '',
             imageUrl: rawImg || defaultBentoImageById[itemId] || '',
+            videoUrl: typeof item.videoUrl === 'string' ? item.videoUrl.trim() : '',
+            videoMode: item.videoMode === 'autoplay' ? 'autoplay' : 'click',
+            videoFit: normalizeVideoFit(item.videoFit),
             span: item.span === 'wide' ? 'wide' : 'normal',
           };
         })
@@ -420,6 +443,9 @@ export function resolveSalespageConfig(raw?: Record<string, any> | null): Salesp
             title: item.title || `Fitur ${idx + 1}`,
             description: item.description || '',
             img: rawImg || defaultSlideImg,
+            videoUrl: typeof item.videoUrl === 'string' ? item.videoUrl.trim() : '',
+            videoMode: item.videoMode === 'autoplay' ? 'autoplay' : 'click',
+            videoFit: normalizeVideoFit(item.videoFit),
             link: (item.link || '').trim(),
           };
         })
@@ -465,6 +491,8 @@ export function resolveSalespageConfig(raw?: Record<string, any> | null): Salesp
     partnersEnabled:
       typeof src.partnersEnabled === 'boolean' ? src.partnersEnabled : DEFAULT_SALESPAGE_CONFIG.partnersEnabled,
     partnersTitle: pickString('partnersTitle', DEFAULT_SALESPAGE_CONFIG.partnersTitle),
+    partnersLogoSize:
+      src.partnersLogoSize === 'sm' || src.partnersLogoSize === 'lg' ? src.partnersLogoSize : 'md',
     partners,
 
     statsUseLive: typeof src.statsUseLive === 'boolean' ? src.statsUseLive : DEFAULT_SALESPAGE_CONFIG.statsUseLive,
@@ -489,6 +517,9 @@ export function resolveSalespageConfig(raw?: Record<string, any> | null): Salesp
     darkSectionKicker: pickString('darkSectionKicker', DEFAULT_SALESPAGE_CONFIG.darkSectionKicker),
     problemTitle: pickString('problemTitle', DEFAULT_SALESPAGE_CONFIG.problemTitle),
     problemImage: pickImage('problemImage', DEFAULT_SALESPAGE_CONFIG.problemImage),
+    problemVideoUrl: typeof src.problemVideoUrl === 'string' ? src.problemVideoUrl.trim() : '',
+    problemVideoMode: src.problemVideoMode === 'autoplay' ? 'autoplay' : 'click',
+    problemVideoFit: normalizeVideoFit(src.problemVideoFit),
     problemItems: pickString('problemItems', DEFAULT_SALESPAGE_CONFIG.problemItems),
     solutionTitle: pickString('solutionTitle', DEFAULT_SALESPAGE_CONFIG.solutionTitle),
     solutionDesc: pickString('solutionDesc', DEFAULT_SALESPAGE_CONFIG.solutionDesc),

@@ -227,6 +227,11 @@ export default function RouteBreadcrumbs() {
         label: 'White Label',
         shortCode: 'Settings',
       });
+    } else if (first === 'salespage-settings') {
+      segments.push({
+        label: 'Setting Salespage',
+        shortCode: 'Setting Salespage',
+      });
     } else if (first === 'services') {
       segments.push({
         label: 'Informasi Layanan',

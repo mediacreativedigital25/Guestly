@@ -30,6 +30,7 @@ import {
 } from '../lib/salespageDefaults';
 import {
   HeroMediaSurface,
+  HeroVideoFitMode,
   HeroVideoLightbox,
   parseHeroVideoUrl,
 } from '../components/salespage/HeroMediaStage';
@@ -89,12 +90,23 @@ const ResilientImage: React.FC<ResilientImageProps> = ({
   );
 };
 
-const PartnerLogoTile: React.FC<{ partner: SalespagePartnerItem }> = ({ partner }) => {
+const PARTNER_LOGO_SIZE_CLASSES: Record<'sm' | 'md' | 'lg', string> = {
+  sm: 'h-14 sm:h-16 lg:h-20 max-w-[180px] sm:max-w-[210px]',
+  md: 'h-20 sm:h-24 lg:h-28 max-w-[230px] sm:max-w-[280px]',
+  lg: 'h-24 sm:h-30 lg:h-36 max-w-[270px] sm:max-w-[330px]',
+};
+
+const PartnerLogoTile: React.FC<{
+  partner: SalespagePartnerItem;
+  size?: 'sm' | 'md' | 'lg';
+}> = ({ partner, size = 'md' }) => {
   const [logoError, setLogoError] = useState(false);
 
   useEffect(() => {
     setLogoError(false);
   }, [partner.logoUrl]);
+
+  const sizeClass = PARTNER_LOGO_SIZE_CLASSES[size] || PARTNER_LOGO_SIZE_CLASSES.md;
 
   const content =
     partner.logoUrl && !logoError ? (
@@ -103,10 +115,10 @@ const PartnerLogoTile: React.FC<{ partner: SalespagePartnerItem }> = ({ partner 
         alt={partner.name || 'Mitra Guestly'}
         referrerPolicy="no-referrer"
         onError={() => setLogoError(true)}
-        className="h-8 sm:h-9 w-auto max-w-[148px] object-contain grayscale opacity-60 group-hover:grayscale-0 group-hover:opacity-100 transition-all duration-200"
+        className={`${sizeClass} w-auto object-contain grayscale opacity-85 contrast-115 group-hover:grayscale-0 group-hover:opacity-100 group-hover:contrast-100 transition-all duration-200`}
       />
     ) : (
-      <span className="text-[15px] sm:text-[16px] font-semibold tracking-[-0.015em] text-[#5C5559]/70 group-hover:text-[#8C3A50] transition-colors duration-200 whitespace-nowrap">
+      <span className="text-[16px] sm:text-[18px] font-semibold tracking-[-0.015em] text-[#5C5559]/75 group-hover:text-[#8C3A50] transition-colors duration-200 whitespace-nowrap px-3">
         {partner.name}
       </span>
     );
@@ -118,7 +130,7 @@ const PartnerLogoTile: React.FC<{ partner: SalespagePartnerItem }> = ({ partner 
         target="_blank"
         rel="noopener noreferrer"
         title={partner.name}
-        className="group inline-flex items-center justify-center px-8 sm:px-11 py-2 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8C3A50]/40 rounded-lg"
+        className="group inline-flex items-center justify-center px-3 sm:px-5 py-1 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8C3A50]/40 rounded-lg"
       >
         {content}
       </a>
@@ -128,7 +140,7 @@ const PartnerLogoTile: React.FC<{ partner: SalespagePartnerItem }> = ({ partner 
   return (
     <div
       title={partner.name}
-      className="group inline-flex items-center justify-center px-8 sm:px-11 py-2 shrink-0 select-none"
+      className="group inline-flex items-center justify-center px-3 sm:px-5 py-1 shrink-0 select-none"
     >
       {content}
     </div>
@@ -215,8 +227,21 @@ export default function SalesPage() {
   const [testiSuccess, setTestiSuccess] = useState(false);
   const [testiError, setTestiError] = useState<string | null>(null);
 
-  // Hero Video Lightbox state
-  const [isHeroVideoOpen, setIsHeroVideoOpen] = useState(false);
+  // Shared Video Lightbox Modal state (Hero, Bento, Problem, Gallery)
+  const [activeVideoModal, setActiveVideoModal] = useState<{
+    url: string;
+    poster: string;
+    fit?: HeroVideoFitMode;
+    title?: string;
+  } | null>(null);
+
+  const openHeroVideoModal = () =>
+    setActiveVideoModal({
+      url: cfg.heroVideoUrl,
+      poster: cfg.heroImage || SALESPAGE_DEFAULT_ASSETS.hero,
+      fit: cfg.heroVideoFit,
+      title: 'Video Preview Guestly',
+    });
 
   // Live Stats from Firestore
   const [realStats, setRealStats] = useState<{ totalEvents: number; totalGuests: number } | null>(null);
@@ -575,7 +600,7 @@ export default function SalesPage() {
                 videoMode={cfg.heroVideoMode}
                 videoFit={cfg.heroVideoFit}
                 layoutMode="fullbg"
-                onOpenLightbox={() => setIsHeroVideoOpen(true)}
+                onOpenLightbox={openHeroVideoModal}
                 showPlayTrigger={false}
                 controlsPosition="bottom-right"
               />
@@ -661,7 +686,7 @@ export default function SalesPage() {
                     {hasHeroVideo && cfg.heroVideoMode === 'click' ? (
                       <button
                         type="button"
-                        onClick={() => setIsHeroVideoOpen(true)}
+                        onClick={openHeroVideoModal}
                         className={`inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-[14.5px] font-medium transition-colors whitespace-nowrap ${
                           isDarkFrosted
                             ? 'border border-white/25 bg-white/10 text-white hover:bg-white/20 backdrop-blur-xs'
@@ -713,7 +738,7 @@ export default function SalesPage() {
                   <div className="hidden lg:flex lg:col-span-5 items-center justify-center">
                     <button
                       type="button"
-                      onClick={() => setIsHeroVideoOpen(true)}
+                      onClick={openHeroVideoModal}
                       aria-label="Putar video preview Guestly"
                       className="group inline-flex items-center gap-3 px-6 py-3.5 rounded-xl bg-[#181316]/70 hover:bg-[#8C3A50] backdrop-blur-md border border-white/25 text-white text-[14.5px] font-semibold shadow-xl transition-all duration-200 hover:scale-[1.03]"
                     >
@@ -794,7 +819,7 @@ export default function SalesPage() {
                       videoMode={cfg.heroVideoMode}
                       videoFit={cfg.heroVideoFit}
                       layoutMode="split"
-                      onOpenLightbox={() => setIsHeroVideoOpen(true)}
+                      onOpenLightbox={openHeroVideoModal}
                       showPlayTrigger={true}
                       controlsPosition="top-right"
                     />
@@ -819,42 +844,54 @@ export default function SalesPage() {
         )}
 
         {/* OUR PARTNER STRIP (IMMEDIATELY BELOW HERO — MONOCHROME MARQUEE) */}
-        {cfg.partnersEnabled && cfg.partners.length > 0 && (
-          <section
-            aria-label="Our Partner"
-            className="border-y border-[#E8E2E4] bg-white py-8 sm:py-10 overflow-hidden"
-          >
-            <div className="max-w-[1200px] mx-auto px-5 sm:px-8 mb-5 text-center">
-              <p className="text-[12.5px] font-medium text-[#6F686C] tracking-[0.01em]">
-                {cfg.partnersTitle}
-              </p>
-            </div>
+        {cfg.partnersEnabled && cfg.partners.length > 0 && (() => {
+          const repeatCount = Math.max(1, Math.ceil(10 / cfg.partners.length));
+          const marqueeSet = Array.from({ length: repeatCount }, () => cfg.partners).flat();
+          return (
+            <section
+              aria-label="Our Partner"
+              className="border-y border-[#E8E2E4] bg-white py-6 sm:py-8 overflow-hidden"
+            >
+              <div className="max-w-[1200px] mx-auto px-5 sm:px-8 mb-3.5 sm:mb-4 text-center">
+                <p className="text-[12.5px] sm:text-[13px] font-medium text-[#6F686C] tracking-[0.01em]">
+                  {cfg.partnersTitle}
+                </p>
+              </div>
 
-            <div className="sales-marquee-wrap relative overflow-hidden">
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-y-0 left-0 w-16 sm:w-28 bg-gradient-to-r from-white to-transparent z-10"
-              />
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-y-0 right-0 w-16 sm:w-28 bg-gradient-to-l from-white to-transparent z-10"
-              />
+              <div className="sales-marquee-wrap relative overflow-hidden">
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 left-0 w-16 sm:w-28 bg-gradient-to-r from-white to-transparent z-10"
+                />
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 right-0 w-16 sm:w-28 bg-gradient-to-l from-white to-transparent z-10"
+                />
 
-              <div className="sales-marquee-track items-center">
-                <div className="flex items-center shrink-0">
-                  {cfg.partners.map((partner, idx) => (
-                    <PartnerLogoTile key={`${partner.id}-a-${idx}`} partner={partner} />
-                  ))}
-                </div>
-                <div className="sales-marquee-clone flex items-center shrink-0" aria-hidden="true">
-                  {cfg.partners.map((partner, idx) => (
-                    <PartnerLogoTile key={`${partner.id}-b-${idx}`} partner={partner} />
-                  ))}
+                <div className="sales-marquee-track items-center">
+                  <div className="flex items-center shrink-0">
+                    {marqueeSet.map((partner, idx) => (
+                      <PartnerLogoTile
+                        key={`${partner.id}-a-${idx}`}
+                        partner={partner}
+                        size={cfg.partnersLogoSize}
+                      />
+                    ))}
+                  </div>
+                  <div className="sales-marquee-clone flex items-center shrink-0" aria-hidden="true">
+                    {marqueeSet.map((partner, idx) => (
+                      <PartnerLogoTile
+                        key={`${partner.id}-b-${idx}`}
+                        partner={partner}
+                        size={cfg.partnersLogoSize}
+                      />
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          </section>
-        )}
+            </section>
+          );
+        })()}
 
         {/* METRIC STRIP — SYMMETRICAL 2x2 MOBILE / 4-COL DESKTOP PROOF */}
         <section className="bg-[#FAF8F6] border-b border-[#E8E2E4]">
@@ -891,6 +928,11 @@ export default function SalesPage() {
               {cfg.bentoItems.map((item, idx) => {
                 const isWide = item.span === 'wide';
                 const hasImage = Boolean(item.imageUrl && item.imageUrl.trim() !== '');
+                const hasVideo = parseHeroVideoUrl(item.videoUrl).type !== 'none';
+                const hasMedia = hasImage || hasVideo;
+                const itemPoster = item.imageUrl || SALESPAGE_DEFAULT_ASSETS.bentoQr;
+                const itemVideoMode = item.videoMode === 'autoplay' ? 'autoplay' : 'click';
+                const itemVideoFit = item.videoFit || 'auto';
 
                 if (isWide) {
                   return (
@@ -898,18 +940,39 @@ export default function SalesPage() {
                       key={item.id || idx}
                       className="md:col-span-2 bg-white border border-[#E8E2E4] rounded-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 items-stretch transition-colors duration-200 hover:border-[#D4C7CB]"
                     >
-                      {hasImage && (
-                        <div className="lg:col-span-6 aspect-[16/10] lg:aspect-auto lg:min-h-[300px] bg-[#F4EEF0] overflow-hidden border-b lg:border-b-0 lg:border-r border-[#EFEAED]">
-                          <ResilientImage
-                            src={item.imageUrl}
-                            alt={item.title}
-                            className="w-full h-full object-cover transition-transform duration-500 hover:scale-[1.02]"
-                          />
+                      {hasMedia && (
+                        <div className="lg:col-span-6 aspect-[16/10] lg:aspect-auto lg:min-h-[320px] bg-[#F4EEF0] overflow-hidden border-b lg:border-b-0 lg:border-r border-[#EFEAED]">
+                          {hasVideo ? (
+                            <HeroMediaSurface
+                              posterSrc={itemPoster}
+                              fallbackPosterSrc={SALESPAGE_DEFAULT_ASSETS.bentoQr}
+                              videoUrl={item.videoUrl}
+                              videoMode={itemVideoMode}
+                              videoFit={itemVideoFit}
+                              layoutMode="split"
+                              onOpenLightbox={() =>
+                                setActiveVideoModal({
+                                  url: item.videoUrl || '',
+                                  poster: itemPoster,
+                                  fit: itemVideoFit,
+                                  title: item.title || 'Video Fitur Guestly',
+                                })
+                              }
+                              showPlayTrigger={true}
+                              controlsPosition="top-right"
+                            />
+                          ) : (
+                            <ResilientImage
+                              src={item.imageUrl}
+                              alt={item.title}
+                              className="w-full h-full object-cover transition-transform duration-500 hover:scale-[1.02]"
+                            />
+                          )}
                         </div>
                       )}
                       <div
                         className={`${
-                          hasImage ? 'lg:col-span-6' : 'lg:col-span-12'
+                          hasMedia ? 'lg:col-span-6' : 'lg:col-span-12'
                         } p-7 sm:p-9 flex flex-col justify-center`}
                       >
                         <p className="text-[12.5px] font-semibold text-[#8C3A50] mb-2.5">
@@ -931,13 +994,42 @@ export default function SalesPage() {
                     key={item.id || idx}
                     className="bg-white border border-[#E8E2E4] rounded-2xl overflow-hidden flex flex-col transition-colors duration-200 hover:border-[#D4C7CB]"
                   >
-                    {hasImage && (
-                      <div className="w-full h-[220px] sm:h-[245px] overflow-hidden border-b border-[#EFEAED] bg-[#F4EEF0]">
-                        <ResilientImage
-                          src={item.imageUrl}
-                          alt={item.title}
-                          className="w-full h-full object-cover transition-transform duration-500 hover:scale-[1.02]"
-                        />
+                    {hasMedia && (
+                      <div
+                        className={`w-full ${
+                          hasVideo &&
+                          (itemVideoFit === 'portrait' ||
+                            /youtube\.com\/shorts\//i.test(item.videoUrl || ''))
+                            ? 'h-[300px] sm:h-[340px]'
+                            : 'h-[220px] sm:h-[250px]'
+                        } overflow-hidden border-b border-[#EFEAED] bg-[#F4EEF0]`}
+                      >
+                        {hasVideo ? (
+                          <HeroMediaSurface
+                            posterSrc={itemPoster}
+                            fallbackPosterSrc={SALESPAGE_DEFAULT_ASSETS.bentoWelcome}
+                            videoUrl={item.videoUrl}
+                            videoMode={itemVideoMode}
+                            videoFit={itemVideoFit}
+                            layoutMode="split"
+                            onOpenLightbox={() =>
+                              setActiveVideoModal({
+                                url: item.videoUrl || '',
+                                poster: itemPoster,
+                                fit: itemVideoFit,
+                                title: item.title || 'Video Fitur Guestly',
+                              })
+                            }
+                            showPlayTrigger={true}
+                            controlsPosition="top-right"
+                          />
+                        ) : (
+                          <ResilientImage
+                            src={item.imageUrl}
+                            alt={item.title}
+                            className="w-full h-full object-cover transition-transform duration-500 hover:scale-[1.02]"
+                          />
+                        )}
                       </div>
                     )}
 
@@ -970,15 +1062,49 @@ export default function SalesPage() {
             {/* Part A: Problem & Solution Split */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
               <div className="lg:col-span-5">
-                <div className="rounded-2xl overflow-hidden border border-[#E7C89E]/20 shadow-2xl shadow-black/35 aspect-[4/3] bg-[#2B0D16]">
-                  <ResilientImage
-                    src={cfg.problemImage}
-                    fallbackSrc={SALESPAGE_DEFAULT_ASSETS.darkBallroom}
-                    alt="Suasana foyer ballroom malam hari yang tertata rapi"
-                    className="w-full h-full object-cover"
-                    fallbackLabel="Guestly Ballroom"
-                  />
-                </div>
+                {(() => {
+                  const hasProblemVideo = parseHeroVideoUrl(cfg.problemVideoUrl).type !== 'none';
+                  const isPortraitProblem =
+                    hasProblemVideo &&
+                    (cfg.problemVideoFit === 'portrait' ||
+                      /youtube\.com\/shorts\//i.test(cfg.problemVideoUrl));
+                  return (
+                    <div
+                      className={`rounded-2xl overflow-hidden border border-[#E7C89E]/20 shadow-2xl shadow-black/35 ${
+                        isPortraitProblem ? 'aspect-[4/5] sm:aspect-[4/4.2]' : 'aspect-[4/3]'
+                      } bg-[#2B0D16]`}
+                    >
+                      {hasProblemVideo ? (
+                        <HeroMediaSurface
+                          posterSrc={cfg.problemImage || SALESPAGE_DEFAULT_ASSETS.darkBallroom}
+                          fallbackPosterSrc={SALESPAGE_DEFAULT_ASSETS.darkBallroom}
+                          videoUrl={cfg.problemVideoUrl}
+                          videoMode={cfg.problemVideoMode}
+                          videoFit={cfg.problemVideoFit}
+                          layoutMode="split"
+                          onOpenLightbox={() =>
+                            setActiveVideoModal({
+                              url: cfg.problemVideoUrl,
+                              poster: cfg.problemImage || SALESPAGE_DEFAULT_ASSETS.darkBallroom,
+                              fit: cfg.problemVideoFit,
+                              title: cfg.problemTitle || 'Transformasi Operasional Guestly',
+                            })
+                          }
+                          showPlayTrigger={true}
+                          controlsPosition="top-right"
+                        />
+                      ) : (
+                        <ResilientImage
+                          src={cfg.problemImage}
+                          fallbackSrc={SALESPAGE_DEFAULT_ASSETS.darkBallroom}
+                          alt="Suasana foyer ballroom malam hari yang tertata rapi"
+                          className="w-full h-full object-cover"
+                          fallbackLabel="Guestly Ballroom"
+                        />
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="lg:col-span-7 space-y-6">
@@ -1111,6 +1237,7 @@ export default function SalesPage() {
                 <div className="lg:col-span-4 flex flex-col justify-between gap-3">
                   {cfg.featuresCarouselData.map((slide, idx) => {
                     const isActive = idx === activeSlideIndex;
+                    const slideHasVideo = parseHeroVideoUrl(slide.videoUrl).type !== 'none';
                     return (
                       <button
                         key={idx}
@@ -1122,8 +1249,16 @@ export default function SalesPage() {
                             : 'bg-white border-[#E8E2E4] hover:border-[#D4C7CB]'
                         }`}
                       >
-                        <div className="sales-mono text-[12px] font-semibold text-[#8C3A50] mb-1.5">
-                          {String(idx + 1).padStart(2, '0')}
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <div className="sales-mono text-[12px] font-semibold text-[#8C3A50]">
+                            {String(idx + 1).padStart(2, '0')}
+                          </div>
+                          {slideHasVideo && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#8C3A50]">
+                              <Play className="w-3 h-3 fill-[#8C3A50]" />
+                              Video
+                            </span>
+                          )}
                         </div>
                         <div className="text-[15px] font-semibold text-[#171417] mb-1">
                           {slide.title}
@@ -1141,12 +1276,34 @@ export default function SalesPage() {
                 {/* Right Crisp Preview Frame */}
                 <div className="lg:col-span-8 flex flex-col rounded-2xl overflow-hidden border border-[#E8E2E4] bg-[#FAF8F6]">
                   <div className="aspect-[16/10] w-full bg-[#EDE7E9] overflow-hidden">
-                    <ResilientImage
-                      src={activeSlide.img}
-                      fallbackSrc={SALESPAGE_DEFAULT_ASSETS.bentoQr}
-                      alt={activeSlide.title}
-                      className="w-full h-full object-cover"
-                    />
+                    {parseHeroVideoUrl(activeSlide.videoUrl).type !== 'none' ? (
+                      <HeroMediaSurface
+                        key={`${activeSlideIndex}-${activeSlide.videoUrl}`}
+                        posterSrc={activeSlide.img || SALESPAGE_DEFAULT_ASSETS.bentoQr}
+                        fallbackPosterSrc={SALESPAGE_DEFAULT_ASSETS.bentoQr}
+                        videoUrl={activeSlide.videoUrl}
+                        videoMode={activeSlide.videoMode === 'autoplay' ? 'autoplay' : 'click'}
+                        videoFit={activeSlide.videoFit || 'auto'}
+                        layoutMode="split"
+                        onOpenLightbox={() =>
+                          setActiveVideoModal({
+                            url: activeSlide.videoUrl || '',
+                            poster: activeSlide.img || SALESPAGE_DEFAULT_ASSETS.bentoQr,
+                            fit: activeSlide.videoFit || 'auto',
+                            title: activeSlide.title || 'Preview Sistem Guestly',
+                          })
+                        }
+                        showPlayTrigger={true}
+                        controlsPosition="top-right"
+                      />
+                    ) : (
+                      <ResilientImage
+                        src={activeSlide.img}
+                        fallbackSrc={SALESPAGE_DEFAULT_ASSETS.bentoQr}
+                        alt={activeSlide.title}
+                        className="w-full h-full object-cover"
+                      />
+                    )}
                   </div>
                   <div className="px-6 py-4 bg-white border-t border-[#E8E2E4] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
@@ -1311,6 +1468,12 @@ export default function SalesPage() {
                             </div>
                           </div>
 
+                          {Array.isArray(service.features) && service.features.length > 0 && service.description?.trim() && (
+                            <p className="text-[12.5px] sm:text-[13px] leading-relaxed text-[#6F686C] mb-4">
+                              {service.description.trim()}
+                            </p>
+                          )}
+
                           <ul className="space-y-2.5 sm:space-y-3 mb-6 sm:mb-7">
                             {service.eventQuota ? (
                               <li className="flex items-start gap-2.5 text-[13px] sm:text-[13.5px] lg:text-[14px] leading-[1.5] text-[#3D373B]">
@@ -1332,21 +1495,31 @@ export default function SalesPage() {
                                 </span>
                               </li>
                             ) : null}
-                            {service.description
-                              .split('\n')
-                              .map((line) => line.trim())
-                              .filter(Boolean)
-                              .map((line, i) => (
-                                <li
-                                  key={i}
-                                  className="flex items-start gap-2.5 text-[13px] sm:text-[13.5px] lg:text-[14px] leading-[1.5] text-[#4B4448]"
-                                >
-                                  <Check className="w-4 h-4 text-[#8C3A50] shrink-0 mt-0.5" strokeWidth={2.2} />
-                                  <span className="min-w-0 break-words">
-                                    {line.replace(/^[-•*]\s*/, '')}
-                                  </span>
-                                </li>
-                              ))}
+                            {(Array.isArray(service.features) && service.features.length > 0
+                              ? service.features.map((f) => f.trim()).filter(Boolean)
+                              : (service.description || '')
+                                  .split('\n')
+                                  .map((line) => line.trim())
+                                  .filter(Boolean)
+                            ).map((line, i) => (
+                              <li
+                                key={i}
+                                className="flex items-start gap-2.5 text-[13px] sm:text-[13.5px] lg:text-[14px] leading-[1.5] text-[#4B4448]"
+                              >
+                                <Check className="w-4 h-4 text-[#8C3A50] shrink-0 mt-0.5" strokeWidth={2.2} />
+                                <span className="min-w-0 break-words">
+                                  {line.replace(/^[-•*]\s*/, '')}
+                                </span>
+                              </li>
+                            ))}
+                            {service.includeWeddingPlanner && (
+                              <li className="flex items-start gap-2.5 text-[13px] sm:text-[13.5px] lg:text-[14px] leading-[1.5] text-[#8C3A50] font-medium">
+                                <Check className="w-4 h-4 text-[#8C3A50] shrink-0 mt-0.5" strokeWidth={2.4} />
+                                <span className="min-w-0 break-words">
+                                  Termasuk Modul Wedding Planner Lengkap
+                                </span>
+                              </li>
+                            )}
                           </ul>
                         </div>
                       </div>
@@ -1884,13 +2057,14 @@ export default function SalesPage() {
         </div>
       )}
 
-      {/* HERO VIDEO LIGHTBOX MODAL (ZERO INITIAL LOAD) */}
+      {/* SHARED VIDEO LIGHTBOX MODAL (HERO, BENTO, PROBLEM, SHOWCASE — ZERO INITIAL LOAD) */}
       <HeroVideoLightbox
-        isOpen={isHeroVideoOpen}
-        onClose={() => setIsHeroVideoOpen(false)}
-        videoUrl={cfg.heroVideoUrl}
-        posterSrc={cfg.heroImage || SALESPAGE_DEFAULT_ASSETS.hero}
-        videoFit={cfg.heroVideoFit}
+        isOpen={Boolean(activeVideoModal)}
+        onClose={() => setActiveVideoModal(null)}
+        videoUrl={activeVideoModal?.url}
+        posterSrc={activeVideoModal?.poster || SALESPAGE_DEFAULT_ASSETS.hero}
+        videoFit={activeVideoModal?.fit || 'auto'}
+        title={activeVideoModal?.title || 'Video Preview Guestly'}
       />
     </div>
   );
