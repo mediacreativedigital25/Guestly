@@ -137,7 +137,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
     try {
       const result = await mediaService.uploadMedia({
         file,
-        category: 'logos'
+        category: 'logo'
       });
       setProfileForm(prev => ({ ...prev, brandLogo: result.url }));
       toast.success("Logo berhasil diunggah.");
@@ -287,7 +287,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
     try {
       const result = await mediaService.uploadMedia({
         file,
-        category: 'logos'
+        category: 'logo'
       });
       setNewClient(prev => ({ ...prev, brandLogo: result.url }));
       toast.success("Logo berhasil diunggah.");

@@ -140,7 +140,8 @@ export async function onRequestPost(context: any) {
       'E-Invitation',
       'Layar Sapa',
     ];
-    category = reqCategory && typeof reqCategory === 'string' ? reqCategory : 'attachment';
+    const rawReqCategory = reqCategory && typeof reqCategory === 'string' ? reqCategory.trim() : 'attachment';
+    category = rawReqCategory.toLowerCase() === 'logos' ? 'logo' : rawReqCategory;
     if (!allowedCategories.includes(category)) {
       statusCode = 400;
       errorCode = 'INVALID_CATEGORY';

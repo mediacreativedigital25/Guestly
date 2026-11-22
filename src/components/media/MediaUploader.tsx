@@ -14,6 +14,7 @@ interface MediaUploaderProps {
   onFileSelect?: (file: File) => void;
   onUploadSuccess?: (data: { url: string; key: string; sizeBytes: number; file?: File }) => void;
   onUploadError?: (error: string) => void;
+  onClear?: () => void;
 }
 
 export const MediaUploader: React.FC<MediaUploaderProps> = ({
@@ -24,7 +25,8 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   disabled,
   onFileSelect,
   onUploadSuccess,
-  onUploadError
+  onUploadError,
+  onClear
 }) => {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | undefined>(defaultValue);
@@ -128,7 +130,8 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     setFile(null);
     setPreviewUrl(undefined);
     setError(null);
-  }, []);
+    onClear?.();
+  }, [onClear]);
 
   return (
     <div className="w-full">

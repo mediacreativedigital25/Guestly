@@ -5,6 +5,7 @@ import { db } from '../lib/firebase';
 import { Building2, UploadCloud, Link as LinkIcon, Phone, Image as ImageIcon, MapPin, Lock, CheckCircle2 } from 'lucide-react';
 import { MediaUploader } from '../components/media/MediaUploader';
 import { showAlert, showCancelAlert } from '../lib/alerts';
+import { resolveMediaUrl } from '../lib/utils';
 
 export default function WhiteLabelSettings() {
   const { appUser } = useAuth();
@@ -29,9 +30,9 @@ export default function WhiteLabelSettings() {
       setBusinessAddress(appUser.businessAddress || '');
       setBusinessCity(appUser.businessCity || '');
       setPhone(appUser.phone || '');
-      setLogoUrl(appUser.logoUrl || '');
-      setBannerUrl(appUser.bannerUrl || '');
-      setBrandingImageUrl(appUser.brandingImageUrl || '');
+      setLogoUrl(resolveMediaUrl(appUser.logoUrl || appUser.brandLogo || ''));
+      setBannerUrl(resolveMediaUrl(appUser.bannerUrl || ''));
+      setBrandingImageUrl(resolveMediaUrl(appUser.brandingImageUrl || ''));
     }
   }, [appUser]);
 
@@ -43,12 +44,17 @@ export default function WhiteLabelSettings() {
     setMessage({ text: '', type: '' });
     
     try {
+      const resolvedLogoUrl = resolveMediaUrl(logoUrl);
+      const resolvedBannerUrl = resolveMediaUrl(bannerUrl);
+      const resolvedBrandingImageUrl = resolveMediaUrl(brandingImageUrl);
+
       const userRef = doc(db, 'users', appUser.id);
       const updatePayload: any = {
         phone,
-        logoUrl,
-        bannerUrl,
-        brandingImageUrl,
+        logoUrl: resolvedLogoUrl,
+        brandLogo: resolvedLogoUrl,
+        bannerUrl: resolvedBannerUrl,
+        brandingImageUrl: resolvedBrandingImageUrl,
         updatedAt: serverTimestamp()
       };
 
@@ -67,9 +73,13 @@ export default function WhiteLabelSettings() {
         appUser.businessCity = businessCity.trim();
       }
       appUser.phone = phone;
-      appUser.logoUrl = logoUrl;
-      appUser.bannerUrl = bannerUrl;
-      appUser.brandingImageUrl = brandingImageUrl;
+      appUser.logoUrl = resolvedLogoUrl;
+      appUser.brandLogo = resolvedLogoUrl;
+      appUser.bannerUrl = resolvedBannerUrl;
+      appUser.brandingImageUrl = resolvedBrandingImageUrl;
+      setLogoUrl(resolvedLogoUrl);
+      setBannerUrl(resolvedBannerUrl);
+      setBrandingImageUrl(resolvedBrandingImageUrl);
       
       setMessage({ text: 'Pengaturan branding berhasil disimpan.', type: 'success' });
       showAlert('Berhasil', 'Pengaturan branding berhasil disimpan.', 'success');
@@ -235,7 +245,8 @@ export default function WhiteLabelSettings() {
                       maxSize={2 * 1024 * 1024}
                       allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
                       defaultValue={logoUrl}
-                      onUploadSuccess={(data) => setLogoUrl(data.url)}
+                      onUploadSuccess={(data) => setLogoUrl(resolveMediaUrl(data.url))}
+                      onClear={() => setLogoUrl('')}
                       onUploadError={(err) => setMessage({ text: `Gagal mengunggah logo: ${err}`, type: 'error' })}
                     />
                   </div>
@@ -252,11 +263,11 @@ export default function WhiteLabelSettings() {
                         <LinkIcon className="h-4 w-4 text-gray-400" />
                       </div>
                       <input
-                        type="url"
+                        type="text"
                         value={logoUrl}
                         onChange={(e) => setLogoUrl(e.target.value)}
                         className="pl-10 w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white"
-                        placeholder="https://example.com/logo.png"
+                        placeholder="https://cdn.guestly.yulovi.com/logo/..."
                       />
                     </div>
                   </div>
@@ -273,7 +284,8 @@ export default function WhiteLabelSettings() {
                       maxSize={5 * 1024 * 1024}
                       allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
                       defaultValue={bannerUrl}
-                      onUploadSuccess={(data) => setBannerUrl(data.url)}
+                      onUploadSuccess={(data) => setBannerUrl(resolveMediaUrl(data.url))}
+                      onClear={() => setBannerUrl('')}
                       onUploadError={(err) => setMessage({ text: `Gagal mengunggah banner: ${err}`, type: 'error' })}
                     />
                   </div>
@@ -290,11 +302,11 @@ export default function WhiteLabelSettings() {
                         <LinkIcon className="h-4 w-4 text-gray-400" />
                       </div>
                       <input
-                        type="url"
+                        type="text"
                         value={bannerUrl}
                         onChange={(e) => setBannerUrl(e.target.value)}
                         className="pl-10 w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white"
-                        placeholder="https://example.com/banner.png"
+                        placeholder="https://cdn.guestly.yulovi.com/banner/..."
                       />
                     </div>
                   </div>
@@ -311,7 +323,8 @@ export default function WhiteLabelSettings() {
                       maxSize={5 * 1024 * 1024}
                       allowedMimeTypes={['image/png', 'image/jpeg', 'image/webp']}
                       defaultValue={brandingImageUrl}
-                      onUploadSuccess={(data) => setBrandingImageUrl(data.url)}
+                      onUploadSuccess={(data) => setBrandingImageUrl(resolveMediaUrl(data.url))}
+                      onClear={() => setBrandingImageUrl('')}
                       onUploadError={(err) => setMessage({ text: `Gagal mengunggah branding: ${err}`, type: 'error' })}
                     />
                   </div>
@@ -328,11 +341,11 @@ export default function WhiteLabelSettings() {
                         <LinkIcon className="h-4 w-4 text-gray-400" />
                       </div>
                       <input
-                        type="url"
+                        type="text"
                         value={brandingImageUrl}
                         onChange={(e) => setBrandingImageUrl(e.target.value)}
                         className="pl-10 w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white"
-                        placeholder="https://example.com/branding.png"
+                        placeholder="https://cdn.guestly.yulovi.com/banner/..."
                       />
                     </div>
                   </div>
@@ -350,9 +363,9 @@ export default function WhiteLabelSettings() {
                     setBusinessAddress(appUser.businessAddress || '');
                     setBusinessCity(appUser.businessCity || '');
                     setPhone(appUser.phone || '');
-                    setLogoUrl(appUser.logoUrl || '');
-                    setBannerUrl(appUser.bannerUrl || '');
-                    setBrandingImageUrl(appUser.brandingImageUrl || '');
+                    setLogoUrl(resolveMediaUrl(appUser.logoUrl || appUser.brandLogo || ''));
+                    setBannerUrl(resolveMediaUrl(appUser.bannerUrl || ''));
+                    setBrandingImageUrl(resolveMediaUrl(appUser.brandingImageUrl || ''));
                   }
                   showCancelAlert('Perubahan pengaturan White Label dibatalkan.');
                 }}

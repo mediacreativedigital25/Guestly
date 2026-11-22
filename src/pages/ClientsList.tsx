@@ -3,13 +3,14 @@ import { useAuth } from '../AuthContext';
 import { collection, query, getDocs, where, addDoc, serverTimestamp, doc, setDoc, deleteDoc, updateDoc, runTransaction, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, createAuthUserSilently } from '../lib/firebase';
 import { Client, User } from '../types';
-import { parseFirestoreDate, getUserBusinessId } from '../lib/utils';
+import { parseFirestoreDate, getUserBusinessId, resolveMediaUrl } from '../lib/utils';
 import { format } from 'date-fns';
 import { Plus, Trash2, Edit, Eye, Phone, MessageSquare, Send, Search, X } from 'lucide-react';
 import { Link, useNavigate, useLocation, useParams } from 'react-router-dom';
 import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
 import { Modal } from '../components/Modal';
 import { sendFonnteMessage } from '../lib/fonnte';
+import { DateRangeFilterBar, isWithinDateRange } from '../components/DateRangeFilterBar';
 
 export default function ClientsList() {
   const { appUser } = useAuth();
@@ -18,6 +19,7 @@ export default function ClientsList() {
   const { clientId: routeClientId } = useParams<{ clientId?: string }>();
   const [clients, setClients] = useState<Client[]>([]);
   const [partners, setPartners] = useState<{id: string, name: string, logoUrl?: string}[]>([]);
+  const [vendorById, setVendorById] = useState<Record<string, { name: string; logoUrl?: string }>>({});
   const [loading, setLoading] = useState(true);
 
   const [lastVisible, setLastVisible] = useState<any>(null);
@@ -27,6 +29,8 @@ export default function ClientsList() {
   // Table Search, Filter & Pagination State
   const [searchTerm, setSearchTerm] = useState('');
   const [clientFilter, setClientFilter] = useState<'all' | 'has_events' | 'no_events'>('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
   const [currentPage, setCurrentPage] = useState<number>(1);
 
@@ -68,6 +72,39 @@ export default function ClientsList() {
         const usersRef = collection(db, 'users');
         const allUsersSnap = await getDocs(usersRef);
 
+        // Build comprehensive Vendor (Partner / Owner Business) lookup map
+        const vendorMap: Record<string, { name: string; logoUrl?: string }> = {};
+        const bizUsers = allUsersSnap.docs
+          .map(d => ({ id: d.id, ...(d.data() as Partial<User>) }))
+          .filter(u => ['owner', 'partner'].includes(u.role || ''));
+
+        bizUsers.forEach(u => {
+          const info = {
+            name: (u.businessName || u.brandName || u.name || 'Vendor').trim(),
+            logoUrl: u.logoUrl || u.brandLogo || undefined,
+          };
+          if (u.id) vendorMap[u.id] = info;
+          if (u.partnerId) vendorMap[u.partnerId] = info;
+        });
+
+        // Also map team/admin accounts back to their business vendor
+        allUsersSnap.docs.forEach(uDoc => {
+          const u = uDoc.data() as Partial<User>;
+          if (!vendorMap[uDoc.id]) {
+            const parentInfo =
+              (u.partnerId && vendorMap[u.partnerId]) ||
+              (u.createdBy && vendorMap[u.createdBy]);
+            if (parentInfo) {
+              vendorMap[uDoc.id] = parentInfo;
+            } else if (u.businessName || u.brandName) {
+              vendorMap[uDoc.id] = {
+                name: (u.businessName || u.brandName || u.name || '').trim(),
+                logoUrl: u.logoUrl || u.brandLogo || undefined,
+              };
+            }
+          }
+        });
+
         if (!isSuperAdmin) {
           const safePid = getUserBusinessId(appUser) || appUser?.id || '';
           if (!safePid) {
@@ -86,22 +123,28 @@ export default function ClientsList() {
               if (u.partnerId) myBizIds.add(u.partnerId);
             }
           });
-          setPartners([{ id: safePid, name: appUser?.businessName || appUser?.name || 'Partner', logoUrl: appUser?.logoUrl }]);
+          const myVendorInfo = vendorMap[safePid] || {
+            name: appUser?.businessName || appUser?.brandName || appUser?.name || 'Vendor',
+            logoUrl: appUser?.logoUrl || appUser?.brandLogo || undefined,
+          };
+          myBizIds.forEach(id => {
+            if (!vendorMap[id]) vendorMap[id] = myVendorInfo;
+          });
+          setPartners([{ id: safePid, name: myVendorInfo.name, logoUrl: myVendorInfo.logoUrl }]);
           setSelectedPartnerId(safePid);
         } else {
           // Fetch businesses (owners & partners) for superadmin
-          const partnersData = allUsersSnap.docs
-            .filter(d => ['owner', 'partner'].includes(d.data().role))
-            .map(doc => ({
-              id: doc.data().partnerId || doc.id,
-              name: doc.data().businessName || doc.data().name,
-              logoUrl: doc.data().logoUrl
-            }));
+          const partnersData = bizUsers.map(u => ({
+            id: u.partnerId || u.id,
+            name: (u.businessName || u.brandName || u.name || 'Vendor').trim(),
+            logoUrl: u.logoUrl || u.brandLogo
+          }));
           setPartners(partnersData);
           if (partnersData.length > 0) {
             setSelectedPartnerId(partnersData[0].id);
           }
         }
+        setVendorById(vendorMap);
 
         try {
           const { getDocs, limit } = await import('firebase/firestore');
@@ -379,9 +422,17 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
     }
   };
 
+  const getVendorInfo = (partnerId?: string | null) => {
+    if (!partnerId) return null;
+    if (vendorById[partnerId]) return vendorById[partnerId];
+    const matched = partners.find(p => p.id === partnerId);
+    if (matched?.name) return { name: matched.name, logoUrl: matched.logoUrl };
+    return null;
+  };
+
   const getPartnerName = (partnerId: string) => {
-    const partner = partners.find(p => p.id === partnerId);
-    return (partner && partner.name) ? partner.name : (partnerId || '-');
+    const info = getVendorInfo(partnerId);
+    return info?.name || '-';
   };
 
   const openEditModal = (client: Client) => {
@@ -462,6 +513,8 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
       if (clientFilter === 'has_events' && evCount <= 0) return false;
       if (clientFilter === 'no_events' && evCount > 0) return false;
 
+      if (!isWithinDateRange(client.createdAt, startDate, endDate)) return false;
+
       if (!q) return true;
       const partnerName = client.partnerId ? getPartnerName(client.partnerId) : '';
       const haystack = [
@@ -475,7 +528,7 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [clients, searchTerm, clientFilter, clientEventsCount, partners]);
+  }, [clients, searchTerm, clientFilter, startDate, endDate, clientEventsCount, partners, vendorById]);
 
   const totalPages = Math.max(1, Math.ceil(filteredClients.length / itemsPerPage));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -488,14 +541,31 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, clientFilter, itemsPerPage]);
+  }, [searchTerm, clientFilter, startDate, endDate, itemsPerPage]);
 
-  const hasActiveFilter = searchTerm.trim() !== '' || clientFilter !== 'all';
+  const hasActiveFilter =
+    searchTerm.trim() !== '' ||
+    clientFilter !== 'all' ||
+    startDate !== '' ||
+    endDate !== '';
 
   return (
     <div className="space-y-4">
-      {/* Unified Toolbar: Search | Filter | Tampilkan 10, 25, 50 | Add Client */}
+      {/* Unified Filter Box: Row 1 Rentang Tanggal | Row 2 Search, Filter & Limit */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-2.5 sm:p-3">
+        <DateRangeFilterBar
+          label="Rentang Tanggal"
+          startDate={startDate}
+          endDate={endDate}
+          onStartDateChange={setStartDate}
+          onEndDateChange={setEndDate}
+          onClear={() => {
+            setStartDate('');
+            setEndDate('');
+          }}
+          position="top"
+        />
+
         <div className="flex flex-col lg:flex-row lg:items-center gap-2">
           {/* Search */}
           <div className="relative flex-1 min-w-0">
@@ -504,7 +574,7 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Cari nama client, email, atau no. WhatsApp..."
+              placeholder="Cari nama client, vendor, email, atau no. WhatsApp..."
               className="w-full h-8.5 pl-8.5 pr-7 text-xs sm:text-sm bg-gray-50/70 border border-gray-200 rounded-lg text-gray-800 placeholder:text-gray-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
             />
             {searchTerm && (
@@ -519,12 +589,12 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
             )}
           </div>
 
-          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             {/* Filter Client */}
             <select
               value={clientFilter}
               onChange={(e) => setClientFilter(e.target.value as 'all' | 'has_events' | 'no_events')}
-              className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none"
+              className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none min-w-[130px]"
               title="Filter status acara client"
             >
               <option value="all">Semua Client</option>
@@ -533,7 +603,7 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
             </select>
 
             {/* Tampilkan 10, 25, 50 */}
-            <div className="flex items-center gap-1.5 h-8.5 px-2.5 bg-white border border-gray-200 rounded-lg text-xs text-gray-600 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition">
+            <div className="flex items-center gap-1.5 h-8.5 px-2.5 bg-white border border-gray-200 rounded-lg text-xs text-gray-600 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition shrink-0">
               <span className="text-xs text-gray-500 whitespace-nowrap">Tampilkan</span>
               <select
                 value={itemsPerPage}
@@ -546,28 +616,30 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
                 <option value={50}>50</option>
               </select>
             </div>
-
-            {/* Add Client Button */}
-            <button
-              onClick={() => {
-                const isFullManagement = appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'admin';
-                const userCredit = appUser?.clientCredit !== undefined ? appUser.clientCredit : (appUser?.clientQuota || 0);
-                if (!isFullManagement && userCredit <= 0) {
-                   showAlert('Akses Ditolak', 'Anda tidak memiliki kuota klien. Silakan beli layanan terlebih dahulu.', 'warning');
-                   navigate('/auth/login/clients');
-                   return;
-                }
-                setError('');
-                setIsAddingClient(true);
-                navigate('/auth/login/clients/add');
-              }}
-              className="h-8.5 px-3 text-xs font-medium inline-flex items-center justify-center gap-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-xs transition-colors whitespace-nowrap cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Client</span>
-            </button>
           </div>
         </div>
+      </div>
+
+      {/* Primary Action Bar (Between Filter Box & Table Box, Left Aligned) */}
+      <div className="flex items-center justify-start">
+        <button
+          onClick={() => {
+            const isFullManagement = appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'admin';
+            const userCredit = appUser?.clientCredit !== undefined ? appUser.clientCredit : (appUser?.clientQuota || 0);
+            if (!isFullManagement && userCredit <= 0) {
+               showAlert('Akses Ditolak', 'Anda tidak memiliki kuota klien. Silakan beli layanan terlebih dahulu.', 'warning');
+               navigate('/auth/login/clients');
+               return;
+            }
+            setError('');
+            setIsAddingClient(true);
+            navigate('/auth/login/clients/add');
+          }}
+          className="h-9 px-3.5 text-xs sm:text-sm font-medium inline-flex items-center justify-center gap-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-xs transition-colors whitespace-nowrap cursor-pointer"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Add Client</span>
+        </button>
       </div>
 
       {/* Add Client Modal (Popup) */}
@@ -727,7 +799,7 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
               <div className="space-y-1">
                 <p className="text-sm font-semibold text-gray-800">Tidak ada client yang cocok</p>
                 <p className="text-xs text-gray-500">
-                  Coba ubah kata kunci pencarian atau filter client.
+                  Coba ubah kata kunci pencarian, status, atau rentang tanggal.
                 </p>
               </div>
               <button
@@ -735,6 +807,8 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
                 onClick={() => {
                   setSearchTerm('');
                   setClientFilter('all');
+                  setStartDate('');
+                  setEndDate('');
                 }}
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
               >
@@ -750,16 +824,16 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
                       <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-14">No</th>
                       <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Nama &amp; Kontak</th>
                       <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">No. WhatsApp</th>
+                      <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Vendor</th>
                       <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Acara</th>
-                      {(appUser?.role === 'superadmin' || appUser?.role === 'partner') && (
-                        <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Partner</th>
-                      )}
                       <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tanggal</th>
                       <th className="px-5 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {paginatedClients.map((client, index) => (
+                    {paginatedClients.map((client, index) => {
+                      const vendorInfo = getVendorInfo(client.partnerId);
+                      return (
                       <tr key={client.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500">
                            {startIndex + index + 1}
@@ -778,25 +852,29 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
                              <span className="text-gray-400">-</span>
                            )}
                         </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap text-sm text-gray-700">
+                          {vendorInfo ? (
+                            <div className="flex items-center gap-2">
+                              {vendorInfo.logoUrl ? (
+                                <img
+                                  src={resolveMediaUrl(vendorInfo.logoUrl)}
+                                  alt={vendorInfo.name}
+                                  className="w-6 h-6 rounded-md object-contain bg-white border border-gray-200 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-6 h-6 rounded-md bg-indigo-50 text-indigo-700 flex items-center justify-center text-xs font-bold border border-indigo-100 shrink-0">
+                                  {vendorInfo.name.charAt(0).toUpperCase()}
+                                </div>
+                              )}
+                              <span className="font-medium text-gray-800">{vendorInfo.name}</span>
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
                         <td className="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500">
                            {clientEventsCount[client.id!] || 0} Acara
                         </td>
-                        {(appUser?.role === 'superadmin' || appUser?.role === 'partner') && (
-                          <td className="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500">
-                             {client.partnerId && partners.find(p => p.id === client.partnerId) ? (
-                               <div className="flex items-center gap-2">
-                                 {partners.find(p => p.id === client.partnerId)?.logoUrl ? (
-                                   <img src={partners.find(p => p.id === client.partnerId)?.logoUrl} alt="Logo" className="w-6 h-6 rounded-md object-contain bg-white border border-gray-200" />
-                                 ) : (
-                                   <div className="w-6 h-6 rounded-md bg-indigo-50 text-indigo-700 flex items-center justify-center text-xs font-bold border border-indigo-100">
-                                     {getPartnerName(client.partnerId).charAt(0).toUpperCase()}
-                                   </div>
-                                 )}
-                                 <span>{getPartnerName(client.partnerId)}</span>
-                               </div>
-                             ) : '-'}
-                          </td>
-                        )}
                         <td className="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500">
                            {client.createdAt && parseFirestoreDate(client.createdAt) ? format(parseFirestoreDate(client.createdAt)!, 'dd MMM yyyy') : '-'}
                         </td>
@@ -835,7 +913,8 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
                            </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -854,6 +933,8 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
                         onClick={() => {
                           setSearchTerm('');
                           setClientFilter('all');
+                          setStartDate('');
+                          setEndDate('');
                         }}
                         className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 underline cursor-pointer"
                       >
@@ -948,9 +1029,9 @@ Silakan login menggunakan Email dan Password di atas. Mohon simpan informasi aku
                 <label className="block text-sm font-medium text-gray-500">Total Acara</label>
                 <div className="mt-1 text-sm text-gray-900">{clientEventsCount[viewingClient.id!] || 0} Acara</div>
               </div>
-              {(appUser?.role === 'superadmin' || appUser?.role === 'partner') && viewingClient.partnerId && (
+              {viewingClient.partnerId && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-500">Partner</label>
+                  <label className="block text-sm font-medium text-gray-500">Vendor</label>
                   <div className="mt-1 text-sm text-gray-900">{getPartnerName(viewingClient.partnerId)}</div>
                 </div>
               )}

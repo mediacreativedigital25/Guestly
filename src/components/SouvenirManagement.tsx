@@ -712,13 +712,11 @@ export default function SouvenirManagement({
     doc.text('Pihak Penyelenggara / Wedding Organizer,', 20, signY);
     doc.text('Petugas Logistik & Meja Souvenir,', 130, signY);
 
-    doc.line(20, signY + 30, 80, signY + 30);
-    doc.text('(................................................)', 20, signY + 35);
-    doc.text('Nama Terang / Stempel', 20, signY + 40);
+    doc.text('(................................................)', 20, signY + 30);
+    doc.text('Nama Terang / Stempel', 20, signY + 35);
 
-    doc.line(130, signY + 30, 190, signY + 30);
-    doc.text('(................................................)', 130, signY + 35);
-    doc.text('Nama Terang / Petugas', 130, signY + 40);
+    doc.text('(................................................)', 130, signY + 30);
+    doc.text('Nama Terang / Petugas', 130, signY + 35);
 
     const cleanTitle = eventTitle.replace(/[^a-zA-Z0-9]/g, '_');
     doc.save(`Berita_Acara_Souvenir_${cleanTitle}.pdf`);

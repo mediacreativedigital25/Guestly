@@ -26,6 +26,7 @@ import {
   Settings2,
   Smartphone,
   Sparkles,
+  Tag,
   UserCheck,
   Users,
   Wifi,
@@ -176,9 +177,12 @@ export default function SendInvitations() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
   const hasAutoSelectedFilterRef = useRef(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [invitationTypeFilter, setInvitationTypeFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [sessionFilter, setSessionFilter] = useState('all');
   const [selectedGuestIds, setSelectedGuestIds] = useState<string[]>([]);
+  const [bulkInvitationType, setBulkInvitationType] = useState('');
+  const [isUpdatingBulkType, setIsUpdatingBulkType] = useState(false);
 
   // Sending execution state
   const [isBlasting, setIsBlasting] = useState(false);
@@ -519,6 +523,21 @@ export default function SendInvitations() {
     }
   }, [loading, guests.length, stats.pending, stats.failed, stats.sent]);
 
+  const availableInvitationTypes = useMemo(() => {
+    const defaults = ['Undangan Fisik', 'Undangan Cetak', 'Undangan Digital'];
+    const base =
+      event?.invitationTypes && event.invitationTypes.length > 0
+        ? event.invitationTypes
+        : defaults;
+    const set = new Set<string>(base.map((t) => t.trim()).filter(Boolean));
+    guests.forEach((g) => {
+      if (g.invitationType && g.invitationType.trim()) {
+        set.add(g.invitationType.trim());
+      }
+    });
+    return Array.from(set);
+  }, [event?.invitationTypes, guests]);
+
   const availableCategories = useMemo(() => {
     const set = new Set<string>(event?.guestCategories || []);
     guests.forEach((g) => {
@@ -545,6 +564,14 @@ export default function SendInvitations() {
       if (statusFilter === 'failed' && st !== 'failed') return false;
       if (statusFilter === 'no_phone' && valid) return false;
 
+      if (invitationTypeFilter !== 'all') {
+        const guestType = (g.invitationType || '').trim();
+        if (invitationTypeFilter === 'unassigned') {
+          if (guestType) return false;
+        } else if (guestType.toLowerCase() !== invitationTypeFilter.trim().toLowerCase()) {
+          return false;
+        }
+      }
       if (categoryFilter !== 'all' && (g.category || '') !== categoryFilter) return false;
       if (sessionFilter !== 'all' && (g.session || '') !== sessionFilter) return false;
 
@@ -553,14 +580,20 @@ export default function SendInvitations() {
         const fullName = formatGuestFullName(g.name, g.title).toLowerCase();
         const phone = (g.phone || '').toLowerCase();
         const ticket = (g.ticketCode || '').toLowerCase();
-        if (!fullName.includes(q) && !phone.includes(q) && !ticket.includes(q)) {
+        const invType = (g.invitationType || '').toLowerCase();
+        if (
+          !fullName.includes(q) &&
+          !phone.includes(q) &&
+          !ticket.includes(q) &&
+          !invType.includes(q)
+        ) {
           return false;
         }
       }
 
       return true;
     });
-  }, [guests, dispatchMap, statusFilter, categoryFilter, sessionFilter, searchTerm]);
+  }, [guests, dispatchMap, statusFilter, invitationTypeFilter, categoryFilter, sessionFilter, searchTerm]);
 
   // Build message & media URL for any guest
   const buildGuestPayload = (guest: Guest) => {
@@ -1118,14 +1151,62 @@ export default function SendInvitations() {
     );
   }
 
-  const allFilteredSelectableIds = filteredGuests.filter((g) => g.id && hasValidPhone(g)).map((g) => g.id!);
+  const allFilteredGuestIds = filteredGuests.filter((g) => g.id).map((g) => g.id!);
   const isAllSelected =
-    allFilteredSelectableIds.length > 0 &&
-    allFilteredSelectableIds.every((id) => selectedGuestIds.includes(id));
+    allFilteredGuestIds.length > 0 &&
+    allFilteredGuestIds.every((id) => selectedGuestIds.includes(id));
 
   const pendingTargets = guests.filter((g) => getGuestStatus(g) === 'pending' && hasValidPhone(g));
   const failedTargets = guests.filter((g) => getGuestStatus(g) === 'failed' && hasValidPhone(g));
-  const selectedTargets = guests.filter((g) => g.id && selectedGuestIds.includes(g.id) && hasValidPhone(g));
+  const selectedGuests = guests.filter((g) => g.id && selectedGuestIds.includes(g.id));
+  const selectedTargets = selectedGuests.filter((g) => hasValidPhone(g));
+  const selectedWithoutPhoneCount = selectedGuests.length - selectedTargets.length;
+  const hasActiveAttributeFilters =
+    Boolean(searchTerm.trim()) ||
+    invitationTypeFilter !== 'all' ||
+    categoryFilter !== 'all' ||
+    sessionFilter !== 'all';
+
+  const handleBulkUpdateInvitationType = async () => {
+    if (!eventId || selectedGuests.length === 0 || !bulkInvitationType) return;
+    const nextValue = bulkInvitationType === '__clear__' ? '' : bulkInvitationType;
+    setIsUpdatingBulkType(true);
+    try {
+      const targetIds = selectedGuests.map((g) => g.id!).filter(Boolean);
+      const chunkSize = 10;
+      for (let i = 0; i < targetIds.length; i += chunkSize) {
+        const slice = targetIds.slice(i, i + chunkSize);
+        await Promise.all(
+          slice.map((gid) =>
+            updateDoc(doc(db, 'events', eventId, 'guests', gid), {
+              invitationType: nextValue,
+              updatedAt: serverTimestamp(),
+            })
+          )
+        );
+      }
+      setBulkInvitationType('');
+      if (invitationTypeFilter !== 'all') {
+        setSelectedGuestIds([]);
+      }
+      showAlert(
+        'Tipe Undangan Diperbarui',
+        nextValue
+          ? `${targetIds.length} tamu berhasil ditandai sebagai "${nextValue}".`
+          : `Tipe undangan untuk ${targetIds.length} tamu berhasil dikosongkan.`,
+        'success'
+      );
+    } catch (err: any) {
+      console.error('Error bulk updating invitationType:', err);
+      showAlert(
+        'Gagal Memperbarui',
+        err?.message || 'Terjadi kesalahan saat mengubah tipe undangan secara massal.',
+        'error'
+      );
+    } finally {
+      setIsUpdatingBulkType(false);
+    }
+  };
 
   const canSaveToEvent = ['superadmin', 'owner', 'admin', 'partner', 'client'].includes(appUser?.role || '');
 
@@ -1777,21 +1858,41 @@ export default function SendInvitations() {
           </div>
 
           {/* Search & Attribute Filters */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Cari nama tamu, no. HP, kode tiket..."
+                placeholder="Cari nama, no. HP, tipe, tiket..."
                 className="w-full h-9 pl-9 pr-3 border border-slate-200 rounded-lg text-xs sm:text-sm bg-white focus:ring-indigo-500 focus:border-indigo-500"
               />
             </div>
 
             <select
+              value={invitationTypeFilter}
+              onChange={(e) => {
+                setInvitationTypeFilter(e.target.value);
+                setSelectedGuestIds([]);
+              }}
+              className="h-9 border border-slate-200 rounded-lg px-3 text-xs sm:text-sm bg-white text-slate-700"
+            >
+              <option value="all">Semua Tipe Undangan</option>
+              {availableInvitationTypes.map((invType) => (
+                <option key={invType} value={invType}>
+                  {invType}
+                </option>
+              ))}
+              <option value="unassigned">Belum Diatur</option>
+            </select>
+
+            <select
               value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
+              onChange={(e) => {
+                setCategoryFilter(e.target.value);
+                setSelectedGuestIds([]);
+              }}
               className="h-9 border border-slate-200 rounded-lg px-3 text-xs sm:text-sm bg-white text-slate-700"
             >
               <option value="all">Semua Kategori</option>
@@ -1804,7 +1905,10 @@ export default function SendInvitations() {
 
             <select
               value={sessionFilter}
-              onChange={(e) => setSessionFilter(e.target.value)}
+              onChange={(e) => {
+                setSessionFilter(e.target.value);
+                setSelectedGuestIds([]);
+              }}
               className="h-9 border border-slate-200 rounded-lg px-3 text-xs sm:text-sm bg-white text-slate-700"
             >
               <option value="all">Semua Sesi</option>
@@ -1815,17 +1919,103 @@ export default function SendInvitations() {
               ))}
             </select>
           </div>
+
+          {/* Bulk Checklist Bar */}
+          {selectedGuests.length > 0 && (
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50/75 px-3.5 py-2.5 flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="inline-flex items-center gap-1.5 font-semibold text-indigo-900">
+                  <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+                  {selectedGuests.length} tamu dicentang
+                </span>
+                <span className="text-indigo-300">•</span>
+                <span className="text-indigo-800">
+                  <strong>{selectedTargets.length}</strong> siap kirim WA
+                  {selectedWithoutPhoneCount > 0
+                    ? ` (${selectedWithoutPhoneCount} belum ada nomor)`
+                    : ''}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={bulkInvitationType}
+                    onChange={(e) => setBulkInvitationType(e.target.value)}
+                    disabled={isUpdatingBulkType || isBlasting}
+                    className="h-8 border border-indigo-200 rounded-md px-2.5 text-xs bg-white text-slate-700 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50"
+                  >
+                    <option value="">Set Tipe Undangan...</option>
+                    {availableInvitationTypes.map((invType) => (
+                      <option key={invType} value={invType}>
+                        {invType}
+                      </option>
+                    ))}
+                    <option value="__clear__">Kosongkan Tipe Undangan</option>
+                  </select>
+                  <button
+                    type="button"
+                    disabled={!bulkInvitationType || isUpdatingBulkType || isBlasting}
+                    onClick={handleBulkUpdateInvitationType}
+                    className="h-8 px-3 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+                  >
+                    {isUpdatingBulkType ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Tag className="w-3.5 h-3.5" />
+                    )}
+                    <span>Terapkan</span>
+                  </button>
+                </div>
+
+                {selectedTargets.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={isBlasting || isUpdatingBulkType}
+                    onClick={() => runBroadcast(selectedTargets, 'Terpilih')}
+                    className="h-8 px-3 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-45"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Blast ({selectedTargets.length})</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  disabled={isUpdatingBulkType || isBlasting}
+                  onClick={() => setSelectedGuestIds([])}
+                  className="h-8 px-2.5 rounded-md border border-indigo-200 bg-white hover:bg-indigo-50 text-slate-600 text-xs font-medium transition-colors cursor-pointer disabled:opacity-45"
+                >
+                  Batal Pilih
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Table */}
         {filteredGuests.length === 0 ? (
           <div className="p-8 text-center space-y-2.5">
             <p className="text-slate-600 text-sm font-medium">
-              {statusFilter === 'pending' && stats.noPhone > 0 && stats.pending === 0
+              {statusFilter === 'pending' && stats.noPhone > 0 && stats.pending === 0 && !hasActiveAttributeFilters
                 ? `Belum ada tamu dengan nomor WhatsApp (${stats.noPhone} tamu saat ini belum memiliki No. HP).`
-                : 'Tidak ada data tamu pada filter status ini.'}
+                : 'Tidak ada data tamu yang cocok dengan filter saat ini.'}
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2">
+              {hasActiveAttributeFilters && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setInvitationTypeFilter('all');
+                    setCategoryFilter('all');
+                    setSessionFilter('all');
+                  }}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg cursor-pointer"
+                >
+                  Reset Filter
+                </button>
+              )}
               {statusFilter !== 'all' && guests.length > 0 && (
                 <button
                   type="button"
@@ -1853,20 +2043,25 @@ export default function SendInvitations() {
                   <th className="px-4 py-3 w-10">
                     <input
                       type="checkbox"
+                      disabled={isBlasting || isUpdatingBulkType}
                       checked={isAllSelected}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedGuestIds(allFilteredSelectableIds);
+                          setSelectedGuestIds((prev) =>
+                            Array.from(new Set([...prev, ...allFilteredGuestIds]))
+                          );
                         } else {
-                          setSelectedGuestIds([]);
+                          const visibleSet = new Set(allFilteredGuestIds);
+                          setSelectedGuestIds((prev) => prev.filter((id) => !visibleSet.has(id)));
                         }
                       }}
-                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      title="Pilih semua tamu pada filter ini"
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:opacity-40"
                     />
                   </th>
                   <th className="px-4 py-3">Tamu</th>
                   <th className="px-4 py-3">No. WhatsApp</th>
-                  <th className="px-4 py-3">Kategori / Sesi</th>
+                  <th className="px-4 py-3">Kategori / Tipe / Sesi</th>
                   <th className="px-4 py-3">Status Pengiriman</th>
                   <th className="px-4 py-3 text-right">Aksi Kirim</th>
                 </tr>
@@ -1878,23 +2073,29 @@ export default function SendInvitations() {
                   const validPhone = hasValidPhone(guest);
                   const isSendingThis = sendingGuestId === guest.id;
                   const fullName = formatGuestFullName(guest.name, guest.title);
+                  const isChecked = Boolean(guest.id && selectedGuestIds.includes(guest.id));
 
                   return (
-                    <tr key={guest.id} className="hover:bg-slate-50/70 transition-colors">
+                    <tr
+                      key={guest.id}
+                      className={`transition-colors ${isChecked ? 'bg-indigo-50/40' : 'hover:bg-slate-50/70'}`}
+                    >
                       <td className="px-4 py-3">
                         <input
                           type="checkbox"
-                          disabled={!validPhone || isBlasting}
-                          checked={Boolean(guest.id && selectedGuestIds.includes(guest.id))}
+                          disabled={isBlasting || isUpdatingBulkType}
+                          checked={isChecked}
                           onChange={(e) => {
                             if (!guest.id) return;
                             if (e.target.checked) {
-                              setSelectedGuestIds((prev) => [...prev, guest.id!]);
+                              setSelectedGuestIds((prev) =>
+                                prev.includes(guest.id!) ? prev : [...prev, guest.id!]
+                              );
                             } else {
                               setSelectedGuestIds((prev) => prev.filter((id) => id !== guest.id));
                             }
                           }}
-                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-40"
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:opacity-40"
                         />
                       </td>
                       <td className="px-4 py-3">
@@ -1908,14 +2109,28 @@ export default function SendInvitations() {
                           <span className="text-slate-400 font-sans">Belum ada nomor</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-xs text-slate-600 whitespace-nowrap">
-                        <span>{guest.category || 'Reguler'}</span>
-                        {guest.session ? (
-                          <>
-                            <span className="mx-1.5 text-slate-300">·</span>
-                            <span>{guest.session}</span>
-                          </>
-                        ) : null}
+                      <td className="px-4 py-3 text-xs text-slate-600">
+                        <div className="whitespace-nowrap">
+                          <span className="font-medium text-slate-700">{guest.category || 'Reguler'}</span>
+                          {guest.session ? (
+                            <>
+                              <span className="mx-1.5 text-slate-300">·</span>
+                              <span>{guest.session}</span>
+                            </>
+                          ) : null}
+                        </div>
+                        {guest.invitationType?.trim() ? (
+                          <div className="mt-1">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-50 text-[#8C3A50] border border-rose-200/80 text-[11px] font-medium">
+                              <Tag className="w-3 h-3 shrink-0" />
+                              {guest.invitationType.trim()}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="mt-0.5 text-[11px] text-slate-400">
+                            Tipe belum diatur
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-xs">
                         {status === 'sent' ? (

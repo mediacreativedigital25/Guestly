@@ -14,11 +14,13 @@ import { GreetingScreenCanvas } from '../components/GreetingScreenCanvas';
 import { eInviteTemplateService, DEFAULT_EINVITE_TEMPLATES } from '../services/eInviteTemplateService';
 import { greetingTemplateService, DEFAULT_GREETING_TEMPLATES } from '../services/greetingTemplateService';
 import { showAlert, showConfirm, showCancelAlert } from '../lib/alerts';
+import { DateRangeFilterBar, isWithinDateRange } from '../components/DateRangeFilterBar';
 
 export default function EventsList() {
   const { appUser } = useAuth();
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [vendorById, setVendorById] = useState<Record<string, { name: string; logoUrl?: string }>>({});
   const [loading, setLoading] = useState(true);
 
   const [lastVisible, setLastVisible] = useState<any>(null);
@@ -28,6 +30,8 @@ export default function EventsList() {
   // Table Search, Filter & Pagination State
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'draft' | 'expired'>('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
   const [currentPage, setCurrentPage] = useState<number>(1);
 
@@ -479,12 +483,44 @@ export default function EventsList() {
         );
         const myClientIds = new Set<string>();
 
+        const vendorMap: Record<string, { name: string; logoUrl?: string }> = {};
+
         if (appUser?.role !== 'client' && appUser?.role !== 'staff') {
           try {
             const [snapClients, snapUsers] = await Promise.all([
               getDocs(cQuery),
               getDocs(collection(db, 'users')),
             ]);
+
+            const bizUsers = snapUsers.docs
+              .map(d => ({ id: d.id, ...(d.data() as Partial<User>) }))
+              .filter(u => ['owner', 'partner'].includes(u.role || ''));
+
+            bizUsers.forEach(u => {
+              const info = {
+                name: (u.businessName || u.brandName || u.name || 'Vendor').trim(),
+                logoUrl: u.logoUrl || u.brandLogo || undefined,
+              };
+              if (u.id) vendorMap[u.id] = info;
+              if (u.partnerId) vendorMap[u.partnerId] = info;
+            });
+
+            snapUsers.docs.forEach(uDoc => {
+              const u = uDoc.data() as Partial<User>;
+              if (!vendorMap[uDoc.id]) {
+                const parentInfo =
+                  (u.partnerId && vendorMap[u.partnerId]) ||
+                  (u.createdBy && vendorMap[u.createdBy]);
+                if (parentInfo) {
+                  vendorMap[uDoc.id] = parentInfo;
+                } else if (u.businessName || u.brandName) {
+                  vendorMap[uDoc.id] = {
+                    name: (u.businessName || u.brandName || u.name || '').trim(),
+                    logoUrl: u.logoUrl || u.brandLogo || undefined,
+                  };
+                }
+              }
+            });
 
             if (appUser && ['owner', 'partner', 'admin'].includes(appUser.role)) {
               snapUsers.docs.forEach(uDoc => {
@@ -511,6 +547,16 @@ export default function EventsList() {
                   }
                 }
               }
+
+              const ownVendorInfo =
+                vendorMap[targetOwnerId] ||
+                (appUser.partnerId ? vendorMap[appUser.partnerId] : undefined) || {
+                  name: appUser.businessName || appUser.brandName || appUser.name || 'Vendor',
+                  logoUrl: appUser.logoUrl || appUser.brandLogo || undefined,
+                };
+              myBizIds.forEach(id => {
+                if (!vendorMap[id]) vendorMap[id] = ownVendorInfo;
+              });
             }
 
             clientsData = snapClients.docs.map(d => ({ id: d.id, ...d.data() } as Client));
@@ -526,7 +572,24 @@ export default function EventsList() {
           }
         } else {
           setClients([]);
+          if (appUser?.partnerId) {
+            try {
+              const pSnap = await getDoc(doc(db, 'users', appUser.partnerId));
+              if (pSnap.exists()) {
+                const pu = pSnap.data() as Partial<User>;
+                const info = {
+                  name: (pu.businessName || pu.brandName || pu.name || 'Vendor').trim(),
+                  logoUrl: pu.logoUrl || pu.brandLogo || undefined,
+                };
+                vendorMap[pSnap.id] = info;
+                if (pu.partnerId) vendorMap[pu.partnerId] = info;
+              }
+            } catch {
+              // ignore
+            }
+          }
         }
+        setVendorById(vendorMap);
 
         try {
           const qLimited = query(q, limit(100));
@@ -1075,6 +1138,19 @@ export default function EventsList() {
     return map;
   }, [clients]);
 
+  const getEventVendorInfo = (ev: EventRecord) => {
+    if (ev.partnerId && vendorById[ev.partnerId]) {
+      return vendorById[ev.partnerId];
+    }
+    if (ev.clientId) {
+      const matchedClient = clients.find(c => c.id === ev.clientId);
+      if (matchedClient?.partnerId && vendorById[matchedClient.partnerId]) {
+        return vendorById[matchedClient.partnerId];
+      }
+    }
+    return null;
+  };
+
   const filteredEvents = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return events.filter((ev) => {
@@ -1084,8 +1160,11 @@ export default function EventsList() {
       if (statusFilter === 'draft' && !isDraft) return false;
       if (statusFilter === 'expired' && !expired) return false;
 
+      if (!isWithinDateRange(ev.date, startDate, endDate)) return false;
+
       if (!q) return true;
       const clientName = ev.clientId ? (clientNameById[ev.clientId] || '') : '';
+      const vendorName = getEventVendorInfo(ev)?.name || '';
       const haystack = [
         ev.title,
         ev.coupleName,
@@ -1093,13 +1172,14 @@ export default function EventsList() {
         ev.eInviteVenueName,
         ev.status,
         clientName,
+        vendorName,
       ]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [events, searchTerm, statusFilter, clientNameById]);
+  }, [events, searchTerm, statusFilter, startDate, endDate, clientNameById, vendorById, clients]);
 
   const totalPages = Math.max(1, Math.ceil(filteredEvents.length / itemsPerPage));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -1112,9 +1192,13 @@ export default function EventsList() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, statusFilter, itemsPerPage]);
+  }, [searchTerm, statusFilter, startDate, endDate, itemsPerPage]);
 
-  const hasActiveFilter = searchTerm.trim() !== '' || statusFilter !== 'all';
+  const hasActiveFilter =
+    searchTerm.trim() !== '' ||
+    statusFilter !== 'all' ||
+    startDate !== '' ||
+    endDate !== '';
 
   return (
     <div className="space-y-4">
@@ -1124,8 +1208,21 @@ export default function EventsList() {
         </p>
       )}
 
-      {/* Unified Toolbar: Search | Filter | Tampilkan 10, 25, 50 | Create Event */}
+      {/* Unified Filter Box: Row 1 Rentang Tgl Acara | Row 2 Search, Status & Limit */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-2.5 sm:p-3">
+        <DateRangeFilterBar
+          label="Rentang Tgl Acara"
+          startDate={startDate}
+          endDate={endDate}
+          onStartDateChange={setStartDate}
+          onEndDateChange={setEndDate}
+          onClear={() => {
+            setStartDate('');
+            setEndDate('');
+          }}
+          position="top"
+        />
+
         <div className="flex flex-col lg:flex-row lg:items-center gap-2">
           {/* Search */}
           <div className="relative flex-1 min-w-0">
@@ -1134,7 +1231,7 @@ export default function EventsList() {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Cari nama acara, mempelai, atau lokasi..."
+              placeholder="Cari nama acara, mempelai, vendor, atau lokasi..."
               className="w-full h-8.5 pl-8.5 pr-7 text-xs sm:text-sm bg-gray-50/70 border border-gray-200 rounded-lg text-gray-800 placeholder:text-gray-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
             />
             {searchTerm && (
@@ -1149,12 +1246,12 @@ export default function EventsList() {
             )}
           </div>
 
-          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             {/* Filter Status */}
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'draft' | 'expired')}
-              className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none"
+              className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none min-w-[130px]"
               title="Filter status acara"
             >
               <option value="all">Semua Status</option>
@@ -1164,7 +1261,7 @@ export default function EventsList() {
             </select>
 
             {/* Tampilkan 10, 25, 50 */}
-            <div className="flex items-center gap-1.5 h-8.5 px-2.5 bg-white border border-gray-200 rounded-lg text-xs text-gray-600 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition">
+            <div className="flex items-center gap-1.5 h-8.5 px-2.5 bg-white border border-gray-200 rounded-lg text-xs text-gray-600 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition shrink-0">
               <span className="text-xs text-gray-500 whitespace-nowrap">Tampilkan</span>
               <select
                 value={itemsPerPage}
@@ -1177,20 +1274,22 @@ export default function EventsList() {
                 <option value={50}>50</option>
               </select>
             </div>
-
-            {/* Create Event Button */}
-            {canUserCreateEvent(appUser) && (
-              <button
-                onClick={openCreateModal}
-                className="h-8.5 px-3 text-xs font-medium inline-flex items-center justify-center gap-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-xs transition-colors whitespace-nowrap cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Create Event</span>
-              </button>
-            )}
           </div>
         </div>
       </div>
+
+      {/* Primary Action Bar (Between Filter Box & Table Box, Left Aligned) */}
+      {canUserCreateEvent(appUser) && (
+        <div className="flex items-center justify-start">
+          <button
+            onClick={openCreateModal}
+            className="h-9 px-3.5 text-xs sm:text-sm font-medium inline-flex items-center justify-center gap-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-xs transition-colors whitespace-nowrap cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Create Event</span>
+          </button>
+        </div>
+      )}
 
       {/* Warning banner if Owner / Partner / Admin business has not yet been registered with Name & Address by Super Admin */}
       {appUser && ['owner', 'partner', 'admin'].includes(appUser.role) && !loading && !isPartnerVerified && (
@@ -2494,12 +2593,31 @@ export default function EventsList() {
                     onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleAddInvitationType())}
                     type="text" 
                     className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500" 
-                    placeholder="Contoh: Undangan Fisik, Undangan Cetak, Undangan Digital..." 
+                    placeholder="Contoh: Mempelai Pria, Mempelai Wanita, Undangan Fisik, Undangan Digital..." 
                   />
                   <button onClick={handleAddInvitationType} type="button" className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 font-medium">
                     Tambah
                   </button>
                 </div>
+                {['Mempelai Pria', 'Mempelai Wanita', 'Keluarga Bersama', 'Undangan Digital', 'Undangan Fisik'].some(
+                  (preset) => !invitationTypes.includes(preset)
+                ) && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] text-gray-500">Saran cepat:</span>
+                    {['Mempelai Pria', 'Mempelai Wanita', 'Keluarga Bersama', 'Undangan Digital', 'Undangan Fisik']
+                      .filter((preset) => !invitationTypes.includes(preset))
+                      .map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setInvitationTypes([...invitationTypes, preset])}
+                          className="px-2 py-0.5 text-[11px] font-medium rounded-md border border-gray-200 bg-white text-gray-700 hover:border-indigo-300 hover:text-indigo-700 hover:bg-indigo-50/50 transition-colors cursor-pointer"
+                        >
+                          + {preset}
+                        </button>
+                      ))}
+                  </div>
+                )}
               </div>
 
               <div className="mt-4">
@@ -3065,7 +3183,7 @@ export default function EventsList() {
               <div className="space-y-1">
                 <p className="text-sm font-semibold text-gray-800">Tidak ada acara yang cocok</p>
                 <p className="text-xs text-gray-500">
-                  Coba ubah kata kunci pencarian atau filter status acara.
+                  Coba ubah kata kunci pencarian, status, atau rentang tanggal acara.
                 </p>
               </div>
               <button
@@ -3073,6 +3191,8 @@ export default function EventsList() {
                 onClick={() => {
                   setSearchTerm('');
                   setStatusFilter('all');
+                  setStartDate('');
+                  setEndDate('');
                 }}
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
               >
@@ -3089,14 +3209,16 @@ export default function EventsList() {
                       <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Thumbnail</th>
                       <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tgl Dibuat</th>
                       <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Nama Acara</th>
+                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Vendor</th>
                       <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tgl Acara</th>
                       <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Masa Aktif</th>
-                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Aksi</th>
-                      <th className="px-4 py-3.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Scanner</th>
+                      <th className="px-4 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {paginatedEvents.map((event, index) => (
+                    {paginatedEvents.map((event, index) => {
+                      const vendorInfo = getEventVendorInfo(event);
+                      return (
                       <tr key={event.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500">{startIndex + index + 1}</td>
                         <td className="px-4 py-3 whitespace-nowrap">
@@ -3141,6 +3263,26 @@ export default function EventsList() {
                             </div>
                           )}
                         </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-sm text-gray-700">
+                          {vendorInfo ? (
+                            <div className="flex items-center gap-2">
+                              {vendorInfo.logoUrl ? (
+                                <img
+                                  src={resolveMediaUrl(vendorInfo.logoUrl)}
+                                  alt={vendorInfo.name}
+                                  className="w-6 h-6 rounded-md object-contain bg-white border border-gray-200 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-6 h-6 rounded-md bg-indigo-50 text-indigo-700 flex items-center justify-center text-xs font-bold border border-indigo-100 shrink-0">
+                                  {vendorInfo.name.charAt(0).toUpperCase()}
+                                </div>
+                              )}
+                              <span className="font-medium text-gray-800">{vendorInfo.name}</span>
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500">
                           {parseFirestoreDate(event.date) ? format(parseFirestoreDate(event.date)!, 'dd MMM yyyy') : '-'}
                         </td>
@@ -3174,8 +3316,18 @@ export default function EventsList() {
                         );
                       })()}
                     </td>
-                    <td className="px-4 py-3.5 whitespace-nowrap text-sm font-medium">
-                      <div className="flex items-center space-x-2">
+                    <td className="px-4 py-3.5 whitespace-nowrap text-right text-sm font-medium">
+                      <div className="flex items-center justify-end space-x-2">
+                         {(isEventExpired(event) || event.status === 'draft') && appUser?.role !== 'staff' && (
+                           <Link
+                             to={`/auth/login/services/catalog?renewEvent=${event.id}`}
+                             className="text-[#8C3A50] hover:text-[#722B3E] flex items-center justify-center p-1 rounded-full hover:bg-rose-50 transition-colors"
+                             title="Top-Up Paket / Perpanjang Masa Aktif"
+                             aria-label="Top-Up Paket / Perpanjang Masa Aktif"
+                           >
+                             <RefreshCw className="w-4 h-4" />
+                           </Link>
+                         )}
                          {appUser?.role === 'staff' && appUser?.staffType === 'souvenir' ? (
                            <Link to={`/auth/login/events/${event.id}?tab=souvenir`} className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-full text-xs font-semibold transition-colors" title="Kelola Souvenir">
                              <Gift className="w-3.5 h-3.5" /> Kelola Souvenir
@@ -3188,36 +3340,7 @@ export default function EventsList() {
                          {canUserCreateEvent(appUser) && (() => {
                            const isRowLocked = appUser?.role !== 'superadmin' && isEventInactiveOrExpired(event);
                            if (isRowLocked) {
-                             return (
-                               <>
-                                 {appUser?.role !== 'client' && (
-                                   <button
-                                     type="button"
-                                     disabled
-                                     className="text-slate-300 flex items-center justify-center p-1 rounded-full cursor-not-allowed"
-                                     title="Kirim Akses dikunci — lakukan Top-Up Paket terlebih dahulu"
-                                   >
-                                     <Send className="w-4 h-4" />
-                                   </button>
-                                 )}
-                                 <button
-                                   type="button"
-                                   disabled
-                                   className="text-slate-300 flex items-center justify-center p-1 rounded-full cursor-not-allowed"
-                                   title="Edit Acara dikunci — lakukan Top-Up Paket terlebih dahulu"
-                                 >
-                                   <Edit className="w-4 h-4" />
-                                 </button>
-                                 <button
-                                   type="button"
-                                   disabled
-                                   className="text-slate-300 flex items-center justify-center p-1 rounded-full cursor-not-allowed"
-                                   title="Hapus Acara dikunci — lakukan Top-Up Paket terlebih dahulu"
-                                 >
-                                   <Trash2 className="w-4 h-4" />
-                                 </button>
-                               </>
-                             );
+                             return null;
                            }
                            return (
                              <>
@@ -3249,48 +3372,9 @@ export default function EventsList() {
                          })()}
                       </div>
                     </td>
-                    <td className="px-4 py-3.5 whitespace-nowrap text-center text-sm font-medium">
-                       <div className="flex items-center justify-center gap-2">
-                         {isEventExpired(event) || event.status === 'draft' ? (
-                           appUser?.role === 'staff' ? (
-                             <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 text-slate-500 rounded-full text-xs font-semibold">
-                               <Lock className="w-3.5 h-3.5" /> Terkunci
-                             </span>
-                           ) : (
-                             <Link
-                               to={`/auth/login/services/catalog?renewEvent=${event.id}`}
-                               className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#8C3A50] hover:bg-[#722B3E] text-white rounded-full text-xs font-semibold transition-colors shadow-xs"
-                               title="Masa aktif habis / Draft — Perpanjang sesuai paket"
-                             >
-                               <RefreshCw className="w-3.5 h-3.5" /> Top-Up Paket
-                             </Link>
-                           )
-                         ) : appUser?.role === 'staff' && appUser?.staffType === 'souvenir' ? (
-                           <Link 
-                             to={`/auth/login/events/${event.id}/scan?mode=souvenir`} 
-                             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white hover:bg-purple-700 rounded-full text-xs font-semibold transition-colors shadow-sm"
-                           >
-                             <Gift className="w-3.5 h-3.5" /> Scan Souvenir
-                           </Link>
-                         ) : appUser?.role === 'staff' && appUser?.staffType === 'checkin' ? (
-                           <Link 
-                             to={`/auth/login/events/${event.id}/scan?mode=checkin`} 
-                             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white hover:bg-emerald-700 rounded-full text-xs font-semibold transition-colors shadow-sm"
-                           >
-                             <ScanLine className="w-3.5 h-3.5" /> Scan Kehadiran
-                           </Link>
-                         ) : (
-                           <Link 
-                             to={`/auth/login/events/${event.id}/scan`} 
-                             className="inline-flex items-center gap-1 px-3 py-1 bg-green-50 text-green-700 hover:bg-green-100 rounded-full transition-colors"
-                           >
-                             <ScanLine className="w-4 h-4" /> Scan
-                           </Link>
-                         )}
-                       </div>
-                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -3309,6 +3393,8 @@ export default function EventsList() {
                     onClick={() => {
                       setSearchTerm('');
                       setStatusFilter('all');
+                      setStartDate('');
+                      setEndDate('');
                     }}
                     className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 underline cursor-pointer"
                   >

@@ -1275,6 +1275,8 @@ Smart Digital Guestbook & Event Management`;
             ? 'Layar Sapa'
             : rawCategory === 'salespage'
             ? 'super_admin_media'
+            : rawCategory.toLowerCase() === 'logos'
+            ? 'logo'
             : rawCategory.replace(/[^a-zA-Z0-9_-]/g, '') || 'attachment';
 
         const uploadsResolvedBase = path.resolve(uploadsBaseDir);
@@ -1333,7 +1335,13 @@ Smart Digital Guestbook & Event Management`;
         }
 
         const key = `${normalizedCategory}/${finalFileName}`;
-        let finalUrl = `/api/media/r2/${key}`;
+        const cdnDomain = (
+          process.env.CDN_DOMAIN ||
+          process.env.R2_PUBLIC_URL ||
+          r2PublicUrl ||
+          'https://cdn.guestly.yulovi.com'
+        ).replace(/\/+$/, '');
+        let finalUrl = `${cdnDomain}/${key}`;
 
         const r2Client = getR2Client();
         if (r2Client) {
