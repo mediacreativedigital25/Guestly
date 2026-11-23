@@ -2391,6 +2391,19 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                           Invoice
                         </div>
                       </Link>
+                      <Link
+                        to="/auth/login/invoices/history"
+                        onClick={() => setIsMobileMenuOpen(false)}
+                        className={cn(
+                          "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                          location.pathname === '/auth/login/invoices/history' ? subActiveClass : subIdleClass
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Clock className="h-4 w-4" />
+                          Riwayat
+                        </div>
+                      </Link>
 
                       {!!(
                         appUser &&
@@ -2612,7 +2625,7 @@ Terima kasih telah mempercayakan kebutuhan manajemen tamu Anda kepada Guestly.
                           >
                             <div className="flex items-center gap-2">
                               <CreditCard className="h-4 w-4" />
-                              Invoice
+                              Payment Receive
                             </div>
                           </Link>
                           <Link

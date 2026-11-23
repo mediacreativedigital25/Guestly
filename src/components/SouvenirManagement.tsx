@@ -92,14 +92,20 @@ export default function SouvenirManagement({
   const [auditNotes, setAuditNotes] = useState('');
   const [shouldAdjustSystem, setShouldAdjustSystem] = useState(false);
 
-  // Guest distribution filtering
+  // Guest distribution filtering & pagination
   const [guestSearch, setGuestSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'taken' | 'not_taken'>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [distItemsPerPage, setDistItemsPerPage] = useState<number>(25);
+  const [distCurrentPage, setDistCurrentPage] = useState<number>(1);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   // Active view inside souvenir tab: 'overview' | 'distribution' | 'audit_trail'
   const [viewTab, setViewTab] = useState<'overview' | 'distribution' | 'audit_trail'>('overview');
+
+  useEffect(() => {
+    setDistCurrentPage(1);
+  }, [guestSearch, statusFilter, categoryFilter, distItemsPerPage]);
 
   // Synchronize souvenirs whenever guests prop updates
   useEffect(() => {
@@ -723,49 +729,54 @@ export default function SouvenirManagement({
     showAlert('Berhasil', 'Dokumen Berita Acara Souvenir PDF berhasil diunduh.', 'success');
   };
 
+  const distTotalPages = Math.max(1, Math.ceil(filteredGuests.length / distItemsPerPage));
+  const distSafePage = Math.min(distCurrentPage, distTotalPages);
+  const distStartIndex = (distSafePage - 1) * distItemsPerPage;
+  const distEndIndex = Math.min(distStartIndex + distItemsPerPage, filteredGuests.length);
+  const paginatedDistGuests = filteredGuests.slice(distStartIndex, distEndIndex);
+  const hasDistFilter = guestSearch.trim() !== '' || statusFilter !== 'all' || categoryFilter !== 'all';
+
   return (
-    <div className="space-y-6">
-      {/* Top Banner: Status Sinkronisasi Fisik & Sistem */}
-      <div className={`p-4 sm:p-5 rounded-xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${
-        overallDiscrepancy === 0 && totalDistributed > 0 
-          ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
-          : overallDiscrepancy !== 0
-          ? 'bg-amber-50 border-amber-200 text-amber-900'
-          : 'bg-indigo-50 border-indigo-200 text-indigo-900'
-      }`}>
-        <div className="flex items-start gap-3.5">
-          <div className={`p-2.5 rounded-lg flex-shrink-0 ${
-            overallDiscrepancy === 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'
-          }`}>
-            {overallDiscrepancy === 0 ? <PackageCheck className="w-6 h-6" /> : <AlertTriangle className="w-6 h-6" />}
+    <div className="space-y-4">
+      {/* Top Status Strip: Audit Sinkronisasi Fisik & Sistem */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-3.5 sm:p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+        <div className="flex items-start gap-3 min-w-0">
+          <div
+            className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+              overallDiscrepancy === 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
+            }`}
+          >
+            {overallDiscrepancy === 0 ? <PackageCheck className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-semibold text-base">
-                {overallDiscrepancy === 0 
-                  ? 'Audit Stok: Fisik & Sistem 100% Sinkron' 
-                  : `Perhatian: Ditemukan Selisih ${Math.abs(overallDiscrepancy)} Pcs Antara Fisik dan Sistem`}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-semibold text-sm sm:text-base text-gray-900">
+                {overallDiscrepancy === 0
+                  ? 'Audit Stok: Fisik & Sistem Sinkron'
+                  : `Ditemukan Selisih ${Math.abs(overallDiscrepancy)} Pcs Antara Fisik & Sistem`}
               </h3>
-              <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${
-                overallDiscrepancy === 0 ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-200 text-amber-800'
-              }`}>
-                {overallDiscrepancy === 0 ? 'VALID & MATCH' : `${overallDiscrepancy > 0 ? '+' : ''}${overallDiscrepancy} PCS`}
+              <span
+                className={`text-xs font-semibold tabular-nums ${
+                  overallDiscrepancy === 0 ? 'text-emerald-700' : 'text-amber-700'
+                }`}
+              >
+                · {overallDiscrepancy === 0 ? 'Sesuai (0 selisih)' : `${overallDiscrepancy > 0 ? '+' : ''}${overallDiscrepancy} pcs`}
               </span>
             </div>
-            <p className="text-xs sm:text-sm opacity-90 mt-1">
+            <p className="text-xs text-gray-500 mt-0.5">
               {overallDiscrepancy === 0
-                ? 'Semua souvenir yang diserahkan tercatat secara sinkron tanpa selisih terhadap hitung fisik meja.'
-                : 'Lakukan pemeriksaan meja souvenir atau gunakan tombol Stock Opname untuk menyelaraskan catatan fisik & sistem.'}
+                ? 'Semua souvenir yang diserahkan tercatat sinkron tanpa selisih terhadap hitung fisik meja.'
+                : 'Lakukan pemeriksaan meja souvenir atau gunakan Stock Opname untuk menyelaraskan catatan fisik & sistem.'}
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto shrink-0">
           {isLocked ? (
             <button
               type="button"
               disabled
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3.5 py-2 bg-slate-100 border border-slate-200 text-slate-400 text-xs sm:text-sm font-medium rounded-lg cursor-not-allowed"
+              className="h-9 px-3.5 inline-flex items-center justify-center gap-1.5 bg-gray-100 border border-gray-200 text-gray-400 text-xs sm:text-sm font-medium rounded-lg cursor-not-allowed whitespace-nowrap"
               title="Scanner Meja dikunci — lakukan Top-Up Paket untuk membuka"
             >
               <Lock className="w-4 h-4" />
@@ -774,160 +785,146 @@ export default function SouvenirManagement({
           ) : (
             <Link
               to={`/auth/login/events/${eventId}/scan`}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors"
+              className="h-9 px-3.5 inline-flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-medium rounded-lg shadow-xs transition-colors whitespace-nowrap"
             >
               <ScanLine className="w-4 h-4" />
               <span>Buka Scanner Meja</span>
             </Link>
           )}
           <button
+            type="button"
             onClick={handleExportExcel}
             disabled={isLocked}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors ${
+            className={`h-9 px-3 inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
               isLocked
-                ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
-                : 'bg-white hover:bg-gray-50 border border-gray-300 text-gray-700'
+                ? 'bg-gray-100 border border-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 cursor-pointer'
             }`}
             title={isLocked ? 'Export Excel dikunci — lakukan Top-Up Paket untuk membuka' : 'Download Rekapitulasi Excel'}
           >
-            {isLocked ? <Lock className="w-4 h-4 text-slate-400" /> : <FileSpreadsheet className="w-4 h-4 text-emerald-600" />}
+            {isLocked ? <Lock className="w-3.5 h-3.5 text-gray-400" /> : <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />}
             <span>Excel</span>
           </button>
           <button
+            type="button"
             onClick={handleExportPDF}
             disabled={isLocked}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors ${
+            className={`h-9 px-3 inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
               isLocked
-                ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
-                : 'bg-white hover:bg-gray-50 border border-gray-300 text-gray-700'
+                ? 'bg-gray-100 border border-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 cursor-pointer'
             }`}
             title={isLocked ? 'Export Berita Acara PDF dikunci — lakukan Top-Up Paket untuk membuka' : 'Cetak Berita Acara PDF'}
           >
-            {isLocked ? <Lock className="w-4 h-4 text-slate-400" /> : <FileText className="w-4 h-4 text-rose-600" />}
+            {isLocked ? <Lock className="w-3.5 h-3.5 text-gray-400" /> : <FileText className="w-3.5 h-3.5 text-rose-600" />}
             <span>Berita Acara</span>
           </button>
         </div>
       </div>
 
-      {/* 4 Quick Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-gray-500">Stok Awal Fisik</span>
-            <Boxes className="w-4 h-4 text-gray-400" />
+      {/* Standardized 4 Quick Stat Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-xs">
+          <p className="text-xs font-medium text-gray-500">Stok Awal Fisik</p>
+          <div className="mt-1.5 flex items-baseline gap-1.5 tabular-nums">
+            <span className="text-xl sm:text-2xl font-bold text-gray-900">{totalInitial.toLocaleString('id-ID')}</span>
+            <span className="text-xs text-gray-400">pcs</span>
           </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-gray-900">{totalInitial}</span>
-            <span className="text-xs text-gray-500">pcs</span>
-          </div>
-          <p className="text-[11px] text-gray-400 mt-1">Total alokasi semua jenis</p>
+          <p className="text-[11px] text-gray-500 mt-2 pt-2 border-t border-gray-100">Total alokasi semua jenis</p>
         </div>
 
-        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-gray-500">Terdistribusi (Sistem)</span>
-            <Gift className="w-4 h-4 text-indigo-500" />
-          </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-indigo-600">{totalDistributed}</span>
-            <span className="text-xs text-indigo-500">
+        <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-xs">
+          <p className="text-xs font-medium text-gray-500">Terdistribusi (Sistem)</p>
+          <div className="mt-1.5 flex items-baseline gap-1.5 tabular-nums">
+            <span className="text-xl sm:text-2xl font-bold text-indigo-600">{totalDistributed.toLocaleString('id-ID')}</span>
+            <span className="text-xs text-gray-500">
               ({totalInitial > 0 ? Math.round((totalDistributed / totalInitial) * 100) : 0}%)
             </span>
           </div>
-          <p className="text-[11px] text-gray-400 mt-1">
+          <p className="text-[11px] text-gray-500 mt-2 pt-2 border-t border-gray-100 tabular-nums">
             {totalDirectQrOut > 0
-              ? `${guestsTakenCount} tamu + ${totalDirectQrOut} scan QR fisik`
+              ? `${guestsTakenCount} tamu · ${totalDirectQrOut} scan QR fisik`
               : `${guestsTakenCount} dari ${guests.length} tamu`}
           </p>
         </div>
 
-        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-gray-500">Sisa Stok Sistem</span>
-            <TrendingDown className="w-4 h-4 text-emerald-500" />
-          </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className={`text-2xl font-bold ${totalRemainingSystem <= 10 ? 'text-amber-600' : 'text-emerald-600'}`}>
-              {totalRemainingSystem}
+        <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-xs">
+          <p className="text-xs font-medium text-gray-500">Sisa Stok Sistem</p>
+          <div className="mt-1.5 flex items-baseline gap-1.5 tabular-nums">
+            <span className={`text-xl sm:text-2xl font-bold ${totalRemainingSystem <= 10 ? 'text-amber-600' : 'text-emerald-700'}`}>
+              {totalRemainingSystem.toLocaleString('id-ID')}
             </span>
-            <span className="text-xs text-gray-500">pcs</span>
+            <span className="text-xs text-gray-400">pcs</span>
           </div>
-          <p className="text-[11px] text-gray-400 mt-1">Stok Awal - Pengambilan</p>
+          <p className="text-[11px] text-gray-500 mt-2 pt-2 border-t border-gray-100">Stok awal dikurangi distribusi</p>
         </div>
 
-        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-gray-500">Hasil Cek Fisik Meja</span>
-            <ClipboardCheck className={`w-4 h-4 ${overallDiscrepancy === 0 ? 'text-emerald-500' : 'text-amber-500'}`} />
-          </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-gray-900">{totalPhysicalAudit}</span>
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-              overallDiscrepancy === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-            }`}>
-              {overallDiscrepancy === 0 ? 'Cocok' : `Selisih ${overallDiscrepancy}`}
+        <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-xs">
+          <p className="text-xs font-medium text-gray-500">Hasil Cek Fisik Meja</p>
+          <div className="mt-1.5 flex items-baseline gap-2 tabular-nums">
+            <span className="text-xl sm:text-2xl font-bold text-gray-900">{totalPhysicalAudit.toLocaleString('id-ID')}</span>
+            <span className={`text-xs font-semibold ${overallDiscrepancy === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+              {overallDiscrepancy === 0 ? 'Cocok' : `Selisih ${overallDiscrepancy > 0 ? '+' : ''}${overallDiscrepancy}`}
             </span>
           </div>
-          <p className="text-[11px] text-gray-400 mt-1">Stock opname terakhir</p>
+          <p className="text-[11px] text-gray-500 mt-2 pt-2 border-t border-gray-100">Stock opname terakhir</p>
         </div>
       </div>
 
-      {/* Internal Navigation Tabs inside Souvenir Section */}
-      <div className="flex items-center justify-between border-b border-gray-200">
-        <div className="flex space-x-6">
+      {/* Internal Sub-Navigation Tabs */}
+      <div className="flex flex-wrap items-center justify-between border-b border-gray-200 gap-2">
+        <div className="flex space-x-5 sm:space-x-6 overflow-x-auto -mb-px">
           <button
+            type="button"
             onClick={() => setViewTab('overview')}
-            className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            className={`pb-3 text-xs sm:text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
               viewTab === 'overview'
                 ? 'border-indigo-600 text-indigo-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
             }`}
           >
-            <Boxes className="w-4 h-4" />
-            <span>Katalog & Inventaris Stok ({souvenirs.length})</span>
+            <Boxes className="w-3.5 h-3.5" />
+            <span>Katalog & Inventaris</span>
+            <span className="text-xs tabular-nums text-gray-400">({souvenirs.length})</span>
           </button>
           <button
+            type="button"
             onClick={() => setViewTab('distribution')}
-            className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            className={`pb-3 text-xs sm:text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
               viewTab === 'distribution'
                 ? 'border-indigo-600 text-indigo-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
             }`}
           >
-            <Gift className="w-4 h-4" />
-            <span>Loket Penyerahan Tamu ({guestsTakenCount}/{guests.length})</span>
+            <Gift className="w-3.5 h-3.5" />
+            <span>Loket Penyerahan Tamu</span>
+            <span className="text-xs tabular-nums text-gray-400">
+              ({guestsTakenCount}/{guests.length})
+            </span>
           </button>
           <button
+            type="button"
             onClick={() => setViewTab('audit_trail')}
-            className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            className={`pb-3 text-xs sm:text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
               viewTab === 'audit_trail'
                 ? 'border-indigo-600 text-indigo-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
             }`}
           >
-            <History className="w-4 h-4" />
-            <span>Audit Trail Logistik ({logs.length})</span>
+            <History className="w-3.5 h-3.5" />
+            <span>Audit Trail</span>
+            <span className="text-xs tabular-nums text-gray-400">({logs.length})</span>
           </button>
         </div>
+      </div>
 
-        {viewTab === 'overview' && (
-          <div className="flex items-center gap-2 mb-2">
-            {souvenirs.length > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  setBatchQrInitialItem(null);
-                  setIsBatchQrModalOpen(true);
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors cursor-pointer"
-                title="Cetak stiker QR Batch hemat kertas untuk semua kategori souvenir"
-              >
-                <Printer className="w-4 h-4" />
-                <span className="hidden sm:inline">Cetak Stiker QR</span>
-                <span className="sm:hidden">Stiker QR</span>
-              </button>
-            )}
+      {/* VIEW 1: OVERVIEW / INVENTORY TABLE */}
+      {viewTab === 'overview' && (
+        <div className="space-y-4">
+          {/* Left-Aligned Action Bar */}
+          <div className="flex flex-wrap items-center gap-2">
             <button
+              type="button"
               onClick={() => {
                 if (isLocked) {
                   showSouvenirLockedAlert();
@@ -937,479 +934,627 @@ export default function SouvenirManagement({
                 setIsAddModalOpen(true);
               }}
               disabled={isLocked}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors ${
+              className={`h-9 px-3.5 inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-xs transition-colors whitespace-nowrap ${
                 isLocked
-                  ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
-                  : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                  ? 'bg-gray-100 border border-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'
               }`}
               title={isLocked ? 'Tambah souvenir dikunci — lakukan Top-Up Paket untuk membuka' : undefined}
             >
               {isLocked ? <Lock className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
               <span>Tambah Jenis Souvenir</span>
             </button>
-          </div>
-        )}
-      </div>
 
-      {/* VIEW 1: OVERVIEW / INVENTORY LIST */}
-      {viewTab === 'overview' && (
-        <div className="space-y-4">
-          {loading ? (
-            <div className="bg-white p-8 text-center rounded-xl border border-gray-200">
-              <RefreshCw className="w-6 h-6 text-indigo-600 animate-spin mx-auto mb-2" />
-              <p className="text-sm text-gray-500">Memuat data souvenir...</p>
-            </div>
-          ) : souvenirs.length === 0 ? (
-            <div className="bg-white p-12 text-center rounded-xl border border-dashed border-gray-300">
-              <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-3">
-                <Gift className="w-6 h-6" />
-              </div>
-              <h4 className="text-base font-semibold text-gray-900">Belum Ada Souvenir Terdaftar</h4>
-              <p className="text-sm text-gray-500 max-w-md mx-auto mt-1 mb-4">
-                Daftarkan jenis souvenir acara ini (misal: Tumbler Custom, Pouch Kulit, Payung) beserta jumlah stok awal fisiknya.
-              </p>
+            {souvenirs.length > 0 && (
               <button
+                type="button"
                 onClick={() => {
-                  if (isLocked) {
-                    showSouvenirLockedAlert();
-                    return;
-                  }
-                  resetForm();
-                  setIsAddModalOpen(true);
+                  setBatchQrInitialItem(null);
+                  setIsBatchQrModalOpen(true);
                 }}
-                disabled={isLocked}
-                className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg shadow-sm transition-colors ${
-                  isLocked
-                    ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
-                    : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                }`}
+                className="h-9 px-3 inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 transition-colors cursor-pointer whitespace-nowrap"
+                title="Cetak stiker QR Batch hemat kertas untuk semua kategori souvenir"
               >
-                {isLocked ? <Lock className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                <span>Tambah Souvenir Pertama</span>
+                <Printer className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Cetak Stiker QR</span>
               </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {souvenirs.map((item) => {
-                const auditVal = item.physicalStockAudit ?? item.remainingStock;
-                const discrepancy = auditVal - item.remainingStock;
-                const percentage = item.initialStock > 0 
-                  ? Math.min(100, Math.round((item.totalDistributed / item.initialStock) * 100))
-                  : 0;
+            )}
+          </div>
 
-                return (
-                  <div key={item.id} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-between hover:border-indigo-300 transition-all">
-                    <div>
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h4 className="font-semibold text-gray-900 text-base">{item.name}</h4>
-                            <span className="text-[11px] font-medium px-2 py-0.5 bg-gray-100 text-gray-700 rounded-full">
-                              {item.category || 'Semua Tamu'}
-                            </span>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+            {loading ? (
+              <div className="py-12 text-center">
+                <RefreshCw className="w-5 h-5 text-indigo-600 animate-spin mx-auto mb-2" />
+                <p className="text-sm text-gray-500">Memuat data souvenir...</p>
+              </div>
+            ) : souvenirs.length === 0 ? (
+              <div className="py-14 px-4 text-center">
+                <Gift className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                <h4 className="text-sm font-semibold text-gray-800">Belum Ada Souvenir Terdaftar</h4>
+                <p className="text-xs text-gray-500 max-w-md mx-auto mt-1">
+                  Daftarkan jenis souvenir acara ini (misal: Tumbler Custom, Pouch Kulit, Payung) beserta jumlah stok awal fisiknya.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isLocked) {
+                      showSouvenirLockedAlert();
+                      return;
+                    }
+                    resetForm();
+                    setIsAddModalOpen(true);
+                  }}
+                  disabled={isLocked}
+                  className={`mt-4 h-9 px-3.5 inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-xs transition-colors ${
+                    isLocked
+                      ? 'bg-gray-100 border border-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'
+                  }`}
+                >
+                  {isLocked ? <Lock className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                  <span>Tambah Souvenir Pertama</span>
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-12">
+                        No
+                      </th>
+                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Jenis Souvenir
+                      </th>
+                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Target / QR Batch
+                      </th>
+                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Distribusi
+                      </th>
+                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Sisa Sistem
+                      </th>
+                      <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Cek Fisik & Selisih
+                      </th>
+                      <th className="px-4 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Aksi
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {souvenirs.map((item, idx) => {
+                      const auditVal = item.physicalStockAudit ?? item.remainingStock;
+                      const discrepancy = auditVal - item.remainingStock;
+                      const percentage =
+                        item.initialStock > 0
+                          ? Math.min(100, Math.round((item.totalDistributed / item.initialStock) * 100))
+                          : 0;
+
+                      return (
+                        <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">
+                            {idx + 1}
+                          </td>
+                          <td className="px-4 py-3.5 max-w-[260px]">
+                            <div className="text-sm font-medium text-gray-900">{item.name}</div>
+                            {item.notes && (
+                              <div className="text-xs text-gray-500 truncate mt-0.5" title={item.notes}>
+                                {item.notes}
+                              </div>
+                            )}
+                            <div className="text-[11px] text-gray-400 mt-0.5">
+                              Audit terakhir: {item.lastAuditAt ? parseFirestoreDate(item.lastAuditAt)?.toLocaleDateString('id-ID') || '-' : 'Belum pernah'}
+                              {item.lastAuditBy ? ` · ${item.lastAuditBy}` : ''}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3.5 whitespace-nowrap text-xs">
+                            <div className="font-medium text-gray-700">{item.category || 'Semua Tamu'}</div>
                             {item.qrBatchCode && (
-                              <span
-                                className="inline-flex items-center gap-1 text-[11px] font-mono font-bold px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md"
-                                title={`Kode QR Batch: SV:${item.qrBatchCode}`}
-                              >
-                                <QrCode className="w-3 h-3" />
+                              <div className="text-[11px] font-mono text-indigo-600 mt-0.5">
                                 {item.qrBatchCode}
-                              </span>
+                              </div>
                             )}
-                          </div>
-                          {item.notes && (
-                            <p className="text-xs text-gray-500 mt-1">{item.notes}</p>
-                          )}
-                        </div>
-
-                        {!isLocked && (
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => openEditModal(item)}
-                              className="p-1.5 text-gray-400 hover:text-indigo-600 rounded-md hover:bg-gray-50 transition-colors"
-                              title="Edit Data Souvenir"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteSouvenir(item)}
-                              className="p-1.5 text-gray-400 hover:text-rose-600 rounded-md hover:bg-gray-50 transition-colors"
-                              title="Hapus Souvenir"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Distribution Progress Bar */}
-                      <div className="mt-4">
-                        <div className="flex justify-between text-xs text-gray-600 mb-1">
-                          <span>
-                            Terdistribusi: <strong>{item.totalDistributed}</strong> pcs
+                          </td>
+                          <td className="px-4 py-3.5 whitespace-nowrap min-w-[170px]">
+                            <div className="flex items-center justify-between text-xs tabular-nums mb-1">
+                              <span className="font-semibold text-gray-800">
+                                {item.totalDistributed} / {item.initialStock} pcs
+                              </span>
+                              <span className="text-gray-500">{percentage}%</span>
+                            </div>
+                            <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className={`h-full transition-all ${percentage > 90 ? 'bg-amber-500' : 'bg-indigo-600'}`}
+                                style={{ width: `${percentage}%` }}
+                              />
+                            </div>
                             {(item.directQrOutCount || 0) > 0 && (
-                              <span className="text-[11px] text-indigo-600 ml-1">
-                                ({item.directQrOutCount} via QR fisik)
-                              </span>
+                              <div className="text-[11px] text-indigo-600 mt-0.5 tabular-nums">
+                                {item.directQrOutCount} via QR fisik
+                              </div>
                             )}
-                          </span>
-                          <span>Stok Awal: <strong>{item.initialStock}</strong> pcs ({percentage}%)</span>
-                        </div>
-                        <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                          <div 
-                            className={`h-full transition-all duration-500 ${
-                              percentage > 90 ? 'bg-amber-500' : 'bg-indigo-600'
-                            }`}
-                            style={{ width: `${percentage}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      {/* Stock Details Matrix */}
-                      <div className="mt-4 grid grid-cols-3 gap-2 p-3 bg-gray-50 rounded-lg text-center">
-                        <div>
-                          <span className="text-[11px] text-gray-500 block">Sisa Sistem</span>
-                          <span className={`text-base font-bold ${item.remainingStock <= 5 ? 'text-rose-600' : 'text-gray-900'}`}>
-                            {item.remainingStock} <span className="text-[10px] font-normal text-gray-500">pcs</span>
-                          </span>
-                        </div>
-                        <div className="border-x border-gray-200">
-                          <span className="text-[11px] text-gray-500 block">Cek Fisik Meja</span>
-                          <span className="text-base font-bold text-gray-900">
-                            {auditVal} <span className="text-[10px] font-normal text-gray-500">pcs</span>
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-[11px] text-gray-500 block">Selisih Fisik</span>
-                          <span className={`text-base font-bold ${
-                            discrepancy === 0 ? 'text-emerald-600' : 'text-amber-600'
-                          }`}>
-                            {discrepancy === 0 ? '0' : `${discrepancy > 0 ? '+' : ''}${discrepancy}`}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Last audit note */}
-                      <div className="mt-3 flex items-center justify-between text-[11px] text-gray-400">
-                        <span>Pemeriksaan terakhir: {item.lastAuditAt ? (parseFirestoreDate(item.lastAuditAt)?.toLocaleDateString('id-ID') || '-') : 'Belum pernah'}</span>
-                        {item.lastAuditBy && <span>Oleh: {item.lastAuditBy}</span>}
-                      </div>
-                    </div>
-
-                    {/* Action Buttons: QR Batch Sticker & Stock Opname */}
-                    <div className="mt-4 pt-3 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2">
-                      <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
-                        discrepancy === 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
-                      }`}>
-                        {discrepancy === 0 ? <Check className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
-                        {discrepancy === 0 ? 'Sesuai dengan Fisik' : 'Perlu Penyelarasan Fisik'}
-                      </span>
-
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setBatchQrInitialItem(item);
-                            setIsBatchQrModalOpen(true);
-                          }}
-                          className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 transition-colors cursor-pointer"
-                          title={`Lihat & cetak stiker QR Batch (${item.qrBatchCode})`}
-                        >
-                          <QrCode className="w-3.5 h-3.5" />
-                          <span>QR Stiker</span>
-                        </button>
-
-                        <button
-                          onClick={() => openAuditModal(item)}
-                          disabled={isLocked}
-                          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                            isLocked
-                              ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
-                              : 'bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700 cursor-pointer'
-                          }`}
-                          title={isLocked ? 'Stock Opname dikunci — lakukan Top-Up Paket' : undefined}
-                        >
-                          {isLocked ? (
-                            <Lock className="w-3.5 h-3.5 text-slate-400" />
-                          ) : (
-                            <ClipboardCheck className="w-3.5 h-3.5 text-indigo-600" />
-                          )}
-                          <span>Stock Opname</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                          </td>
+                          <td className="px-4 py-3.5 whitespace-nowrap text-sm font-semibold tabular-nums">
+                            <span className={item.remainingStock <= 5 ? 'text-rose-600' : 'text-gray-900'}>
+                              {item.remainingStock} pcs
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5 whitespace-nowrap text-xs tabular-nums">
+                            <div className="font-semibold text-gray-900">{auditVal} pcs</div>
+                            <div className={`mt-0.5 font-medium ${discrepancy === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                              {discrepancy === 0
+                                ? 'Sesuai fisik'
+                                : `Selisih ${discrepancy > 0 ? '+' : ''}${discrepancy} pcs`}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3.5 whitespace-nowrap text-right text-sm font-medium">
+                            <div className="flex items-center justify-end space-x-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setBatchQrInitialItem(item);
+                                  setIsBatchQrModalOpen(true);
+                                }}
+                                className="text-indigo-600 hover:text-indigo-900 flex items-center justify-center p-1.5 rounded-full hover:bg-indigo-50 transition-colors cursor-pointer"
+                                title={`Lihat & cetak stiker QR Batch (${item.qrBatchCode})`}
+                              >
+                                <QrCode className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openAuditModal(item)}
+                                disabled={isLocked}
+                                className={`flex items-center justify-center p-1.5 rounded-full transition-colors ${
+                                  isLocked
+                                    ? 'text-gray-300 cursor-not-allowed'
+                                    : 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 cursor-pointer'
+                                }`}
+                                title={isLocked ? 'Stock Opname dikunci' : 'Stock Opname / Cek Fisik'}
+                              >
+                                <ClipboardCheck className="w-4 h-4" />
+                              </button>
+                              {!isLocked && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditModal(item)}
+                                    className="text-blue-600 hover:text-blue-900 flex items-center justify-center p-1.5 rounded-full hover:bg-blue-50 transition-colors cursor-pointer"
+                                    title="Edit Data Souvenir"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteSouvenir(item)}
+                                    className="text-red-600 hover:text-red-900 flex items-center justify-center p-1.5 rounded-full hover:bg-red-50 transition-colors cursor-pointer"
+                                    title="Hapus Souvenir"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* VIEW 2: GUEST DISTRIBUTION DESK (LOKET PENYERAHAN TAMU) */}
       {viewTab === 'distribution' && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          {/* Search & Filter Bar */}
-          <div className="p-4 border-b border-gray-100 bg-gray-50 flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Cari nama tamu, kode tiket, kategori, atau sesi..."
-                value={guestSearch}
-                onChange={(e) => setGuestSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
-              />
-            </div>
+        <div className="space-y-4">
+          {/* Box 1: Unified Filter Box */}
+          <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-2.5 sm:p-3">
+            <div className="flex flex-col lg:flex-row lg:items-center gap-2">
+              <div className="relative flex-1 min-w-0">
+                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Cari nama tamu, kode tiket, kategori, atau sesi..."
+                  value={guestSearch}
+                  onChange={(e) => setGuestSearch(e.target.value)}
+                  className="w-full h-8.5 pl-8.5 pr-7 text-xs sm:text-sm bg-gray-50/70 border border-gray-200 rounded-lg text-gray-800 placeholder:text-gray-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
+                />
+                {guestSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setGuestSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5 rounded transition-colors cursor-pointer"
+                    title="Hapus pencarian"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as any)}
-                className="text-xs sm:text-sm border border-gray-300 rounded-lg py-2 px-3 bg-white focus:ring-indigo-500 focus:border-indigo-500"
-              >
-                <option value="all">Semua Status Souvenir</option>
-                <option value="not_taken">Belum Ambil Souvenir ({guests.length - guestsTakenCount})</option>
-                <option value="taken">Sudah Ambil Souvenir ({guestsTakenCount})</option>
-              </select>
-
-              {event?.guestCategories && event.guestCategories.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <select
-                  value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
-                  className="text-xs sm:text-sm border border-gray-300 rounded-lg py-2 px-3 bg-white focus:ring-indigo-500 focus:border-indigo-500"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as any)}
+                  className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none min-w-[155px]"
                 >
-                  <option value="all">Semua Kategori</option>
-                  {event.guestCategories.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
+                  <option value="all">Semua Status Souvenir</option>
+                  <option value="not_taken">Belum Ambil ({guests.length - guestsTakenCount})</option>
+                  <option value="taken">Sudah Ambil ({guestsTakenCount})</option>
                 </select>
-              )}
+
+                {event?.guestCategories && event.guestCategories.length > 0 && (
+                  <select
+                    value={categoryFilter}
+                    onChange={(e) => setCategoryFilter(e.target.value)}
+                    className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none min-w-[130px]"
+                  >
+                    <option value="all">Semua Kategori</option>
+                    {event.guestCategories.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                )}
+
+                <div className="flex items-center gap-1.5 h-8.5 px-2.5 bg-white border border-gray-200 rounded-lg text-xs text-gray-600 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition shrink-0">
+                  <span className="text-xs text-gray-500 whitespace-nowrap">Tampilkan</span>
+                  <select
+                    value={distItemsPerPage}
+                    onChange={(e) => setDistItemsPerPage(Number(e.target.value))}
+                    className="bg-transparent text-xs sm:text-sm font-semibold text-gray-800 focus:outline-none cursor-pointer pr-0.5 tabular-nums"
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Guest Distribution Table */}
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
-              <thead className="bg-gray-50 text-gray-500 text-xs font-semibold uppercase tracking-wider">
-                <tr>
-                  <th className="px-4 py-3 text-left">Nama Tamu & Kategori</th>
-                  <th className="px-4 py-3 text-left">Kode Tiket</th>
-                  <th className="px-4 py-3 text-center">Kehadiran (Check-In)</th>
-                  <th className="px-4 py-3 text-left">Status Souvenir</th>
-                  <th className="px-4 py-3 text-left">Waktu & Petugas</th>
-                  <th className="px-4 py-3 text-right">Aksi Meja</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 bg-white">
-                {filteredGuests.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-10 text-center text-gray-400">
-                      Tidak ada data tamu yang cocok dengan filter.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredGuests.map((guest) => {
-                    const isTaken = !!guest.souvenirTaken;
-                    const isLoading = actionLoadingId === guest.id;
-
-                    return (
-                      <tr key={guest.id} className="hover:bg-gray-50/70 transition-colors">
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="font-medium text-gray-900">{guest.name}</div>
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            {guest.category && (
-                              <span className="text-[10px] font-semibold px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded">
-                                {guest.category}
-                              </span>
-                            )}
-                            {guest.session && (
-                              <span className="text-[10px] font-medium px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
-                                {guest.session}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-
-                        <td className="px-4 py-3 whitespace-nowrap font-mono text-xs text-gray-600">
-                          {guest.ticketCode || '-'}
-                        </td>
-
-                        <td className="px-4 py-3 whitespace-nowrap text-center">
-                          {guest.attended ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-                              <CheckCircle className="w-3 h-3" /> Hadir
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-[11px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
-                              Belum Hadir
-                            </span>
-                          )}
-                        </td>
-
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          {isTaken ? (
-                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-full">
-                              <PackageCheck className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>Sudah Ambil ({guest.souvenirName || 'Souvenir'})</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
-                              <Boxes className="w-3.5 h-3.5 text-gray-400" />
-                              <span>Belum Mengambil</span>
-                            </span>
-                          )}
-                        </td>
-
-                        <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-500">
-                          {isTaken ? (
-                            <div>
-                              <div>{guest.souvenirTakenAt ? parseFirestoreDate(guest.souvenirTakenAt)?.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-'}</div>
-                              <div className="text-[10px] text-gray-400">{guest.souvenirTakenBy || 'Petugas'}</div>
-                            </div>
-                          ) : (
-                            <span className="text-gray-300">-</span>
-                          )}
-                        </td>
-
-                        <td className="px-4 py-3 whitespace-nowrap text-right">
-                          {isLocked ? (
-                            <span
-                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-slate-400 bg-slate-100 rounded-md border border-slate-200 cursor-not-allowed"
-                              title="Penyerahan souvenir dikunci — lakukan Top-Up Paket untuk membuka"
-                            >
-                              <Lock className="w-3 h-3" />
-                              <span>Terkunci</span>
-                            </span>
-                          ) : isTaken ? (
-                            <button
-                              onClick={() => handleUndoSouvenir(guest)}
-                              disabled={isLoading}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-md border border-rose-200 transition-colors disabled:opacity-50"
-                              title="Batalkan pengambilan souvenir"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              <span>Batal</span>
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleHandoutSouvenir(guest)}
-                              disabled={isLoading || totalRemainingSystem <= 0}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-sm transition-colors disabled:opacity-50"
-                            >
-                              <Gift className="w-3.5 h-3.5" />
-                              <span>Serahkan</span>
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
+          {/* Box 2: Guest Distribution Table + Pagination */}
+          <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+            {filteredGuests.length === 0 ? (
+              <div className="py-12 px-4 text-center">
+                <Search className="w-9 h-9 text-gray-300 mx-auto mb-2.5" />
+                <p className="text-sm font-medium text-gray-700">Tidak ada data tamu yang cocok dengan filter</p>
+                {hasDistFilter && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGuestSearch('');
+                      setStatusFilter('all');
+                      setCategoryFilter('all');
+                    }}
+                    className="mt-3 h-8 px-3 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
+                  >
+                    Reset Filter
+                  </button>
                 )}
-              </tbody>
-            </table>
+              </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-12">
+                          No
+                        </th>
+                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                          Nama Tamu
+                        </th>
+                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                          Kode Tiket
+                        </th>
+                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                          Kehadiran
+                        </th>
+                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                          Status Souvenir
+                        </th>
+                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                          Waktu & Petugas
+                        </th>
+                        <th className="px-4 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                          Aksi Meja
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 bg-white">
+                      {paginatedDistGuests.map((guest, index) => {
+                        const isTaken = !!guest.souvenirTaken;
+                        const isLoading = actionLoadingId === guest.id;
+
+                        return (
+                          <tr key={guest.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">
+                              {distStartIndex + index + 1}
+                            </td>
+                            <td className="px-4 py-3.5 whitespace-nowrap">
+                              <div className="text-sm font-medium text-gray-900">{guest.name}</div>
+                              {(guest.category || guest.session) && (
+                                <div className="text-xs text-gray-500 mt-0.5">
+                                  {[guest.category, guest.session].filter(Boolean).join(' · ')}
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-gray-600 tabular-nums">
+                              {guest.ticketCode || '-'}
+                            </td>
+
+                            <td className="px-4 py-3.5 whitespace-nowrap text-xs font-medium">
+                              {guest.attended ? (
+                                <span className="text-emerald-700">Hadir</span>
+                              ) : (
+                                <span className="text-gray-400">Belum Hadir</span>
+                              )}
+                            </td>
+
+                            <td className="px-4 py-3.5 whitespace-nowrap text-xs font-medium">
+                              {isTaken ? (
+                                <span className="text-emerald-700">
+                                  Sudah Ambil ({guest.souvenirName || 'Souvenir'})
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">Belum Mengambil</span>
+                              )}
+                            </td>
+
+                            <td className="px-4 py-3.5 whitespace-nowrap text-xs text-gray-500 tabular-nums">
+                              {isTaken ? (
+                                <div>
+                                  <div className="text-gray-700 font-medium">
+                                    {guest.souvenirTakenAt
+                                      ? parseFirestoreDate(guest.souvenirTakenAt)?.toLocaleTimeString('id-ID', {
+                                          hour: '2-digit',
+                                          minute: '2-digit',
+                                        })
+                                      : '-'}
+                                  </div>
+                                  <div className="text-[11px] text-gray-400">{guest.souvenirTakenBy || 'Petugas'}</div>
+                                </div>
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
+                            </td>
+
+                            <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                              {isLocked ? (
+                                <span
+                                  className="inline-flex items-center gap-1 text-xs text-gray-400 cursor-not-allowed"
+                                  title="Penyerahan souvenir dikunci — lakukan Top-Up Paket untuk membuka"
+                                >
+                                  <Lock className="w-3.5 h-3.5" />
+                                  <span>Terkunci</span>
+                                </span>
+                              ) : isTaken ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUndoSouvenir(guest)}
+                                  disabled={isLoading}
+                                  className="h-8 px-2.5 inline-flex items-center gap-1 text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg border border-rose-200 transition-colors disabled:opacity-50 cursor-pointer"
+                                  title="Batalkan pengambilan souvenir"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  <span>Batal</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleHandoutSouvenir(guest)}
+                                  disabled={isLoading || totalRemainingSystem <= 0}
+                                  className="h-8 px-3 inline-flex items-center gap-1 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+                                >
+                                  <Gift className="w-3.5 h-3.5" />
+                                  <span>Serahkan</span>
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination Footer */}
+                <div className="px-4 py-3.5 flex flex-col sm:flex-row items-center justify-between border-t border-gray-200 sm:px-5 gap-3 bg-gray-50/50">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600 tabular-nums">
+                    <span>
+                      Menampilkan <span className="font-semibold text-gray-900">{distStartIndex + 1}</span> –{' '}
+                      <span className="font-semibold text-gray-900">{distEndIndex}</span> dari{' '}
+                      <span className="font-semibold text-indigo-600">{filteredGuests.length}</span> tamu
+                    </span>
+                    {hasDistFilter && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGuestSearch('');
+                          setStatusFilter('all');
+                          setCategoryFilter('all');
+                        }}
+                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 underline cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+
+                  {distTotalPages > 1 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setDistCurrentPage(1)}
+                        disabled={distSafePage === 1}
+                        className="px-2.5 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      >
+                        «
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDistCurrentPage((p) => Math.max(1, p - 1))}
+                        disabled={distSafePage === 1}
+                        className="px-3 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      >
+                        Sebelumnya
+                      </button>
+                      <span className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg tabular-nums">
+                        Hal <span className="text-indigo-600 font-bold">{distSafePage}</span> / {distTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setDistCurrentPage((p) => Math.min(distTotalPages, p + 1))}
+                        disabled={distSafePage === distTotalPages}
+                        className="px-3 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      >
+                        Selanjutnya
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDistCurrentPage(distTotalPages)}
+                        disabled={distSafePage === distTotalPages}
+                        className="px-2.5 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      >
+                        »
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
 
-      {/* VIEW 3: AUDIT TRAIL LOG */}
+      {/* VIEW 3: AUDIT TRAIL LOG (STANDARDIZED TABLE) */}
       {viewTab === 'audit_trail' && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-            <div>
-              <h4 className="font-semibold text-gray-900 text-sm">Riwayat Aktivitas Logistik & Souvenir</h4>
-              <p className="text-xs text-gray-500">Mencatat setiap transaksi penyerahan, pembatalan, dan penyesuaian fisik secara realtime.</p>
+        <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+          {logs.length === 0 ? (
+            <div className="py-14 px-4 text-center">
+              <History className="w-10 h-10 text-gray-300 mx-auto mb-2.5" />
+              <p className="text-sm font-medium text-gray-700">Belum ada catatan aktivitas penyerahan souvenir</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Setiap penyerahan, pembatalan, dan stock opname akan tercatat secara realtime di sini.
+              </p>
             </div>
-            <span className="text-xs font-mono bg-gray-200 text-gray-700 px-2 py-0.5 rounded">
-              {logs.length} transaksi terakhir
-            </span>
-          </div>
+          ) : (
+            <div className="overflow-x-auto max-h-[540px] overflow-y-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-12">
+                      No
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Waktu
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Aktivitas
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Tamu / Subjek
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Souvenir & Qty
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Petugas
+                    </th>
+                    <th className="px-4 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Aksi
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 bg-white">
+                  {logs.map((log, idx) => {
+                    const date = log.timestamp ? parseFirestoreDate(log.timestamp) : null;
+                    const isTake = log.action === 'TAKE';
+                    const isReturn = log.action === 'RETURN';
 
-          <div className="divide-y divide-gray-100 max-h-[500px] overflow-y-auto">
-            {logs.length === 0 ? (
-              <div className="p-8 text-center text-gray-400 text-sm">
-                Belum ada catatan aktivitas penyerahan souvenir.
-              </div>
-            ) : (
-              logs.map((log) => {
-                const date = log.timestamp ? parseFirestoreDate(log.timestamp) : null;
-                const isTake = log.action === 'TAKE';
-                const isReturn = log.action === 'RETURN';
-
-                return (
-                  <div key={log.id} className="p-4 flex items-start justify-between gap-3 hover:bg-gray-50/60 transition-colors">
-                    <div className="flex items-start gap-3">
-                      <div className={`p-2 rounded-lg flex-shrink-0 ${
-                        isTake ? 'bg-indigo-50 text-indigo-600' :
-                        isReturn ? 'bg-rose-50 text-rose-600' :
-                        'bg-amber-50 text-amber-600'
-                      }`}>
-                        {isTake ? <Gift className="w-4 h-4" /> :
-                         isReturn ? <RotateCcw className="w-4 h-4" /> :
-                         <Sliders className="w-4 h-4" />}
-                      </div>
-
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className={`text-xs font-bold px-2 py-0.5 rounded ${
-                            isTake ? 'bg-indigo-100 text-indigo-700' :
-                            isReturn ? 'bg-rose-100 text-rose-700' :
-                            'bg-amber-100 text-amber-700'
-                          }`}>
-                            {isTake ? 'PENYERAHAN' : isReturn ? 'PEMBATALAN' : 'PENYESUAIAN FISIK'}
-                          </span>
-                          <span className="font-medium text-gray-900 text-sm">{log.guestName}</span>
-                          {log.ticketCode && (
-                            <span className="text-xs font-mono text-gray-400">({log.ticketCode})</span>
-                          )}
-                        </div>
-                        <p className="text-xs text-gray-600 mt-0.5">
-                          Souvenir: <strong>{log.souvenirName}</strong> • Jumlah: <strong>{log.quantity} pcs</strong>
-                        </p>
-                        {log.notes && (
-                          <p className="text-xs text-gray-500 mt-0.5 italic">{log.notes}</p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="text-right text-xs text-gray-400 flex-shrink-0 flex flex-col items-end gap-1">
-                      <div>{date ? date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</div>
-                      <div className="text-[10px]">{log.performedBy || 'Petugas'}</div>
-                      {!isLocked &&
-                        isTake &&
-                        log.batchScanId &&
-                        !souvenirStorage.getBatchScansMap(eventId)[log.batchScanId]?.voided && (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              const confirmed = await showConfirm(
-                                'Batalkan Scan QR Batch?',
-                                `Batalkan 1 pcs "${log.souvenirName}" (Batch ${log.batchCode || '-'}) dan kembalikan +1 stok?`
-                              );
-                              if (!confirmed) return;
-                              const res = souvenirStorage.undoBatchScan(
-                                eventId,
-                                log.batchScanId!,
-                                currentUserName || currentUserEmail || 'Admin'
-                              );
-                              if (res.undone) {
-                                setSouvenirs(souvenirStorage.getSouvenirs(eventId, guests));
-                                setLogs(souvenirStorage.getLogs(eventId));
-                                showAlert('Berhasil Dibatalkan', 'Stok sistem dipulihkan +1 pcs.', 'success');
-                              }
-                            }}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded cursor-pointer"
+                    return (
+                      <tr key={log.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">
+                          {idx + 1}
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-xs text-gray-500 tabular-nums">
+                          {date
+                            ? date.toLocaleTimeString('id-ID', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                              })
+                            : '-'}
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-xs font-semibold">
+                          <span
+                            className={
+                              isTake ? 'text-indigo-700' : isReturn ? 'text-rose-700' : 'text-amber-700'
+                            }
                           >
-                            <RotateCcw className="w-2.5 h-2.5" />
-                            <span>Batal (+1)</span>
-                          </button>
-                        )}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
+                            {isTake ? 'Penyerahan' : isReturn ? 'Pembatalan' : 'Penyesuaian Fisik'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 max-w-[260px]">
+                          <div className="text-sm font-medium text-gray-900 truncate">{log.guestName}</div>
+                          {(log.ticketCode || log.notes) && (
+                            <div className="text-xs text-gray-500 truncate mt-0.5" title={log.notes || log.ticketCode}>
+                              {[log.ticketCode, log.notes].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-xs text-gray-700 tabular-nums">
+                          <span className="font-medium text-gray-900">{log.souvenirName}</span>
+                          <span className="text-gray-400"> · </span>
+                          <span>{log.quantity} pcs</span>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-xs text-gray-600">
+                          {log.performedBy || 'Petugas'}
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                          {!isLocked &&
+                          isTake &&
+                          log.batchScanId &&
+                          !souvenirStorage.getBatchScansMap(eventId)[log.batchScanId]?.voided ? (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const confirmed = await showConfirm(
+                                  'Batalkan Scan QR Batch?',
+                                  `Batalkan 1 pcs "${log.souvenirName}" (Batch ${log.batchCode || '-'}) dan kembalikan +1 stok?`
+                                );
+                                if (!confirmed) return;
+                                const res = souvenirStorage.undoBatchScan(
+                                  eventId,
+                                  log.batchScanId!,
+                                  currentUserName || currentUserEmail || 'Admin'
+                                );
+                                if (res.undone) {
+                                  setSouvenirs(souvenirStorage.getSouvenirs(eventId, guests));
+                                  setLogs(souvenirStorage.getLogs(eventId));
+                                  showAlert('Berhasil Dibatalkan', 'Stok sistem dipulihkan +1 pcs.', 'success');
+                                }
+                              }}
+                              className="h-7.5 px-2.5 inline-flex items-center gap-1 text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg cursor-pointer"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>Batal (+1)</span>
+                            </button>
+                          ) : (
+                            <span className="text-xs text-gray-300">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

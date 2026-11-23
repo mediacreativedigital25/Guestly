@@ -273,6 +273,7 @@ export function getActivePageLabel(pathname: string): string {
   if (pathname.startsWith('/auth/login/admin/e-invitation-templates')) return 'Admin: Template E-Invite';
   if (pathname.startsWith('/auth/login/admin/greeting-templates')) return 'Admin: Template Layar Sapa';
   if (pathname.startsWith('/auth/login/services')) return 'Informasi Layanan';
+  if (pathname.startsWith('/auth/login/invoices/history')) return 'Riwayat Invoice';
   if (pathname.startsWith('/auth/login/invoices')) return 'Invoice Saya';
   if (pathname === '/auth/login' || pathname === '/auth/login/') return 'Dashboard Utama';
   return 'Panel Guestly';

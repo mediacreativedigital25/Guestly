@@ -38,6 +38,7 @@ import ServicesCatalog from './pages/services/ServicesCatalog';
 import MyServices from './pages/services/MyServices';
 import ServiceCheckout from './pages/services/ServiceCheckout';
 import MyInvoices from './pages/invoices/MyInvoices';
+import InvoiceHistory from './pages/invoices/InvoiceHistory';
 import PublicPayment from './pages/public/PublicPayment';
 import ActiveSessions from './pages/admin/ActiveSessions';
 import WeddingPlannerWorkspace from './pages/wedding-planner/WeddingPlannerWorkspace';
@@ -100,6 +101,7 @@ export default function App() {
             <Route path="services/checkout/:serviceId" element={<ServiceCheckout />} />
             <Route path="services/my" element={<MyServices />} />
             <Route path="invoices/my" element={<MyInvoices />} />
+            <Route path="invoices/history" element={<InvoiceHistory />} />
 
             <Route path="profile" element={<UserProfile />} />
             <Route path="admin/services" element={<AdminServices />} />

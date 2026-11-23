@@ -271,10 +271,17 @@ export default function RouteBreadcrumbs() {
         shortCode: 'Services',
         to: '/auth/login/services/dashboard',
       });
-      segments.push({
-        label: 'Invoice Saya',
-        shortCode: 'Invoices',
-      });
+      if (second === 'history') {
+        segments.push({
+          label: 'Riwayat Invoice',
+          shortCode: 'History',
+        });
+      } else {
+        segments.push({
+          label: 'Invoice Saya',
+          shortCode: 'Invoices',
+        });
+      }
     } else if (first === 'admin') {
       segments.push({
         label: 'Admin Panel',
@@ -284,7 +291,7 @@ export default function RouteBreadcrumbs() {
       if (second === 'services') {
         segments.push({ label: 'Kelola Layanan', shortCode: 'Services' });
       } else if (second === 'invoice') {
-        segments.push({ label: 'Kelola Invoice', shortCode: 'Invoice' });
+        segments.push({ label: 'Payment Receive', shortCode: 'Payment Receive' });
       } else if (second === 'settings') {
         segments.push({ label: 'Pengaturan Sistem', shortCode: 'Settings' });
       } else if (second === 'calendar') {

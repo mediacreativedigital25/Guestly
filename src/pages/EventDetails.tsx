@@ -2012,18 +2012,34 @@ export default function EventDetails() {
   const resolvedActiveDate = event ? resolveEventActiveUntil(event) : null;
   const daysLeft = event ? getDaysRemaining(event) : 0;
   const hideServiceCatalog = shouldHideServiceInfo(appUser);
+  const hasActiveGuestFilter =
+    searchTerm.trim() !== '' ||
+    rsvpFilter !== 'all' ||
+    attendanceFilter !== 'all' ||
+    waSendFilter !== 'all' ||
+    categoryFilter !== 'all' ||
+    invitationTypeFilter !== 'all';
+
+  const resetGuestFilters = () => {
+    setSearchTerm('');
+    setRsvpFilter('all');
+    setAttendanceFilter('all');
+    setWaSendFilter('all');
+    setCategoryFilter('all');
+    setInvitationTypeFilter('all');
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Expiry & Draft Lock Warning Banner */}
       {event && eventInactive && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50/90 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+        <div className="rounded-xl border border-rose-200 bg-rose-50/90 p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-rose-100 text-[#8C3A50] flex items-center justify-center shrink-0 mt-0.5">
-              <Lock className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-lg bg-rose-100 text-[#8C3A50] flex items-center justify-center shrink-0 mt-0.5">
+              <Lock className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-[#6E293C]">
+              <h3 className="text-sm font-semibold text-[#6E293C]">
                 {eventExpired
                   ? 'Masa Aktif Acara Berakhir — Mode Baca Saja (Status Draft)'
                   : 'Acara Berstatus Draft — Seluruh Fitur Operasional Dikunci'}
@@ -2043,13 +2059,13 @@ export default function EventDetails() {
               {!hideServiceCatalog ? (
                 <Link
                   to={`/auth/login/services/catalog?renewEvent=${eventId}`}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#8C3A50] hover:bg-[#722B3E] text-white text-xs font-bold shadow-xs transition-colors"
+                  className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded-lg bg-[#8C3A50] hover:bg-[#722B3E] text-white text-xs sm:text-sm font-medium shadow-xs transition-colors whitespace-nowrap"
                 >
                   <CreditCard className="w-4 h-4" />
                   <span>Top-Up Paket / Perpanjang</span>
                 </Link>
               ) : (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-rose-200 text-xs font-semibold text-[#8C3A50]">
+                <span className="text-xs font-medium text-[#8C3A50]">
                   Hubungi Partner/Admin untuk perpanjangan
                 </span>
               )}
@@ -2063,7 +2079,7 @@ export default function EventDetails() {
         <div className="rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 text-amber-900">
             <Clock className="w-4 h-4 text-amber-600 shrink-0" />
-            <p className="text-xs font-medium">
+            <p className="text-xs font-medium tabular-nums">
               Masa aktif acara tersisa <strong>{daysLeft} hari</strong>{' '}
               {resolvedActiveDate ? `(berakhir ${format(resolvedActiveDate, 'dd MMM yyyy')})` : ''}. Setelah habis, status otomatis berubah menjadi <strong>Draft</strong>.
             </p>
@@ -2071,7 +2087,7 @@ export default function EventDetails() {
           {!hideServiceCatalog && (
             <Link
               to={`/auth/login/services/catalog?renewEvent=${eventId}`}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shrink-0 transition-colors"
+              className="h-8.5 px-3 inline-flex items-center gap-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium shrink-0 transition-colors whitespace-nowrap"
             >
               <CreditCard className="w-3.5 h-3.5" />
               <span>Perpanjang Masa Aktif</span>
@@ -2080,533 +2096,487 @@ export default function EventDetails() {
         </div>
       )}
 
-      {/* Streamlined Modern Event Hero Card */}
-      <div className="bg-white rounded-xl shadow-2xs border border-slate-200">
-        <div className="p-4 sm:p-5">
-          <div className="flex flex-col lg:flex-row items-start justify-between gap-4">
-            {/* Left Column: Photo + Event Main Info */}
-            <div className="flex items-start gap-3.5 sm:gap-4 min-w-0 flex-1">
-              {/* Event Photo / Thumbnail with quick change overlay */}
-              <div className="relative group shrink-0">
-                {event?.thumbnailUrl ? (
-                  <img
-                    src={resolveMediaUrl(event.thumbnailUrl)}
-                    alt={event.title}
-                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border border-slate-200 bg-slate-50 shadow-xs"
-                  />
-                ) : (
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-500 shadow-xs">
-                    <ImageIcon className="w-7 h-7 sm:w-8 sm:h-8" />
-                  </div>
-                )}
-                {!isStaff && !isEventLocked && (
-                  <button
-                    type="button"
-                    onClick={openThumbnailModal}
-                    className="absolute inset-0 bg-black/40 hover:bg-black/60 text-white rounded-xl flex flex-col items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-[10px] font-semibold"
-                    title="Ubah Foto Mempelai / Thumbnail"
-                  >
-                    <ImageIcon className="w-3.5 h-3.5" />
-                    <span>Ubah</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Title & Core Details */}
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-lg sm:text-xl font-bold text-slate-900 truncate" title={event?.title}>
-                    {event?.title || 'Detail Acara'}
-                  </h1>
-
-                  {/* Status Badge & Dropdown (Manual Status Change: Super Admin ONLY) */}
-                  {event && (
-                    <div className="inline-flex items-center gap-1.5">
-                      <span
-                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${
-                          event.status === 'published'
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                            : event.status === 'completed'
-                            ? 'bg-slate-100 text-slate-700 border border-slate-200'
-                            : 'bg-amber-50 text-amber-700 border border-amber-200'
-                        }`}
-                        title={
-                          !isSuperAdmin
-                            ? 'Status acara dikelola otomatis melalui Top-Up Paket (perubahan manual hanya untuk Super Admin)'
-                            : undefined
-                        }
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            event.status === 'published'
-                              ? 'bg-emerald-500'
-                              : event.status === 'completed'
-                              ? 'bg-slate-400'
-                              : 'bg-amber-500'
-                          }`}
-                        />
-                        {event.status}
-                        {isEventLocked && <Lock className="w-3 h-3 ml-0.5 text-amber-600" />}
-                      </span>
-
-                      {isSuperAdmin && (
-                        <select
-                          value={event.status}
-                          onChange={(e) => handleStatusChange(e.target.value)}
-                          className="text-xs border border-slate-200 rounded-md py-0.5 px-2 bg-slate-50 text-slate-700 focus:ring-indigo-500 focus:border-indigo-500 cursor-pointer"
-                          title="Ubah Status Acara (Khusus Super Admin)"
-                        >
-                          <option value="draft">Draft</option>
-                          <option value="published">Published</option>
-                          <option value="completed">Completed</option>
-                        </select>
-                      )}
-                    </div>
-                  )}
-
-                  {isStaff && (
-                    <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                      Petugas: <strong className="text-indigo-600">{currentOperator}</strong>
-                    </span>
-                  )}
+      {/* Event Context Header Card (Unified Create Event Style) */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-3.5 sm:p-4">
+        <div className="flex flex-col lg:flex-row items-start justify-between gap-4">
+          {/* Left Column: Photo + Event Main Info */}
+          <div className="flex items-start gap-3.5 min-w-0 flex-1">
+            {/* Event Photo / Thumbnail with quick change overlay */}
+            <div className="relative group shrink-0">
+              {event?.thumbnailUrl ? (
+                <img
+                  src={resolveMediaUrl(event.thumbnailUrl)}
+                  alt={event.title}
+                  referrerPolicy="no-referrer"
+                  className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl object-cover border border-gray-200 bg-gray-50"
+                />
+              ) : (
+                <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-gray-50 border border-dashed border-gray-300 flex items-center justify-center text-gray-400">
+                  <ImageIcon className="w-6 h-6" />
                 </div>
-
-                {/* Sub-row with Event Date, Time, and Location */}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 mt-1.5">
-                  <div className="flex items-center gap-1 text-slate-700">
-                    <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                    <span>
-                      {event?.date && parseFirestoreDate(event.date)
-                        ? format(parseFirestoreDate(event.date)!, 'dd MMMM yyyy')
-                        : '-'}
-                    </span>
-                    {event?.time && (
-                      <span className="text-slate-500 font-medium"> • {event.time}</span>
-                    )}
-                  </div>
-
-                  {event?.location && (
-                    <>
-                      <span className="text-slate-300 hidden sm:inline">•</span>
-                      <div className="flex items-center gap-1 text-slate-700 truncate max-w-xs sm:max-w-md">
-                        <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                        <span className="truncate">{event.location}</span>
-                      </div>
-                    </>
-                  )}
-
-                  {resolvedActiveDate && (
-                    <>
-                      <span className="text-slate-300 hidden md:inline">•</span>
-                      <div className={`flex items-center gap-1 text-[11px] font-medium ${eventExpired ? 'text-rose-600 font-semibold' : daysLeft <= 7 ? 'text-amber-600 font-semibold' : 'text-slate-500'}`}>
-                        <Clock className="w-3 h-3 shrink-0" />
-                        <span>
-                          {eventExpired ? 'Kedaluwarsa sejak ' : 'Aktif s/d '}
-                          {format(resolvedActiveDate, 'dd MMM yyyy')}
-                          {!eventExpired && ` (${daysLeft} hr lagi)`}
-                        </span>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {/* Quick Chips: Kategori & Sesi Acara (Compact inline summary) */}
-                <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
-                  {event?.guestCategories && event.guestCategories.length > 0 && (
-                    <div className="flex items-center gap-1 flex-wrap">
-                      <span className="text-[11px] text-slate-400 font-medium">Kategori:</span>
-                      {event.guestCategories.map((cat) => (
-                        <span
-                          key={cat}
-                          className="px-2 py-0.5 bg-indigo-50/80 text-indigo-700 border border-indigo-100 text-[11px] font-medium rounded-md"
-                        >
-                          {cat}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {event?.sessions && event.sessions.length > 0 && (
-                    <div className="flex items-center gap-1 flex-wrap ml-0 sm:ml-2">
-                      <span className="text-[11px] text-slate-400 font-medium">Sesi:</span>
-                      {event.sessions.map((ses) => (
-                        <span
-                          key={ses}
-                          className="px-2 py-0.5 bg-emerald-50/80 text-emerald-700 border border-emerald-100 text-[11px] font-medium rounded-md"
-                        >
-                          {ses}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Toggle More Config (Tipe Undangan, Frame Overlay, dll.) */}
-                  <button
-                    type="button"
-                    onClick={() => setIsConfigExpanded(!isConfigExpanded)}
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded transition-colors cursor-pointer ml-1"
-                    title={isConfigExpanded ? 'Sembunyikan detail konfigurasi' : 'Lihat tipe undangan & frame'}
-                  >
-                    <span>{isConfigExpanded ? 'Tutup Konfigurasi' : 'Konfigurasi Lengkap'}</span>
-                    {isConfigExpanded ? (
-                      <ChevronUp className="w-3 h-3" />
-                    ) : (
-                      <ChevronDown className="w-3 h-3" />
-                    )}
-                  </button>
-                </div>
-              </div>
+              )}
+              {!isStaff && !isEventLocked && (
+                <button
+                  type="button"
+                  onClick={openThumbnailModal}
+                  className="absolute inset-0 bg-black/45 hover:bg-black/60 text-white rounded-xl flex flex-col items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-[10px] font-semibold"
+                  title="Ubah Foto Mempelai / Thumbnail"
+                >
+                  <ImageIcon className="w-3.5 h-3.5" />
+                  <span>Ubah</span>
+                </button>
+              )}
             </div>
 
-            {/* Right Column: Main Actions Bar */}
-            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-start lg:justify-end shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100">
-              {eventInactive ? (
-                <>
-                  <button
-                    type="button"
-                    disabled
-                    className="flex items-center gap-2 px-3.5 py-2 bg-slate-100 text-slate-400 border border-slate-200 rounded-lg font-semibold text-xs sm:text-sm cursor-not-allowed"
-                    title="Scanner dikunci saat acara berstatus Draft atau Masa Aktif berakhir"
-                  >
-                    <Lock className="w-4 h-4" />
-                    <span>Scanner Terkunci</span>
-                  </button>
-                  {!isStaff && !hideServiceCatalog && (
-                    <Link
-                      to={`/auth/login/services/catalog?renewEvent=${eventId}`}
-                      className="flex items-center gap-1.5 px-3.5 py-2 bg-[#8C3A50] hover:bg-[#722B3E] text-white rounded-lg font-bold text-xs sm:text-sm shadow-xs transition-colors"
-                      title="Perpanjang masa aktif acara melalui Katalog Paket & Add-on"
-                    >
-                      <CreditCard className="w-4 h-4" />
-                      <span>Top-Up Paket</span>
-                    </Link>
-                  )}
-                </>
-              ) : (
-                <>
-                  {/* Primary Action Button: Buka Scanner */}
-                  <Link
-                    to={
-                      isStaffSouvenirOnly
-                        ? `/auth/login/events/${eventId}/scan?mode=souvenir`
-                        : isStaffCheckinOnly
-                        ? `/auth/login/events/${eventId}/scan?mode=checkin`
-                        : `/auth/login/events/${eventId}/scan`
-                    }
-                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs sm:text-sm shadow-xs transition-colors"
-                    title="Buka sistem scanner QR tiket & POS penukaran souvenir"
-                  >
-                    <ScanLine className="w-4 h-4" />
-                    <span>
-                      {isStaffSouvenirOnly
-                        ? 'Scanner Souvenir'
-                        : isStaffCheckinOnly
-                        ? 'Scanner Kehadiran'
-                        : 'Buka Scanner'}
-                    </span>
-                  </Link>
+            {/* Title & Core Details */}
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-base sm:text-lg font-semibold text-gray-900 truncate" title={event?.title}>
+                  {event?.title || 'Detail Acara'}
+                </h1>
 
-                  {/* E-Invitation & RSVP View */}
-                  {!isStaff && guests.length > 0 && (
-                    <Link
-                      to={`/rsvp/${eventId}/${guests[0].ticketCode}`}
-                      className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold text-xs sm:text-sm transition-colors shadow-2xs"
-                      title="Lihat tampilan Kartu E-Invitation + Form RSVP & Ucapan Tamu"
-                    >
-                      <QrCode className="w-4 h-4" />
-                      <span>E-Invitation</span>
-                    </Link>
-                  )}
-
-                  {/* Layar Sapa TV */}
-                  {!isStaffSouvenirOnly && (
-                    <Link
-                      to={`/events/${eventId}/greeting`}
-                      target="_blank"
-                      className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-medium text-xs sm:text-sm transition-colors shadow-2xs"
-                      title="Buka Layar Sapa Tamu untuk TV/Monitor"
-                    >
-                      <Monitor className="w-4 h-4 text-indigo-600" />
-                      <span>Layar Sapa</span>
-                    </Link>
-                  )}
-
-                  {/* Pengingat Grup WA Tim (H-3 & H-1) untuk Vendor / Admin / Super Admin */}
-                  {appUser && ['superadmin', 'owner', 'partner', 'admin'].includes(appUser.role) && (
-                    <button
-                      type="button"
-                      onClick={() => setIsGroupReminderModalOpen(true)}
-                      className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg font-medium text-xs sm:text-sm transition-colors shadow-2xs cursor-pointer"
-                      title="Jadwalkan / Kirim Pengingat Grup WhatsApp Tim (H-3, H-1 & Hari H)"
-                    >
-                      <MessageCircle className="w-4 h-4 text-emerald-600" />
-                      <span>Grup Tim</span>
-                    </button>
-                  )}
-                </>
-              )}
-
-              {/* Options Dropdown Menu for Secondary Actions */}
-              {!isStaff && (
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (isEventLocked) {
-                        showEventLockedAlert();
-                        return;
+                {event && (
+                  <div className="inline-flex items-center gap-2">
+                    <span
+                      className={`text-xs font-semibold capitalize inline-flex items-center gap-1 ${
+                        event.status === 'published'
+                          ? 'text-emerald-700'
+                          : event.status === 'completed'
+                          ? 'text-gray-600'
+                          : 'text-amber-700'
+                      }`}
+                      title={
+                        !isSuperAdmin
+                          ? 'Status acara dikelola otomatis melalui Top-Up Paket (perubahan manual hanya untuk Super Admin)'
+                          : undefined
                       }
-                      setIsOptionsDropdownOpen(!isOptionsDropdownOpen);
-                    }}
-                    disabled={isEventLocked}
-                    className={`h-8.5 sm:h-9 flex items-center gap-1 px-2.5 text-xs font-semibold rounded-lg transition-colors shadow-2xs ${
-                      isEventLocked
-                        ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                        : 'text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 cursor-pointer'
-                    }`}
-                    title={
-                      isEventLocked
-                        ? 'Menu Lainnya dikunci hingga dilakukan Top-Up Paket'
-                        : 'Opsi & Alat Acara Lainnya'
-                    }
-                  >
-                    {isEventLocked ? (
-                      <Lock className="w-3.5 h-3.5 text-slate-400" />
-                    ) : (
-                      <MoreHorizontal className="w-4 h-4 text-slate-600" />
+                    >
+                      <span>·</span>
+                      <span>{event.status}</span>
+                      {isEventLocked && <Lock className="w-3 h-3 text-amber-600" />}
+                    </span>
+
+                    {isSuperAdmin && (
+                      <select
+                        value={event.status}
+                        onChange={(e) => handleStatusChange(e.target.value)}
+                        className="h-7 text-xs border border-gray-200 rounded-lg px-2 bg-gray-50 text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+                        title="Ubah Status Acara (Khusus Super Admin)"
+                      >
+                        <option value="draft">Draft</option>
+                        <option value="published">Published</option>
+                        <option value="completed">Completed</option>
+                      </select>
                     )}
-                    <span className="hidden sm:inline">Lainnya</span>
-                    <ChevronDown className="w-3 h-3 text-slate-400" />
-                  </button>
+                  </div>
+                )}
 
-                  {isOptionsDropdownOpen && !isEventLocked && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-20"
-                        onClick={() => setIsOptionsDropdownOpen(false)}
-                      />
-                      <div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50 text-xs animate-in fade-in zoom-in-95 duration-100">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsEmbedModalOpen(true);
-                            setIsOptionsDropdownOpen(false);
-                          }}
-                          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-slate-700 hover:bg-slate-50 hover:text-indigo-600 cursor-pointer"
-                        >
-                          <Code className="w-4 h-4 text-slate-500" />
-                          <span>Embed Kode Widget</span>
-                        </button>
+                {isStaff && (
+                  <span className="text-xs text-gray-500">
+                    · Petugas: <strong className="font-semibold text-indigo-600">{currentOperator}</strong>
+                  </span>
+                )}
+              </div>
 
-                        <Link
-                          to={`/public/rsvp/${eventId}`}
-                          onClick={() => setIsOptionsDropdownOpen(false)}
-                          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-slate-700 hover:bg-slate-50 hover:text-indigo-600"
-                        >
-                          <FileText className="w-4 h-4 text-pink-500" />
-                          <span>Form RSVP Publik</span>
-                        </Link>
+              {/* Clean Unboxed Metadata Row */}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 mt-1 tabular-nums">
+                <span className="inline-flex items-center gap-1 text-gray-700 font-medium">
+                  <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                  <span>
+                    {event?.date && parseFirestoreDate(event.date)
+                      ? format(parseFirestoreDate(event.date)!, 'dd MMMM yyyy')
+                      : '-'}
+                  </span>
+                  {event?.time && <span className="text-gray-500 font-normal">({event.time})</span>}
+                </span>
 
-                        {appUser?.role !== 'client' && (
-                          <Link
-                            to={`/auth/login/events/${eventId}/send-access`}
-                            onClick={() => setIsOptionsDropdownOpen(false)}
-                            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-slate-700 hover:bg-rose-50 hover:text-[#8C3A50]"
-                          >
-                            <Send className="w-4 h-4 text-[#8C3A50]" />
-                            <span>Kirim Akses ke Client</span>
-                          </Link>
-                        )}
+                {event?.location && (
+                  <>
+                    <span aria-hidden="true" className="text-gray-300">·</span>
+                    <span className="inline-flex items-center gap-1 text-gray-600 truncate max-w-xs sm:max-w-md">
+                      <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                      <span className="truncate">{event.location}</span>
+                    </span>
+                  </>
+                )}
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            openThumbnailModal();
-                            setIsOptionsDropdownOpen(false);
-                          }}
-                          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-slate-700 hover:bg-slate-50 hover:text-indigo-600 cursor-pointer border-t border-slate-100"
-                        >
-                          <ImageIcon className="w-4 h-4 text-indigo-500" />
-                          <span>Atur Foto Mempelai</span>
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
+                {resolvedActiveDate && (
+                  <>
+                    <span aria-hidden="true" className="text-gray-300">·</span>
+                    <span
+                      className={`inline-flex items-center gap-1 ${
+                        eventExpired
+                          ? 'text-rose-600 font-semibold'
+                          : daysLeft <= 7
+                          ? 'text-amber-600 font-semibold'
+                          : 'text-gray-500'
+                      }`}
+                    >
+                      <Clock className="w-3.5 h-3.5 shrink-0" />
+                      <span>
+                        {eventExpired ? 'Kedaluwarsa sejak ' : 'Aktif s/d '}
+                        {format(resolvedActiveDate, 'dd MMM yyyy')}
+                        {!eventExpired && ` (${daysLeft} hr)`}
+                      </span>
+                    </span>
+                  </>
+                )}
+              </div>
+
+              {/* Compact Unboxed Configuration Summary */}
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-gray-500 mt-1.5">
+                {event?.guestCategories && event.guestCategories.length > 0 && (
+                  <span>
+                    <span className="text-gray-400">Kategori:</span>{' '}
+                    <span className="text-gray-700 font-medium">{event.guestCategories.join(', ')}</span>
+                  </span>
+                )}
+
+                {event?.sessions && event.sessions.length > 0 && (
+                  <>
+                    {event?.guestCategories && event.guestCategories.length > 0 && (
+                      <span aria-hidden="true" className="text-gray-300">·</span>
+                    )}
+                    <span>
+                      <span className="text-gray-400">Sesi:</span>{' '}
+                      <span className="text-gray-700 font-medium">{event.sessions.join(', ')}</span>
+                    </span>
+                  </>
+                )}
+
+                <span aria-hidden="true" className="text-gray-300">·</span>
+                <button
+                  type="button"
+                  onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 transition-colors cursor-pointer"
+                  title={isConfigExpanded ? 'Sembunyikan detail konfigurasi' : 'Lihat tipe undangan & frame'}
+                >
+                  <span>{isConfigExpanded ? 'Sembunyikan Konfigurasi' : 'Konfigurasi Lengkap'}</span>
+                  {isConfigExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Expanded Config Details (Collapsible Drawer) */}
-          {isConfigExpanded && (
-            <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs animate-in fade-in duration-150">
+          {/* Right Column: Clean Event Operational Actions */}
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-start lg:justify-end shrink-0 pt-2.5 lg:pt-0 border-t lg:border-t-0 border-gray-100">
+            {eventInactive ? (
+              <>
+                <button
+                  type="button"
+                  disabled
+                  className="h-9 px-3.5 inline-flex items-center gap-1.5 bg-gray-100 text-gray-400 border border-gray-200 rounded-lg font-medium text-xs sm:text-sm cursor-not-allowed whitespace-nowrap"
+                  title="Scanner dikunci saat acara berstatus Draft atau Masa Aktif berakhir"
+                >
+                  <Lock className="w-4 h-4" />
+                  <span>Scanner Terkunci</span>
+                </button>
+                {!isStaff && !hideServiceCatalog && (
+                  <Link
+                    to={`/auth/login/services/catalog?renewEvent=${eventId}`}
+                    className="h-9 px-3.5 inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium text-xs sm:text-sm shadow-xs transition-colors whitespace-nowrap"
+                    title="Perpanjang masa aktif acara melalui Katalog Paket & Add-on"
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    <span>Top-Up Paket</span>
+                  </Link>
+                )}
+              </>
+            ) : (
+              <>
+                <Link
+                  to={
+                    isStaffSouvenirOnly
+                      ? `/auth/login/events/${eventId}/scan?mode=souvenir`
+                      : isStaffCheckinOnly
+                      ? `/auth/login/events/${eventId}/scan?mode=checkin`
+                      : `/auth/login/events/${eventId}/scan`
+                  }
+                  className="h-9 px-3.5 inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium text-xs sm:text-sm shadow-xs transition-colors whitespace-nowrap"
+                  title="Buka sistem scanner QR tiket & POS penukaran souvenir"
+                >
+                  <ScanLine className="w-4 h-4" />
+                  <span>
+                    {isStaffSouvenirOnly
+                      ? 'Scanner Souvenir'
+                      : isStaffCheckinOnly
+                      ? 'Scanner Kehadiran'
+                      : 'Buka Scanner'}
+                  </span>
+                </Link>
+
+                {!isStaff && guests.length > 0 && (
+                  <Link
+                    to={`/rsvp/${eventId}/${guests[0].ticketCode}`}
+                    className="h-9 px-3 inline-flex items-center gap-1.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-lg font-medium text-xs sm:text-sm transition-colors whitespace-nowrap"
+                    title="Lihat tampilan Kartu E-Invitation + Form RSVP & Ucapan Tamu"
+                  >
+                    <QrCode className="w-4 h-4 text-emerald-600" />
+                    <span>E-Invitation</span>
+                  </Link>
+                )}
+
+                {!isStaffSouvenirOnly && (
+                  <Link
+                    to={`/events/${eventId}/greeting`}
+                    target="_blank"
+                    className="h-9 px-3 inline-flex items-center gap-1.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-lg font-medium text-xs sm:text-sm transition-colors whitespace-nowrap"
+                    title="Buka Layar Sapa Tamu untuk TV/Monitor"
+                  >
+                    <Monitor className="w-4 h-4 text-indigo-600" />
+                    <span>Layar Sapa</span>
+                  </Link>
+                )}
+
+                {appUser && ['superadmin', 'owner', 'partner', 'admin'].includes(appUser.role) && (
+                  <button
+                    type="button"
+                    onClick={() => setIsGroupReminderModalOpen(true)}
+                    className="h-9 px-3 inline-flex items-center gap-1.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-lg font-medium text-xs sm:text-sm transition-colors cursor-pointer whitespace-nowrap"
+                    title="Jadwalkan / Kirim Pengingat Grup WhatsApp Tim (H-3, H-1 & Hari H)"
+                  >
+                    <MessageCircle className="w-4 h-4 text-emerald-600" />
+                    <span>Grup Tim</span>
+                  </button>
+                )}
+              </>
+            )}
+
+            {/* Options Dropdown Menu for Secondary Actions */}
+            {!isStaff && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isEventLocked) {
+                      showEventLockedAlert();
+                      return;
+                    }
+                    setIsOptionsDropdownOpen(!isOptionsDropdownOpen);
+                  }}
+                  disabled={isEventLocked}
+                  className={`h-9 px-2.5 inline-flex items-center gap-1 text-xs sm:text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
+                    isEventLocked
+                      ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                      : 'text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 cursor-pointer'
+                  }`}
+                  title={
+                    isEventLocked
+                      ? 'Menu Lainnya dikunci hingga dilakukan Top-Up Paket'
+                      : 'Opsi & Alat Acara Lainnya'
+                  }
+                >
+                  {isEventLocked ? (
+                    <Lock className="w-3.5 h-3.5 text-gray-400" />
+                  ) : (
+                    <MoreHorizontal className="w-4 h-4 text-gray-600" />
+                  )}
+                  <span className="hidden sm:inline">Lainnya</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                </button>
+
+                {isOptionsDropdownOpen && !isEventLocked && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-20"
+                      onClick={() => setIsOptionsDropdownOpen(false)}
+                    />
+                    <div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-gray-200 py-1.5 z-50 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEmbedModalOpen(true);
+                          setIsOptionsDropdownOpen(false);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-gray-700 hover:bg-gray-50 hover:text-indigo-600 cursor-pointer"
+                      >
+                        <Code className="w-4 h-4 text-gray-500" />
+                        <span>Embed Kode Widget</span>
+                      </button>
+
+                      <Link
+                        to={`/public/rsvp/${eventId}`}
+                        onClick={() => setIsOptionsDropdownOpen(false)}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-gray-700 hover:bg-gray-50 hover:text-indigo-600"
+                      >
+                        <FileText className="w-4 h-4 text-pink-500" />
+                        <span>Form RSVP Publik</span>
+                      </Link>
+
+                      {appUser?.role !== 'client' && (
+                        <Link
+                          to={`/auth/login/events/${eventId}/send-access`}
+                          onClick={() => setIsOptionsDropdownOpen(false)}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-gray-700 hover:bg-rose-50 hover:text-[#8C3A50]"
+                        >
+                          <Send className="w-4 h-4 text-[#8C3A50]" />
+                          <span>Kirim Akses ke Client</span>
+                        </Link>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          openThumbnailModal();
+                          setIsOptionsDropdownOpen(false);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-gray-700 hover:bg-gray-50 hover:text-indigo-600 cursor-pointer border-t border-gray-100"
+                      >
+                        <ImageIcon className="w-4 h-4 text-indigo-500" />
+                        <span>Atur Foto Mempelai</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Expanded Config Details (Collapsible Drawer) */}
+        {isConfigExpanded && (
+          <div className="mt-3.5 pt-3.5 border-t border-gray-100 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div>
+              <h4 className="font-semibold text-gray-700 mb-1">Tipe Undangan Disediakan</h4>
+              <p className="text-gray-600">{availableInvitationTypes.join(' · ')}</p>
+            </div>
+
+            {event?.frameOverlayUrl && (
               <div>
-                <h4 className="font-semibold text-slate-700 mb-1.5">Tipe Undangan Disediakan</h4>
-                <div className="flex flex-wrap gap-1.5">
-                  {availableInvitationTypes.map((invType) => (
-                    <span
-                      key={invType}
-                      className="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 font-medium rounded-md text-[11px]"
-                    >
-                      {invType}
-                    </span>
-                  ))}
+                <h4 className="font-semibold text-gray-700 mb-1.5">Frame / Overlay Layar Sapa</h4>
+                <div className="w-36 h-20 bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
+                  <img
+                    src={resolveMediaUrl(event.frameOverlayUrl)}
+                    alt="Frame"
+                    referrerPolicy="no-referrer"
+                    className="object-cover w-full h-full"
+                  />
                 </div>
               </div>
-
-              {event?.frameOverlayUrl && (
-                <div>
-                  <h4 className="font-semibold text-slate-700 mb-1.5">Frame / Overlay Layar Sapa</h4>
-                  <div className="w-36 h-20 bg-slate-100 border border-slate-200 rounded-md overflow-hidden relative group">
-                    <img
-                      src={event.frameOverlayUrl}
-                      alt="Frame"
-                      className="object-cover w-full h-full opacity-70 group-hover:opacity-100 transition-opacity"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Live Real-Time Attendance, Pre-Check-In RSVP Pax (For Service Providers) & Souvenir Summary Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-3.5 mt-6">
+      {/* Standardized 5-Card KPI Strip (Clean Flat Cards, Tabular Figures) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {/* Card 1: Total Undangan */}
-        <div className="bg-white p-4 rounded-lg border border-slate-200 border-l-4 border-l-slate-500 shadow-2xs flex flex-col justify-between">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold text-slate-600 whitespace-nowrap">Total Undangan</p>
-            <div className="w-8 h-8 rounded-md bg-slate-100 flex items-center justify-center text-slate-600 shrink-0">
-              <Users className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-2.5 flex items-baseline gap-1.5">
-            <p className="text-2xl font-bold text-slate-900 font-mono tabular-nums leading-none">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-3.5 flex flex-col justify-between">
+          <p className="text-xs font-medium text-gray-500">Total Undangan</p>
+          <div className="mt-1.5 flex items-baseline gap-1.5">
+            <p className="text-xl sm:text-2xl font-bold text-gray-900 tabular-nums leading-none">
               {guests.length.toLocaleString('id-ID')}
             </p>
-            <span className="text-xs font-medium text-slate-500">undangan</span>
+            <span className="text-xs text-gray-400">undangan</span>
           </div>
-          <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
-            <span className="text-slate-500">Total Alokasi:</span>
-            <span className="font-mono tabular-nums font-semibold text-indigo-600">
-              {guests.reduce((acc, g) => acc + (g.rsvpStatus === 'declined' ? 0 : Math.max(1, Number(g.pax) || 1)), 0).toLocaleString('id-ID')} Orang
+          <div className="mt-2.5 pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-500 tabular-nums">
+            <span>Total alokasi</span>
+            <span className="font-semibold text-indigo-600">
+              {guests
+                .reduce((acc, g) => acc + (g.rsvpStatus === 'declined' ? 0 : Math.max(1, Number(g.pax) || 1)), 0)
+                .toLocaleString('id-ID')}{' '}
+              Org
             </span>
           </div>
         </div>
 
-        {/* Card 2: Estimasi Datang (RSVP Pra Check-In) */}
-        <div className="bg-indigo-50/35 p-4 rounded-lg border border-indigo-200 border-l-4 border-l-indigo-600 shadow-2xs flex flex-col justify-between">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-bold text-indigo-900 whitespace-nowrap">Estimasi Hadir (RSVP)</p>
-            <span className="px-2 py-0.5 text-[10px] font-semibold bg-indigo-100 text-indigo-800 rounded whitespace-nowrap shrink-0">
-              Pra Check-In
-            </span>
+        {/* Card 2: Estimasi Hadir (RSVP) */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-3.5 flex flex-col justify-between">
+          <div className="flex items-center justify-between gap-1">
+            <p className="text-xs font-medium text-gray-500">Estimasi Hadir (RSVP)</p>
+            <span className="text-[11px] text-indigo-600 font-medium">Pra Check-In</span>
           </div>
-          <div className="mt-2.5 flex items-baseline gap-1.5">
-            <p className="text-2xl font-bold text-indigo-700 font-mono tabular-nums leading-none">
+          <div className="mt-1.5 flex items-baseline gap-1.5">
+            <p className="text-xl sm:text-2xl font-bold text-indigo-600 tabular-nums leading-none">
               {guests
-                .filter(g => g.rsvpStatus === 'attending')
+                .filter((g) => g.rsvpStatus === 'attending')
                 .reduce((acc, g) => acc + Math.max(1, Number(g.pax) || 1), 0)
                 .toLocaleString('id-ID')}
             </p>
-            <span className="text-xs font-semibold text-indigo-700">Orang (Pax)</span>
+            <span className="text-xs text-gray-500">Orang</span>
           </div>
-          <div className="mt-3 pt-2.5 border-t border-indigo-100/80 flex items-center justify-between text-[11px] font-mono tabular-nums">
-            <span className="text-indigo-900 font-medium">
-              {guests.filter(g => g.rsvpStatus === 'attending').length} hadir
+          <div className="mt-2.5 pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] tabular-nums">
+            <span className="text-gray-600 font-medium">
+              {guests.filter((g) => g.rsvpStatus === 'attending').length} hadir
             </span>
             <span className="text-amber-700 font-medium">
-              {guests.filter(g => !g.rsvpStatus || g.rsvpStatus === 'pending').length} belum respon
+              {guests.filter((g) => !g.rsvpStatus || g.rsvpStatus === 'pending').length} pending
             </span>
           </div>
         </div>
 
-        {/* Card 3: Sudah Check-In (Live) */}
-        <div className="bg-white p-4 rounded-lg border border-emerald-200 border-l-4 border-l-emerald-500 shadow-2xs flex flex-col justify-between">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
-              <p className="text-xs font-semibold text-emerald-800 whitespace-nowrap">Sudah Check-In</p>
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-[10px] font-semibold text-emerald-700">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                Live
-              </span>
-            </div>
-            <div className="w-8 h-8 rounded-md bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
-              <CheckCircle className="w-4 h-4" />
-            </div>
+        {/* Card 3: Sudah Check-In */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-3.5 flex flex-col justify-between">
+          <div className="flex items-center justify-between gap-1">
+            <p className="text-xs font-medium text-gray-500">Sudah Check-In</p>
+            <span className="text-[11px] font-medium text-emerald-600">Realtime</span>
           </div>
-          <div className="mt-2.5 flex items-baseline gap-1.5">
-            <p className="text-2xl font-bold text-emerald-700 font-mono tabular-nums leading-none">
-              {guests.filter(g => g.attended).length.toLocaleString('id-ID')}
+          <div className="mt-1.5 flex items-baseline gap-1.5">
+            <p className="text-xl sm:text-2xl font-bold text-emerald-700 tabular-nums leading-none">
+              {guests.filter((g) => g.attended).length.toLocaleString('id-ID')}
             </p>
-            <span className="text-xs font-semibold text-emerald-700 font-mono tabular-nums">
-              ({guests.filter(g => g.attended).reduce((acc, g) => acc + Math.max(1, Number(g.pax) || 1), 0).toLocaleString('id-ID')} Orang)
+            <span className="text-xs text-gray-500 tabular-nums">
+              ({guests
+                .filter((g) => g.attended)
+                .reduce((acc, g) => acc + Math.max(1, Number(g.pax) || 1), 0)
+                .toLocaleString('id-ID')}{' '}
+              Org)
             </span>
           </div>
-          <div className="mt-3 pt-2.5 border-t border-emerald-100/70 flex items-center justify-between text-[11px]">
-            <span className="text-emerald-700/90">Realisasi hadir:</span>
-            <span className="font-mono tabular-nums font-semibold text-emerald-700">
-              {guests.length > 0 ? Math.round((guests.filter(g => g.attended).length / guests.length) * 100) : 0}%
+          <div className="mt-2.5 pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-500 tabular-nums">
+            <span>Realisasi hadir</span>
+            <span className="font-semibold text-emerald-700">
+              {guests.length > 0 ? Math.round((guests.filter((g) => g.attended).length / guests.length) * 100) : 0}%
             </span>
           </div>
         </div>
 
         {/* Card 4: Belum Masuk Gate */}
-        <div className="bg-white p-4 rounded-lg border border-amber-200 border-l-4 border-l-amber-500 shadow-2xs flex flex-col justify-between">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold text-amber-800 whitespace-nowrap">Belum Masuk Gate</p>
-            <div className="w-8 h-8 rounded-md bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
-              <XCircle className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-2.5 flex items-baseline gap-1.5">
-            <p className="text-2xl font-bold text-amber-700 font-mono tabular-nums leading-none">
-              {guests.filter(g => !g.attended).length.toLocaleString('id-ID')}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-3.5 flex flex-col justify-between">
+          <p className="text-xs font-medium text-gray-500">Belum Masuk Gate</p>
+          <div className="mt-1.5 flex items-baseline gap-1.5">
+            <p className="text-xl sm:text-2xl font-bold text-amber-700 tabular-nums leading-none">
+              {guests.filter((g) => !g.attended).length.toLocaleString('id-ID')}
             </p>
-            <span className="text-xs font-medium text-amber-700/80">undangan</span>
+            <span className="text-xs text-gray-400">undangan</span>
           </div>
-          <div className="mt-3 pt-2.5 border-t border-amber-100/70 flex items-center justify-between text-[11px]">
-            <span className="text-amber-700/90">Konfirmasi absen:</span>
-            <span className="font-mono tabular-nums font-semibold text-rose-600">
-              {guests.filter(g => g.rsvpStatus === 'declined').length} undangan
+          <div className="mt-2.5 pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-500 tabular-nums">
+            <span>Konfirmasi absen</span>
+            <span className="font-semibold text-rose-600">
+              {guests.filter((g) => g.rsvpStatus === 'declined').length} undangan
             </span>
           </div>
         </div>
 
         {/* Card 5: Souvenir Diambil */}
-        <div className="bg-white p-4 rounded-lg border border-purple-200 border-l-4 border-l-purple-500 shadow-2xs flex flex-col justify-between">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold text-purple-800 whitespace-nowrap">Souvenir Diambil</p>
-            <div className="w-8 h-8 rounded-md bg-purple-50 flex items-center justify-center text-purple-600 shrink-0">
-              <Gift className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-2.5 flex items-baseline gap-1.5">
-            <p className="text-2xl font-bold text-purple-700 font-mono tabular-nums leading-none">
-              {guests.filter(g => g.souvenirTaken).length.toLocaleString('id-ID')}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-3.5 flex flex-col justify-between col-span-2 sm:col-span-1">
+          <p className="text-xs font-medium text-gray-500">Souvenir Diambil</p>
+          <div className="mt-1.5 flex items-baseline gap-1.5">
+            <p className="text-xl sm:text-2xl font-bold text-gray-900 tabular-nums leading-none">
+              {guests.filter((g) => g.souvenirTaken).length.toLocaleString('id-ID')}
             </p>
-            <span className="text-xs font-medium text-purple-700/80">diserahkan</span>
+            <span className="text-xs text-gray-400">diserahkan</span>
           </div>
-          <div className="mt-3 pt-2.5 border-t border-purple-100/70 flex items-center justify-between text-[11px]">
-            <span className="text-purple-700/90">Belum ambil:</span>
-            <span className="font-mono tabular-nums font-semibold text-purple-700">
-              {guests.filter(g => !g.souvenirTaken).length.toLocaleString('id-ID')}
+          <div className="mt-2.5 pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-500 tabular-nums">
+            <span>Belum ambil</span>
+            <span className="font-semibold text-gray-700">
+              {guests.filter((g) => !g.souvenirTaken).length.toLocaleString('id-ID')}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Navigation Tabs & Integrated Quota Bar */}
-      <div className="mt-6 flex flex-col lg:flex-row lg:items-center lg:justify-between border-b border-slate-200 gap-3">
-        <nav className="-mb-px flex space-x-6 sm:space-x-8 overflow-x-auto">
+      {/* Navigation Tabs & Integrated WA Blast Quota */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between border-b border-gray-200 gap-2 pt-1">
+        <nav className="-mb-px flex space-x-5 sm:space-x-7 overflow-x-auto">
           {!isStaff && (
             <button
+              type="button"
               onClick={() => setActiveTab('rsvp')}
-              className={`whitespace-nowrap pb-3.5 px-1 border-b-2 font-medium text-sm transition-colors ${
+              className={`whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-xs sm:text-sm transition-colors cursor-pointer ${
                 activeTab === 'rsvp'
                   ? 'border-indigo-600 text-indigo-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
+                  : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
               }`}
             >
               RSVP & Ucapan
@@ -2615,66 +2585,65 @@ export default function EventDetails() {
           {!isStaffSouvenirOnly && (
             <>
               <button
+                type="button"
                 onClick={() => setActiveTab('guest-list')}
-                className={`whitespace-nowrap pb-3.5 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-2 ${
+                className={`whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-xs sm:text-sm transition-colors inline-flex items-center gap-1.5 cursor-pointer ${
                   activeTab === 'guest-list'
                     ? 'border-indigo-600 text-indigo-600'
-                    : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
+                    : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
                 }`}
               >
                 <span>Daftar Tamu</span>
-                <span className="text-xs font-mono tabular-nums text-slate-400">
+                <span className="text-xs tabular-nums text-gray-400">
                   ({guests.length.toLocaleString('id-ID')})
                 </span>
               </button>
               <button
+                type="button"
                 onClick={() => setActiveTab('attended')}
-                className={`whitespace-nowrap pb-3.5 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-2 ${
+                className={`whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-xs sm:text-sm transition-colors inline-flex items-center gap-1.5 cursor-pointer ${
                   activeTab === 'attended'
                     ? 'border-indigo-600 text-indigo-600'
-                    : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
+                    : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
                 }`}
               >
                 <span>Berhasil Scan</span>
-                <span className="text-xs font-mono tabular-nums font-semibold text-emerald-600">
-                  ({guests.filter(g => g.attended).length.toLocaleString('id-ID')})
+                <span className="text-xs tabular-nums font-semibold text-emerald-600">
+                  ({guests.filter((g) => g.attended).length.toLocaleString('id-ID')})
                 </span>
               </button>
             </>
           )}
           {!isStaffCheckinOnly && (
             <button
+              type="button"
               onClick={() => setActiveTab('souvenir')}
-              className={`whitespace-nowrap pb-3.5 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-1.5 ${
+              className={`whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-xs sm:text-sm transition-colors inline-flex items-center gap-1.5 cursor-pointer ${
                 activeTab === 'souvenir'
                   ? 'border-indigo-600 text-indigo-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
+                  : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
               }`}
             >
-              <Gift className="w-4 h-4" />
+              <Gift className="w-3.5 h-3.5" />
               <span>Souvenir & Logistik</span>
             </button>
           )}
         </nav>
 
         {(activeTab === 'guest-list' || activeTab === 'attended') && !isStaff && (
-          <div className="pb-3 lg:pb-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
-            <div className="flex items-center gap-1.5 font-medium text-slate-700">
+          <div className="pb-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 tabular-nums">
+            <span className="inline-flex items-center gap-1 text-gray-700 font-medium">
               <MessageCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
               <span>Kuota WA Blast:</span>
-              <span className="font-mono tabular-nums font-bold text-slate-900">
+              <strong className="text-gray-900">
                 {Math.max(0, 50 - (event?.waBlastCount || 0)) + (appUser?.waBlastQuota || 0)}
-              </span>
+              </strong>
               <span>pesan</span>
-            </div>
-            <span className="text-slate-300 hidden sm:inline" aria-hidden="true">·</span>
-            <span className="text-slate-500 font-mono tabular-nums">
-              Gratis: {Math.min(50, event?.waBlastCount || 0)}/50 terpakai
             </span>
-            <span className="text-slate-300 hidden sm:inline" aria-hidden="true">·</span>
-            <span className="text-slate-500 font-mono tabular-nums">
-              Add-on: {appUser?.waBlastQuota || 0}
-            </span>
+            <span aria-hidden="true" className="text-gray-300 hidden sm:inline">·</span>
+            <span>Gratis {Math.min(50, event?.waBlastCount || 0)}/50</span>
+            <span aria-hidden="true" className="text-gray-300 hidden sm:inline">·</span>
+            <span>Add-on {appUser?.waBlastQuota || 0}</span>
           </div>
         )}
       </div>
@@ -2690,862 +2659,925 @@ export default function EventDetails() {
           isLocked={isEventLocked}
         />
       ) : (
-        <>
-          <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden mt-4">
-            <div className="p-4 sm:p-5 flex flex-col gap-4 border-b border-slate-200 bg-white">
-              {/* Top Row: Section Title & Organized Action Toolbar */}
-              <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 w-full">
-                <div className="flex items-baseline gap-2 shrink-0">
-                  <h2 className="text-base sm:text-lg font-semibold text-slate-900 whitespace-nowrap">
-                    {activeTab === 'rsvp' ? 'RSVP & Ucapan' : activeTab === 'attended' ? 'Berhasil Scan' : 'Daftar Tamu'}
-                  </h2>
-                  <span className="text-xs sm:text-sm font-mono tabular-nums font-medium text-slate-500 whitespace-nowrap">
-                    {filteredGuests.length.toLocaleString('id-ID')} tamu
-                    {guests.length > 0 && filteredGuests.length !== guests.length && (
-                      <span className="text-slate-400"> dari {guests.length.toLocaleString('id-ID')}</span>
-                    )}
-                  </span>
-                </div>
+        <div className="space-y-4">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            accept=".xlsx, .xls"
+            className="hidden"
+          />
 
-                <div className="flex flex-wrap items-center justify-start lg:justify-end gap-1.5 sm:gap-2 w-full lg:w-auto">
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileUpload}
-                    accept=".xlsx, .xls"
-                    className="hidden"
-                  />
-
-                  {/* Group 1: Streamlined Import & Export */}
-                  <div className="inline-flex items-center gap-1.5">
-                    {!isStaff && (
-                      <button
-                        onClick={() => {
-                          if (isEventLocked) {
-                            showEventLockedAlert();
-                            return;
-                          }
-                          setIsImportModalOpen(true);
-                        }}
-                        disabled={isEventLocked || isImporting || isGeneratingSample}
-                        className={`h-8.5 px-3 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap shadow-2xs ${
-                          isEventLocked
-                            ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed'
-                            : 'text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 cursor-pointer disabled:opacity-50'
-                        }`}
-                        title={
-                          isEventLocked
-                            ? 'Import dikunci — lakukan Top-Up Paket untuk membuka'
-                            : 'Import data tamu dari Excel & unduh template'
-                        }
-                      >
-                        {isEventLocked ? (
-                          <Lock className="w-3.5 h-3.5 text-slate-400" />
-                        ) : (
-                          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                        )}
-                        <span>Import</span>
-                      </button>
-                    )}
-
-                    <button
-                      onClick={() => {
-                        if (isEventLocked) {
-                          showEventLockedAlert();
-                          return;
-                        }
-                        setIsExportModalOpen(true);
-                      }}
-                      disabled={isEventLocked}
-                      className={`h-8.5 px-3 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap shadow-2xs ${
-                        isEventLocked
-                          ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed'
-                          : 'text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 cursor-pointer'
-                      }`}
-                      title={
-                        isEventLocked
-                          ? 'Export Excel/PDF dikunci — lakukan Top-Up Paket untuk membuka'
-                          : 'Ekspor data tamu ke Excel atau PDF'
-                      }
-                    >
-                      {isEventLocked ? (
-                        <Lock className="w-3.5 h-3.5 text-slate-400" />
-                      ) : (
-                        <Download className="w-3.5 h-3.5 text-indigo-600" />
-                      )}
-                      <span>Export</span>
-                      {!isEventLocked && <ChevronDown className="w-3 h-3 text-slate-400" />}
-                    </button>
-                  </div>
-
-                  {/* Group 2: Data Utilities (Refresh, Super Admin Seeding & Reset) */}
-                  <div className="inline-flex items-center gap-1.5">
-                    <button
-                      onClick={() => fetchGuests(true)}
-                      disabled={isRefreshingGuests}
-                      className="h-8.5 w-8.5 justify-center text-xs font-medium flex items-center rounded-lg transition-colors text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 shadow-2xs cursor-pointer disabled:opacity-50"
-                      title="Refresh Seluruh Data Tamu"
-                    >
-                      <RefreshCcw className={`w-3.5 h-3.5 ${isRefreshingGuests ? 'animate-spin text-indigo-600' : ''}`} />
-                    </button>
-
-                    {/* Khusus Super Admin: Tombol Uji Seeding 1.000 Contoh */}
-                    {appUser?.role === 'superadmin' && (
-                      <button
-                        onClick={() => handleGenerateSampleGuests(1000)}
-                        disabled={isGeneratingSample || isImporting}
-                        className="h-8.5 px-2.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 hover:border-amber-300 flex items-center gap-1.5 disabled:opacity-50 shadow-2xs cursor-pointer"
-                        title="[Khusus Super Admin] Buat 1.000 data tamu contoh untuk uji coba performa dan scanner"
-                      >
-                        {isGeneratingSample ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
-                        ) : (
-                          <Users className="w-3.5 h-3.5 text-amber-700" />
-                        )}
-                        <span>+1.000 Contoh</span>
-                      </button>
-                    )}
-
-                    {(appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'partner') && guests.length > 0 && (
-                      <button
-                        onClick={handleClearAllGuests}
-                        disabled={isEventLocked || isGeneratingSample || isImporting}
-                        className={`h-8.5 w-8.5 justify-center text-xs font-medium flex items-center rounded-lg transition-colors shadow-2xs ${
-                          isEventLocked
-                            ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed'
-                            : 'text-rose-600 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 cursor-pointer disabled:opacity-50'
-                        }`}
-                        title={
-                          isEventLocked
-                            ? 'Reset Semua Tamu dikunci — lakukan Top-Up Paket'
-                            : 'Kosongkan Semua Tamu (Reset Acara)'
-                        }
-                      >
-                        {isEventLocked ? <Lock className="w-3.5 h-3.5" /> : <Trash2 className="w-3.5 h-3.5" />}
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Group 3: Primary Actions (Kirim Undangan, Blast WA & Tambah Tamu) */}
-                  {!isStaff && (
-                    <div className="inline-flex items-center gap-1.5">
-                      {isEventLocked ? (
-                        <button
-                          type="button"
-                          disabled
-                          className="h-8.5 px-3 text-xs font-semibold flex items-center gap-1.5 rounded-lg whitespace-nowrap text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed shadow-2xs"
-                          title="Kirim Undangan dikunci — lakukan Top-Up Paket untuk membuka"
-                        >
-                          <Lock className="w-3.5 h-3.5" />
-                          <span>Kirim Undangan</span>
-                        </button>
-                      ) : (
-                        <Link
-                          to={`/auth/login/events/${eventId}/send-invitations`}
-                          className="h-8.5 px-3 text-xs font-semibold flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap text-emerald-800 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 shadow-2xs"
-                          title="Buka halaman khusus Kirim Undangan & Tracking Status Terkirim"
-                        >
-                          <Send className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>Kirim Undangan</span>
-                        </Link>
-                      )}
-
-                      <button
-                        onClick={openBlastModal}
-                        disabled={isEventLocked || isBlasting}
-                        className={`h-8.5 px-3 text-xs font-medium flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap shadow-2xs ${
-                          isEventLocked
-                            ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed'
-                            : 'text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-60 cursor-pointer'
-                        }`}
-                        title={
-                          isEventLocked
-                            ? 'Blast WA dikunci — lakukan Top-Up Paket untuk membuka'
-                            : 'Blast WhatsApp Cepat'
-                        }
-                      >
-                        {isEventLocked ? (
-                          <Lock className="w-3.5 h-3.5 text-slate-400" />
-                        ) : (
-                          <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                        )}
-                        <span>{isBlasting ? 'Memproses...' : 'Blast WA'}</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          if (isEventLocked) {
-                            showEventLockedAlert();
-                            return;
-                          }
-                          setIsAddingGuest(true);
-                          if (eventId && !location.pathname.endsWith('/guests/add')) {
-                            navigate(`/auth/login/events/${eventId}/guests/add`);
-                          }
-                        }}
-                        disabled={isEventLocked}
-                        className={`h-8.5 px-3 text-xs font-medium flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap shadow-xs ${
-                          isEventLocked
-                            ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed'
-                            : 'text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer'
-                        }`}
-                        title={
-                          isEventLocked
-                            ? 'Tambah Tamu dikunci — lakukan Top-Up Paket untuk membuka'
-                            : 'Tambah data tamu baru'
-                        }
-                      >
-                        {isEventLocked ? <Lock className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-                        <span>Tambah Tamu</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Progress Indicators for Batch Operations */}
-              {(isImporting || isGeneratingSample) && (
-                <div className="bg-indigo-50/80 border border-indigo-200 rounded-lg px-3.5 py-2.5 flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
-                    <span className="text-xs sm:text-sm font-medium text-indigo-900">
-                      {isImporting ? 'Sedang menulis data Excel ke database...' : 'Sedang membuat 1.000 tamu contoh ke database...'}
-                    </span>
-                  </div>
-                  <span className="text-xs font-mono tabular-nums font-semibold text-indigo-700 bg-white px-2.5 py-1 rounded border border-indigo-100">
-                    {isImporting && importProgress ? `${importProgress.current} / ${importProgress.total} tamu` : ''}
-                    {isGeneratingSample && sampleProgress ? `${sampleProgress.current} / ${sampleProgress.total} tamu` : ''}
-                  </span>
-                </div>
-              )}
-
-              {/* Bottom Row: Structured Filter & Search Bar */}
-              <div className="bg-slate-50/80 p-2.5 sm:p-3 rounded-xl border border-slate-200/80">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-center">
-                  {/* Search Input */}
-                  <div className={`relative ${activeTab === 'attended' ? 'sm:col-span-2 lg:col-span-5' : 'sm:col-span-2 lg:col-span-3'}`}>
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Search className="h-4 w-4 text-slate-400" />
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="Cari nama, tiket, kota, no hp..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="block w-full h-9 pl-9 pr-8 border border-slate-200 rounded-lg text-xs sm:text-sm bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-                    />
-                    {searchTerm && (
-                      <button
-                        type="button"
-                        onClick={() => setSearchTerm('')}
-                        className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600"
-                        title="Hapus pencarian"
-                      >
-                        <XCircle className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Status / Attendance Filter */}
-                  {activeTab === 'rsvp' ? (
-                    <div className="lg:col-span-2">
-                      <select
-                        value={rsvpFilter}
-                        onChange={(e) => setRsvpFilter(e.target.value)}
-                        className="block w-full h-9 pl-3 pr-7 border border-slate-200 rounded-lg text-xs sm:text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-                      >
-                        <option value="all">Semua Status RSVP</option>
-                        <option value="attending">Hadir</option>
-                        <option value="declined">Tidak Hadir</option>
-                        <option value="pending">Pending</option>
-                      </select>
-                    </div>
-                  ) : activeTab === 'guest-list' ? (
-                    <div className="lg:col-span-2">
-                      <select
-                        value={attendanceFilter}
-                        onChange={(e) => setAttendanceFilter(e.target.value)}
-                        className="block w-full h-9 pl-3 pr-7 border border-slate-200 rounded-lg text-xs sm:text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-                      >
-                        <option value="all">Semua Kehadiran</option>
-                        <option value="attended">Sudah Scan</option>
-                        <option value="not_attended">Belum Hadir</option>
-                      </select>
-                    </div>
-                  ) : null}
-
-                  {/* Category Filter */}
-                  <div className="lg:col-span-2">
-                    <select
-                      value={categoryFilter}
-                      onChange={(e) => setCategoryFilter(e.target.value)}
-                      className="block w-full h-9 pl-3 pr-7 border border-slate-200 rounded-lg text-xs sm:text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-                    >
-                      <option value="all">Semua Kategori</option>
-                      {availableCategories.map((cat) => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                      <option value="unassigned">Belum Diatur (-)</option>
-                    </select>
-                  </div>
-
-                  {/* Invitation Type Filter */}
-                  <div className="lg:col-span-2">
-                    <select
-                      value={invitationTypeFilter}
-                      onChange={(e) => setInvitationTypeFilter(e.target.value)}
-                      className="block w-full h-9 pl-3 pr-7 border border-slate-200 rounded-lg text-xs sm:text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-                    >
-                      <option value="all">Semua Tipe Undangan</option>
-                      {availableInvitationTypes.map((invType) => (
-                        <option key={invType} value={invType}>{invType}</option>
-                      ))}
-                      <option value="unassigned">Belum Diatur (-)</option>
-                    </select>
-                  </div>
-
-                  {/* Sort Order */}
-                  <div className="lg:col-span-2">
-                    <select
-                      value={sortBy}
-                      onChange={(e) => setSortBy(e.target.value as any)}
-                      className="block w-full h-9 pl-3 pr-7 border border-slate-200 rounded-lg text-xs sm:text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-                      title="Urutkan Daftar Tamu"
-                    >
-                      <option value="category_setting">Urut: Kategori ({configuredCategories.slice(0, 2).join(', ')}{configuredCategories.length > 2 ? '...' : ''})</option>
-                      <option value="category_desc">Urut: Kategori (Terbalik)</option>
-                      <option value="newest">Urut: Waktu Terbaru</option>
-                      <option value="name_asc">Urut: Nama (A-Z)</option>
-                    </select>
-                  </div>
-
-                  {/* Items Per Page */}
-                  <div className="lg:col-span-1">
-                    <select
-                      value={itemsPerPage}
-                      onChange={(e) => {
-                        const val = e.target.value === 'all' ? 'all' : Number(e.target.value);
-                        setItemsPerPage(val);
-                      }}
-                      className="block w-full h-9 pl-2.5 pr-6 border border-slate-200 rounded-lg text-xs sm:text-sm font-medium bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-                      title="Jumlah baris per halaman"
-                    >
-                      <option value={25}>25 / hal</option>
-                      <option value={50}>50 / hal</option>
-                      <option value={100}>100 / hal</option>
-                      <option value={250}>250 / hal</option>
-                      <option value={500}>500 / hal</option>
-                      <option value={1000}>1.000 / hal</option>
-                      <option value="all">Semua ({filteredGuests.length})</option>
-                    </select>
-                  </div>
-                  {/* Invitation Send Status Filter (guest-list tab) */}
-                  {activeTab === 'guest-list' && (
-                    <div className="lg:col-span-2">
-                      <select
-                        value={waSendFilter}
-                        onChange={(e) => setWaSendFilter(e.target.value as any)}
-                        className="block w-full h-9 pl-3 pr-7 border border-slate-200 rounded-lg text-xs sm:text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-                      >
-                        <option value="all">Semua Status Kirim</option>
-                        <option value="pending">Belum Dikirim</option>
-                        <option value="sent">Sudah Dikirim</option>
-                        <option value="failed">Gagal Kirim</option>
-                      </select>
-                    </div>
-                  )}
-                </div>
-
-                {/* Active Filter Indicator & Quick Reset */}
-                {(searchTerm || rsvpFilter !== 'all' || attendanceFilter !== 'all' || waSendFilter !== 'all' || categoryFilter !== 'all' || invitationTypeFilter !== 'all') && (
-                  <div className="mt-2.5 pt-2 border-t border-slate-200/70 flex items-center justify-between text-xs text-slate-500">
-                    <span>
-                      Menampilkan <strong className="text-slate-800 font-mono tabular-nums">{filteredGuests.length}</strong> hasil yang cocok dengan filter
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSearchTerm('');
-                        setRsvpFilter('all');
-                        setAttendanceFilter('all');
-                        setWaSendFilter('all');
-                        setCategoryFilter('all');
-                        setInvitationTypeFilter('all');
-                      }}
-                      className="text-indigo-600 hover:text-indigo-800 font-medium hover:underline"
-                    >
-                      Reset semua filter
-                    </button>
-                  </div>
+          {/* BOX 1: Unified Filter Box (Create Event Standard) */}
+          <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-2.5 sm:p-3 space-y-2">
+            {/* Row 1: Search + Primary Filter Dropdowns + Limit */}
+            <div className="flex flex-col lg:flex-row lg:items-center gap-2">
+              <div className="relative flex-1 min-w-0">
+                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Cari nama tamu, kode tiket, alamat, no HP, atau sesi..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full h-8.5 pl-8.5 pr-7 text-xs sm:text-sm bg-gray-50/70 border border-gray-200 rounded-lg text-gray-800 placeholder:text-gray-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5 rounded transition-colors cursor-pointer"
+                    title="Hapus pencarian"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 )}
               </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {/* Status / Attendance Filter */}
+                {activeTab === 'rsvp' ? (
+                  <select
+                    value={rsvpFilter}
+                    onChange={(e) => setRsvpFilter(e.target.value)}
+                    className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none min-w-[135px]"
+                    title="Filter status RSVP"
+                  >
+                    <option value="all">Semua Status RSVP</option>
+                    <option value="attending">Hadir</option>
+                    <option value="declined">Tidak Hadir</option>
+                    <option value="pending">Pending</option>
+                  </select>
+                ) : activeTab === 'guest-list' ? (
+                  <select
+                    value={attendanceFilter}
+                    onChange={(e) => setAttendanceFilter(e.target.value)}
+                    className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none min-w-[135px]"
+                    title="Filter status kehadiran"
+                  >
+                    <option value="all">Semua Kehadiran</option>
+                    <option value="attended">Sudah Scan</option>
+                    <option value="not_attended">Belum Hadir</option>
+                  </select>
+                ) : null}
+
+                {/* Category Filter */}
+                <select
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none min-w-[130px]"
+                  title="Filter kategori tamu"
+                >
+                  <option value="all">Semua Kategori</option>
+                  {availableCategories.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                  <option value="unassigned">Belum Diatur (-)</option>
+                </select>
+
+                {/* Tampilkan Limit */}
+                <div className="flex items-center gap-1.5 h-8.5 px-2.5 bg-white border border-gray-200 rounded-lg text-xs text-gray-600 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition shrink-0">
+                  <span className="text-xs text-gray-500 whitespace-nowrap">Tampilkan</span>
+                  <select
+                    value={itemsPerPage}
+                    onChange={(e) => {
+                      const val = e.target.value === 'all' ? 'all' : Number(e.target.value);
+                      setItemsPerPage(val);
+                    }}
+                    className="bg-transparent text-xs sm:text-sm font-semibold text-gray-800 focus:outline-none cursor-pointer pr-0.5 tabular-nums"
+                    title="Jumlah baris per halaman"
+                  >
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={250}>250</option>
+                    <option value={500}>500</option>
+                    <option value={1000}>1.000</option>
+                    <option value="all">Semua</option>
+                  </select>
+                </div>
+              </div>
             </div>
 
-        <div className="p-0">
-          {loading ? (
-            <div className="p-6">
-              <p className="text-gray-500 text-sm">Memuat daftar tamu...</p>
+            {/* Row 2: Secondary Filters (Tipe Undangan, Status Kirim WA, Urutan) */}
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100">
+              <select
+                value={invitationTypeFilter}
+                onChange={(e) => setInvitationTypeFilter(e.target.value)}
+                className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none min-w-[155px]"
+                title="Filter tipe undangan"
+              >
+                <option value="all">Semua Tipe Undangan</option>
+                {availableInvitationTypes.map((invType) => (
+                  <option key={invType} value={invType}>{invType}</option>
+                ))}
+                <option value="unassigned">Belum Diatur (-)</option>
+              </select>
+
+              {activeTab === 'guest-list' && (
+                <select
+                  value={waSendFilter}
+                  onChange={(e) => setWaSendFilter(e.target.value as any)}
+                  className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none min-w-[145px]"
+                  title="Filter status kirim undangan WA"
+                >
+                  <option value="all">Semua Status Kirim</option>
+                  <option value="pending">Belum Dikirim</option>
+                  <option value="sent">Sudah Dikirim</option>
+                  <option value="failed">Gagal Kirim</option>
+                </select>
+              )}
+
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none min-w-[180px]"
+                title="Urutkan Daftar Tamu"
+              >
+                <option value="category_setting">
+                  Urut: Kategori ({configuredCategories.slice(0, 2).join(', ')}{configuredCategories.length > 2 ? '...' : ''})
+                </option>
+                <option value="category_desc">Urut: Kategori (Terbalik)</option>
+                <option value="newest">Urut: Waktu Terbaru</option>
+                <option value="name_asc">Urut: Nama (A-Z)</option>
+              </select>
+
+              {hasActiveGuestFilter && (
+                <button
+                  type="button"
+                  onClick={resetGuestFilters}
+                  className="h-8.5 px-2.5 inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Reset Filter</span>
+                </button>
+              )}
             </div>
-          ) : guests.length === 0 ? (
-            <div className="p-12 text-center">
-              <p className="text-gray-500 text-sm">Belum ada tamu yang ditambahkan di daftar ini.</p>
+          </div>
+
+          {/* PRIMARY ACTION BAR (Between Filter Box & Table Box, Left-Aligned — Create Event Standard) */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {!isStaff && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isEventLocked) {
+                      showEventLockedAlert();
+                      return;
+                    }
+                    setIsAddingGuest(true);
+                    if (eventId && !location.pathname.endsWith('/guests/add')) {
+                      navigate(`/auth/login/events/${eventId}/guests/add`);
+                    }
+                  }}
+                  disabled={isEventLocked}
+                  className={`h-9 px-3.5 text-xs sm:text-sm font-medium inline-flex items-center justify-center gap-1.5 rounded-lg transition-colors whitespace-nowrap shadow-xs ${
+                    isEventLocked
+                      ? 'text-gray-400 bg-gray-100 border border-gray-200 cursor-not-allowed'
+                      : 'text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer'
+                  }`}
+                  title={isEventLocked ? 'Tambah Tamu dikunci — lakukan Top-Up Paket untuk membuka' : 'Tambah data tamu baru'}
+                >
+                  {isEventLocked ? <Lock className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                  <span>Tambah Tamu</span>
+                </button>
+              )}
+
+              {!isStaff && (
+                isEventLocked ? (
+                  <button
+                    type="button"
+                    disabled
+                    className="h-9 px-3 text-xs sm:text-sm font-medium inline-flex items-center gap-1.5 rounded-lg whitespace-nowrap text-gray-400 bg-gray-100 border border-gray-200 cursor-not-allowed"
+                    title="Kirim Undangan dikunci — lakukan Top-Up Paket untuk membuka"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Kirim Undangan</span>
+                  </button>
+                ) : (
+                  <Link
+                    to={`/auth/login/events/${eventId}/send-invitations`}
+                    className="h-9 px-3 text-xs sm:text-sm font-medium inline-flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap text-gray-700 bg-white border border-gray-200 hover:bg-gray-50"
+                    title="Buka halaman khusus Kirim Undangan & Tracking Status Terkirim"
+                  >
+                    <Send className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Kirim Undangan</span>
+                  </Link>
+                )
+              )}
+
+              {!isStaff && (
+                <button
+                  type="button"
+                  onClick={openBlastModal}
+                  disabled={isEventLocked || isBlasting}
+                  className={`h-9 px-3 text-xs sm:text-sm font-medium inline-flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap ${
+                    isEventLocked
+                      ? 'text-gray-400 bg-gray-100 border border-gray-200 cursor-not-allowed'
+                      : 'text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-60 cursor-pointer'
+                  }`}
+                  title={isEventLocked ? 'Blast WA dikunci — lakukan Top-Up Paket untuk membuka' : 'Blast WhatsApp Cepat'}
+                >
+                  {isEventLocked ? (
+                    <Lock className="w-3.5 h-3.5 text-gray-400" />
+                  ) : (
+                    <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                  )}
+                  <span>{isBlasting ? 'Memproses...' : 'Blast WA'}</span>
+                </button>
+              )}
+
+              {!isStaff && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isEventLocked) {
+                      showEventLockedAlert();
+                      return;
+                    }
+                    setIsImportModalOpen(true);
+                  }}
+                  disabled={isEventLocked || isImporting || isGeneratingSample}
+                  className={`h-9 px-3 text-xs sm:text-sm font-medium inline-flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap ${
+                    isEventLocked
+                      ? 'text-gray-400 bg-gray-100 border border-gray-200 cursor-not-allowed'
+                      : 'text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 cursor-pointer disabled:opacity-50'
+                  }`}
+                  title={isEventLocked ? 'Import dikunci — lakukan Top-Up Paket untuk membuka' : 'Import data tamu dari Excel & unduh template'}
+                >
+                  {isEventLocked ? (
+                    <Lock className="w-3.5 h-3.5 text-gray-400" />
+                  ) : (
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                  )}
+                  <span>Import</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (isEventLocked) {
+                    showEventLockedAlert();
+                    return;
+                  }
+                  setIsExportModalOpen(true);
+                }}
+                disabled={isEventLocked}
+                className={`h-9 px-3 text-xs sm:text-sm font-medium inline-flex items-center gap-1.5 rounded-lg transition-colors whitespace-nowrap ${
+                  isEventLocked
+                    ? 'text-gray-400 bg-gray-100 border border-gray-200 cursor-not-allowed'
+                    : 'text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 cursor-pointer'
+                }`}
+                title={isEventLocked ? 'Export Excel/PDF dikunci — lakukan Top-Up Paket untuk membuka' : 'Ekspor data tamu ke Excel atau PDF'}
+              >
+                {isEventLocked ? (
+                  <Lock className="w-3.5 h-3.5 text-gray-400" />
+                ) : (
+                  <Download className="w-3.5 h-3.5 text-indigo-600" />
+                )}
+                <span>Export</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => fetchGuests(true)}
+                disabled={isRefreshingGuests}
+                className="h-9 px-3 text-xs sm:text-sm font-medium inline-flex items-center gap-1.5 rounded-lg transition-colors text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                title="Muat Ulang Data Tamu"
+              >
+                <RefreshCcw className={`w-3.5 h-3.5 ${isRefreshingGuests ? 'animate-spin text-indigo-600' : 'text-gray-500'}`} />
+                <span className="hidden sm:inline">Muat Ulang</span>
+              </button>
+
+              {appUser?.role === 'superadmin' && (
+                <button
+                  type="button"
+                  onClick={() => handleGenerateSampleGuests(1000)}
+                  disabled={isGeneratingSample || isImporting}
+                  className="h-9 px-3 text-xs font-medium rounded-lg transition-colors whitespace-nowrap bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 inline-flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                  title="[Khusus Super Admin] Buat 1.000 data tamu contoh untuk uji coba performa dan scanner"
+                >
+                  {isGeneratingSample ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
+                  ) : (
+                    <Users className="w-3.5 h-3.5 text-amber-700" />
+                  )}
+                  <span>+1.000 Contoh</span>
+                </button>
+              )}
+
+              {(appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'partner') && guests.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearAllGuests}
+                  disabled={isEventLocked || isGeneratingSample || isImporting}
+                  className={`h-9 w-9 justify-center inline-flex items-center rounded-lg transition-colors ${
+                    isEventLocked
+                      ? 'text-gray-400 bg-gray-100 border border-gray-200 cursor-not-allowed'
+                      : 'text-rose-600 bg-white hover:bg-rose-50 border border-gray-200 hover:border-rose-200 cursor-pointer disabled:opacity-50'
+                  }`}
+                  title={isEventLocked ? 'Reset Semua Tamu dikunci — lakukan Top-Up Paket' : 'Kosongkan Semua Tamu (Reset Acara)'}
+                >
+                  {isEventLocked ? <Lock className="w-3.5 h-3.5" /> : <Trash2 className="w-3.5 h-3.5" />}
+                </button>
+              )}
             </div>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
+
+            <div className="text-xs text-gray-500 tabular-nums whitespace-nowrap">
+              <span className="font-semibold text-gray-800">
+                {activeTab === 'rsvp' ? 'RSVP & Ucapan' : activeTab === 'attended' ? 'Berhasil Scan' : 'Daftar Tamu'}
+              </span>
+              <span className="mx-1.5 text-gray-300" aria-hidden="true">·</span>
+              <span>
+                {filteredGuests.length.toLocaleString('id-ID')} tamu
+                {guests.length > 0 && filteredGuests.length !== guests.length && ` dari ${guests.length.toLocaleString('id-ID')}`}
+              </span>
+            </div>
+          </div>
+
+          {/* Progress Indicators for Batch Operations */}
+          {(isImporting || isGeneratingSample) && (
+            <div className="bg-indigo-50/80 border border-indigo-200 rounded-xl px-4 py-2.5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
+                <span className="text-xs sm:text-sm font-medium text-indigo-900">
+                  {isImporting ? 'Sedang menulis data Excel ke database...' : 'Sedang membuat 1.000 tamu contoh ke database...'}
+                </span>
+              </div>
+              <span className="text-xs font-mono tabular-nums font-semibold text-indigo-700 bg-white px-2.5 py-1 rounded-lg border border-indigo-100">
+                {isImporting && importProgress ? `${importProgress.current} / ${importProgress.total} tamu` : ''}
+                {isGeneratingSample && sampleProgress ? `${sampleProgress.current} / ${sampleProgress.total} tamu` : ''}
+              </span>
+            </div>
+          )}
+
+          {/* BOX 2: Standardized Table Card */}
+          <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+            {loading ? (
+              <div className="flex items-center justify-center py-14 text-sm text-gray-500 gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                <span>Memuat daftar tamu...</span>
+              </div>
+            ) : guests.length === 0 ? (
+              <div className="text-center py-14 px-4">
+                <Users className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                <p className="text-sm font-medium text-gray-700">Belum ada tamu yang ditambahkan</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Tambahkan tamu secara manual atau impor daftar tamu dari Excel untuk memulai.
+                </p>
+              </div>
+            ) : filteredGuests.length === 0 ? (
+              <div className="text-center py-14 px-4">
+                <Search className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                <p className="text-sm font-medium text-gray-700">Tidak ada tamu yang cocok dengan filter</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Coba ubah kata kunci pencarian, kategori, atau filter status.
+                </p>
+                {hasActiveGuestFilter && (
+                  <button
+                    type="button"
+                    onClick={resetGuestFilters}
+                    className="mt-4 h-8.5 px-3 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
+                  >
+                    Reset Filter
+                  </button>
+                )}
+              </div>
+            ) : (
+              <>
                 {selectedGuestIds.length > 0 && !isEventLocked && (
-                <div className="bg-indigo-50 px-6 py-3 border-b border-indigo-100 flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-sm text-indigo-700 font-medium">{selectedGuestIds.length} tamu terpilih</span>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button 
-                      onClick={() => {
-                        setSinglePrintGuest(null);
-                        setIsPrintModalOpen(true);
-                      }} 
-                      className="px-3.5 py-1.5 bg-indigo-600 text-white hover:bg-indigo-700 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
-                      title="Pilih cetak QR Biasa (20/Hal) atau Bentuk Card E-Invitation (4 atau 8 Card/Hal)"
-                    >
-                      <Printer className="w-3.5 h-3.5" />
-                      <span>Cetak QR ({selectedGuestIds.length} Tamu)</span>
-                    </button>
-                    {canDirectEditRank && (
+                  <div className="bg-indigo-50/80 px-4 sm:px-5 py-3 border-b border-indigo-100 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs sm:text-sm text-indigo-800 font-semibold tabular-nums">
+                      {selectedGuestIds.length} tamu terpilih
+                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={() => {
-                          setBulkRankValue('');
-                          setIsBulkRankModalOpen(true);
+                          setSinglePrintGuest(null);
+                          setIsPrintModalOpen(true);
                         }}
-                        className="px-3.5 py-1.5 bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-100 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
-                        title="Tambahkan atau ubah Pangkat / Jabatan ke semua tamu terpilih sekaligus tanpa mengubah QR Code"
+                        className="h-8 px-3 bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                        title="Pilih cetak QR Biasa (20/Hal) atau Bentuk Card E-Invitation (4 atau 8 Card/Hal)"
                       >
-                        <Edit className="w-3.5 h-3.5" />
-                        <span>Set Pangkat / Jabatan ({selectedGuestIds.length})</span>
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>Cetak QR ({selectedGuestIds.length})</span>
                       </button>
-                    )}
-                    {activeTab === 'rsvp' && !isStaff && (
-                      <button
-                        onClick={handleBulkResetRsvpAndWishes}
-                        className="px-3 py-1.5 bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                        title="Hapus ucapan & keluarkan dari list RSVP (Data tamu tetap ada di Daftar Tamu)"
-                      >
-                        <Trash2 className="w-3.5 h-3.5 text-amber-700" />
-                        <span>Hapus Ucapan & Keluarkan dari List ({selectedGuestIds.length})</span>
-                      </button>
-                    )}
-                    {(appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'admin' || appUser?.role === 'partner') && (
-                      <button 
-                        onClick={handleBulkDeleteGuests} 
-                        className="text-xs sm:text-sm text-red-600 hover:text-red-800 font-medium flex items-center transition-colors cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4 mr-1" />
-                        {activeTab === 'rsvp' ? 'Hapus Permanen Tamu' : 'Hapus Terpilih'}
-                      </button>
-                    )}
-                    <button onClick={() => setSelectedGuestIds([])} className="text-xs sm:text-sm text-indigo-600 hover:text-indigo-800 underline transition-colors">Batal Pilih Semua</button>
-                  </div>
-                </div>
-              )}
-              <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50/90 border-b border-slate-200">
-                  <tr>
-                    <th className="px-4 sm:px-5 py-3.5 text-left w-10">
-                      <input 
-                        type="checkbox" 
-                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
-                        checked={!isEventLocked && selectedGuestIds.length === filteredGuests.length && filteredGuests.length > 0}
-                        disabled={isEventLocked}
-                        onChange={handleSelectAll}
-                        title={isEventLocked ? 'Aksi massal dikunci hingga Top-Up Paket' : undefined}
-                      />
-                    </th>
-                    <th className="px-3 py-3.5 text-left text-xs font-semibold text-slate-600 w-12">No</th>
-                    <th className="px-3 py-3.5 text-left text-xs font-semibold text-slate-600 w-40">
-                      <div className="flex flex-col">
-                        <span>Pangkat / Jabatan</span>
-                        {canDirectEditRank && !isEventLocked && (
-                          <span className="text-[10px] font-normal text-indigo-600">Ketik & Enter</span>
-                        )}
-                      </div>
-                    </th>
-                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Nama Tamu</th>
-                    {(activeTab === 'guest-list' || activeTab === 'attended') && (
-                      <>
-                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Alamat</th>
-                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">No. Hp</th>
-                        <th 
-                          onClick={() => setSortBy(prev => prev === 'category_setting' ? 'category_desc' : 'category_setting')}
-                          className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600 cursor-pointer hover:text-indigo-600 select-none"
-                          title="Klik untuk mengurutkan berdasarkan Kategori sesuai settingan"
+                      {canDirectEditRank && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBulkRankValue('');
+                            setIsBulkRankModalOpen(true);
+                          }}
+                          className="h-8 px-3 bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-50 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="Tambahkan atau ubah Pangkat / Jabatan ke semua tamu terpilih sekaligus tanpa mengubah QR Code"
                         >
-                          <div className="inline-flex items-center gap-1">
-                            <span>Kategori</span>
-                            <ArrowUpDown className={`w-3.5 h-3.5 ${sortBy === 'category_setting' || sortBy === 'category_desc' ? 'text-indigo-600' : 'text-slate-400'}`} />
+                          <Edit className="w-3.5 h-3.5" />
+                          <span>Set Pangkat ({selectedGuestIds.length})</span>
+                        </button>
+                      )}
+                      {activeTab === 'rsvp' && !isStaff && (
+                        <button
+                          type="button"
+                          onClick={handleBulkResetRsvpAndWishes}
+                          className="h-8 px-3 bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="Hapus ucapan & keluarkan dari list RSVP (Data tamu tetap ada di Daftar Tamu)"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-amber-700" />
+                          <span>Hapus Ucapan ({selectedGuestIds.length})</span>
+                        </button>
+                      )}
+                      {(appUser?.role === 'superadmin' || appUser?.role === 'owner' || appUser?.role === 'admin' || appUser?.role === 'partner') && (
+                        <button
+                          type="button"
+                          onClick={handleBulkDeleteGuests}
+                          className="h-8 px-3 text-xs text-red-600 bg-white border border-red-200 hover:bg-red-50 rounded-lg font-medium inline-flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>{activeTab === 'rsvp' ? 'Hapus Permanen' : 'Hapus Terpilih'}</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedGuestIds([])}
+                        className="text-xs font-medium text-indigo-600 hover:text-indigo-800 underline px-1 cursor-pointer"
+                      >
+                        Batal
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3.5 text-left w-10">
+                          <input
+                            type="checkbox"
+                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                            checked={!isEventLocked && selectedGuestIds.length === filteredGuests.length && filteredGuests.length > 0}
+                            disabled={isEventLocked}
+                            onChange={handleSelectAll}
+                            title={isEventLocked ? 'Aksi massal dikunci hingga Top-Up Paket' : undefined}
+                          />
+                        </th>
+                        <th className="px-3 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-12">
+                          No
+                        </th>
+                        <th className="px-3 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-40">
+                          <div className="flex flex-col">
+                            <span>Pangkat / Jabatan</span>
+                            {canDirectEditRank && !isEventLocked && (
+                              <span className="text-[10px] font-normal normal-case tracking-normal text-indigo-600">
+                                Ketik & Enter
+                              </span>
+                            )}
                           </div>
                         </th>
-                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Tipe Undangan</th>
-                      </>
-                    )}
-                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Sesi</th>
-                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Jumlah Pax</th>
-                    {activeTab === 'rsvp' ? (
-                      <>
-                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Status RSVP</th>
-                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Ucapan</th>
-                      </>
-                    ) : (
-                      <>
-                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Status Kirim</th>
-                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Status RSVP</th>
-                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Status Scan</th>
-                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Waktu Kehadiran</th>
-                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-slate-600">Souvenir</th>
-                      </>
-                    )}
-                    <th className="px-4 sm:px-5 py-3.5 text-right text-xs font-semibold text-slate-600 sticky right-0 bg-slate-50/95 shadow-[-4px_0_12px_-3px_rgba(0,0,0,0.04)] z-10">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-slate-100">
-                  {paginatedGuests.map((guest, index) => (
-                    <tr key={guest.id} className={`group transition-colors ${selectedGuestIds.includes(guest.id) ? 'bg-indigo-50/40' : 'hover:bg-slate-50/80'}`}>
-                      <td className="px-4 sm:px-5 py-3.5 whitespace-nowrap">
-                        <input 
-                          type="checkbox" 
-                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
-                          checked={!isEventLocked && selectedGuestIds.includes(guest.id)}
-                          disabled={isEventLocked}
-                          onChange={(e) => handleSelectGuest(guest.id, e.target.checked)}
-                        />
-                      </td>
-                      <td className="px-3 py-3.5 whitespace-nowrap text-xs text-slate-400 font-mono tabular-nums">{startIndex + index + 1}</td>
-                      <td className="px-3 py-3.5 whitespace-nowrap">
-                        {canDirectEditRank && !isEventLocked ? (
-                          <div className="relative flex items-center">
-                            <input
-                              type="text"
-                              value={
-                                guest.id && inlineTitleDrafts[guest.id] !== undefined
-                                  ? inlineTitleDrafts[guest.id]
-                                  : guest.title || ''
-                              }
-                              onChange={e => {
-                                if (!guest.id) return;
-                                setInlineTitleDrafts(prev => ({
-                                  ...prev,
-                                  [guest.id!]: e.target.value,
-                                }));
-                              }}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  e.currentTarget.blur();
-                                } else if (e.key === 'Escape' && guest.id) {
-                                  setInlineTitleDrafts(prev => ({
-                                    ...prev,
-                                    [guest.id!]: guest.title || '',
-                                  }));
-                                  e.currentTarget.blur();
-                                }
-                              }}
-                              onBlur={e => {
-                                handleQuickSaveGuestTitle(guest, e.target.value);
-                              }}
-                              placeholder="+ Pangkat/Gelar..."
-                              className="w-36 px-2.5 py-1 text-xs font-medium text-slate-800 bg-slate-50/80 hover:bg-white focus:bg-white border border-slate-200 focus:border-indigo-500 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/15 transition-all placeholder:text-slate-400 placeholder:font-normal"
-                              title="Ketik Pangkat/Jabatan (contoh: Letkol, Mayor, Bpk., Ibu) lalu tekan Enter"
-                            />
-                            {savingTitleGuestId === guest.id && (
-                              <Loader2 className="w-3.5 h-3.5 text-indigo-600 animate-spin absolute right-2" />
-                            )}
-                          </div>
-                        ) : guest.title ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-xs font-medium border border-slate-200/80">
-                            {guest.title}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-400">-</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3.5 whitespace-nowrap">
-                        <div className="text-sm font-semibold text-slate-900">{guest.name}</div>
-                        {guest.ticketCode && (
-                          <div className="text-[11px] font-mono tabular-nums text-slate-400 mt-0.5">{guest.ticketCode}</div>
-                        )}
-                      </td>
-                      {(activeTab === 'guest-list' || activeTab === 'attended') && (
-                        <>
-                          <td className="px-4 py-3.5 whitespace-nowrap text-sm text-slate-600">{guest.address || '-'}</td>
-                          <td className="px-4 py-3.5 whitespace-nowrap text-sm font-mono tabular-nums text-slate-600">{guest.phone || '-'}</td>
-                          <td className="px-4 py-3.5 whitespace-nowrap text-xs font-medium text-indigo-700">
-                            {guest.category || <span className="text-slate-400 font-normal">-</span>}
-                          </td>
-                          <td className="px-4 py-3.5 whitespace-nowrap text-xs font-medium text-slate-600">
-                            {guest.invitationType || <span className="text-slate-400 font-normal">-</span>}
-                          </td>
-                        </>
-                      )}
-                      <td className="px-4 py-3.5 whitespace-nowrap text-xs font-medium text-slate-700">
-                        {guest.session || <span className="text-slate-400 font-normal">-</span>}
-                      </td>
-                      <td className="px-4 py-3.5 whitespace-nowrap text-xs font-semibold">
-                        {guest.rsvpStatus === 'declined' ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 font-mono">
-                            0 Orang
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-mono">
-                            {Math.max(1, Number(guest.pax) || 1)} Orang
-                          </span>
-                        )}
-                      </td>
-                      {activeTab === 'rsvp' ? (
-                        <>
-                          <td className="px-4 py-3.5 whitespace-nowrap text-xs font-medium">
-                            <span className={`inline-flex items-center gap-1.5 ${
-                              guest.rsvpStatus === 'attending' ? 'text-emerald-700' : 
-                              guest.rsvpStatus === 'declined' ? 'text-rose-700' : 
-                              'text-amber-700'
-                            }`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${
-                                guest.rsvpStatus === 'attending' ? 'bg-emerald-500' : 
-                                guest.rsvpStatus === 'declined' ? 'bg-rose-500' : 
-                                'bg-amber-500'
-                              }`} />
-                              {guest.rsvpStatus === 'attending' ? 'Hadir' : guest.rsvpStatus === 'declined' ? 'Tidak Hadir' : 'Pending'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5 text-sm text-slate-600 max-w-xs truncate" title={guest.wishes || '-'}>
-                            <div className="flex items-center gap-2">
-                              {guest.stickerUrl && <span className="text-xl leading-none drop-shadow-sm">{guest.stickerUrl}</span>}
-                              <span>{guest.wishes || '-'}</span>
-                            </div>
-                          </td>
-                        </>
-                      ) : (
-                        <>
-                          <td className="px-4 py-3.5 whitespace-nowrap text-xs font-medium">
-                            {(() => {
-                              const dispatchEntry = guest.id ? waDispatchMap[guest.id] : undefined;
-                              const st = dispatchEntry?.status || 'pending';
-                              if (st === 'sent') {
-                                return (
-                                  <span
-                                    className="inline-flex items-center gap-1.5 text-emerald-700"
-                                    title={dispatchEntry?.sentAt ? `Terkirim ${new Date(dispatchEntry.sentAt).toLocaleString('id-ID')}` : 'Terkirim'}
-                                  >
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                    Terkirim ({dispatchEntry?.method === 'manual' ? 'Manual' : 'Fonnte'})
-                                  </span>
-                                );
-                              }
-                              if (st === 'failed') {
-                                return (
-                                  <span
-                                    className="inline-flex items-center gap-1.5 text-rose-600"
-                                    title={dispatchEntry?.lastError || 'Gagal mengirim'}
-                                  >
-                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                                    Gagal
-                                  </span>
-                                );
-                              }
-                              return (
-                                <span className="inline-flex items-center gap-1.5 text-slate-500">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-                                  Belum
-                                </span>
-                              );
-                            })()}
-                          </td>
-                          <td className="px-4 py-3.5 whitespace-nowrap text-xs font-medium">
-                            <span className={`inline-flex items-center gap-1.5 ${
-                              guest.rsvpStatus === 'attending' ? 'text-emerald-700' : 
-                              guest.rsvpStatus === 'declined' ? 'text-rose-700' : 
-                              'text-amber-700'
-                            }`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${
-                                guest.rsvpStatus === 'attending' ? 'bg-emerald-500' : 
-                                guest.rsvpStatus === 'declined' ? 'bg-rose-500' : 
-                                'bg-amber-500'
-                              }`} />
-                              {guest.rsvpStatus === 'attending' ? 'Hadir' : guest.rsvpStatus === 'declined' ? 'Tidak Hadir' : 'Pending'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5 whitespace-nowrap text-xs">
-                            <div className="flex flex-col items-start gap-1">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className={`inline-flex items-center gap-1.5 font-semibold ${guest.attended ? 'text-emerald-700' : 'text-slate-500'}`}>
-                                  <span className={`w-1.5 h-1.5 rounded-full ${guest.attended ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                                  {guest.attended ? 'Hadir' : 'Belum Hadir'}
-                                </span>
-                                {guest.attended && (
-                                  guest.checkInMethod === 'manual' ? (
-                                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded">
-                                      Manual
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-sky-800 bg-sky-50 border border-sky-200 px-1.5 py-0.2 rounded">
-                                      Scan QR
-                                    </span>
-                                  )
-                                )}
-                              </div>
-                              {guest.attended && guest.checkInStaff && (
-                                <span className="text-[11px] text-slate-500 pl-3">
-                                  Oleh: <span className="font-medium text-indigo-700">{guest.checkInStaff}</span>
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5 whitespace-nowrap text-xs font-mono tabular-nums text-slate-500">
-                            {guest.attendedAt && parseFirestoreDate(guest.attendedAt) ? parseFirestoreDate(guest.attendedAt)!.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '-'}
-                          </td>
-                          <td className="px-4 py-3.5 whitespace-nowrap text-xs">
-                            {guest.souvenirTaken ? (
-                              <div className="flex flex-col items-start gap-0.5">
-                                <span className="inline-flex items-center gap-1.5 font-semibold text-purple-700">
-                                  <Gift className="w-3.5 h-3.5 text-purple-600" />
-                                  <span>{guest.souvenirName || 'Diambil'}</span>
-                                </span>
-                                {guest.souvenirTakenBy && (
-                                  <span className="text-[11px] text-slate-500 pl-5">
-                                    Oleh: <span className="font-medium text-purple-700">{guest.souvenirTakenBy}</span>
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-xs text-slate-400">Belum</span>
-                            )}
-                          </td>
-                        </>
-                      )}
-                      <td className={`px-4 sm:px-5 py-3.5 whitespace-nowrap text-sm font-medium sticky right-0 z-10 shadow-[-4px_0_12px_-3px_rgba(0,0,0,0.04)] ${selectedGuestIds.includes(guest.id) ? 'bg-indigo-50/40' : 'bg-white group-hover:bg-slate-50/90'}`}>
-                        <div className="flex items-center justify-end gap-1">
-                          {isEventLocked ? (
-                            <span
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-100 text-slate-400 text-[11px] font-medium border border-slate-200/80 cursor-not-allowed"
-                              title="Aksi tamu dikunci sementara — lakukan Top-Up Paket untuk membuka kembali"
+                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                          Nama Tamu
+                        </th>
+                        {(activeTab === 'guest-list' || activeTab === 'attended') && (
+                          <>
+                            <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                              Alamat
+                            </th>
+                            <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                              No. Hp
+                            </th>
+                            <th
+                              onClick={() => setSortBy((prev) => (prev === 'category_setting' ? 'category_desc' : 'category_setting'))}
+                              className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-indigo-600 select-none"
+                              title="Klik untuk mengurutkan berdasarkan Kategori sesuai settingan"
                             >
-                              <Lock className="w-3 h-3" />
-                              <span>Terkunci</span>
-                            </span>
-                          ) : activeTab === 'rsvp' ? (
+                              <div className="inline-flex items-center gap-1">
+                                <span>Kategori</span>
+                                <ArrowUpDown
+                                  className={`w-3.5 h-3.5 ${
+                                    sortBy === 'category_setting' || sortBy === 'category_desc' ? 'text-indigo-600' : 'text-gray-400'
+                                  }`}
+                                />
+                              </div>
+                            </th>
+                            <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                              Tipe Undangan
+                            </th>
+                          </>
+                        )}
+                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                          Sesi
+                        </th>
+                        <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                          Pax
+                        </th>
+                        {activeTab === 'rsvp' ? (
+                          <>
+                            <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                              Status RSVP
+                            </th>
+                            <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                              Ucapan
+                            </th>
+                          </>
+                        ) : (
+                          <>
+                            <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                              Status Kirim
+                            </th>
+                            <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                              Status RSVP
+                            </th>
+                            <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                              Status Scan
+                            </th>
+                            <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                              Waktu Hadir
+                            </th>
+                            <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                              Souvenir
+                            </th>
+                          </>
+                        )}
+                        <th className="px-4 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider sticky right-0 bg-gray-50 shadow-[-4px_0_12px_-3px_rgba(0,0,0,0.04)] z-10">
+                          Aksi
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {paginatedGuests.map((guest, index) => (
+                        <tr
+                          key={guest.id}
+                          className={`group transition-colors ${
+                            selectedGuestIds.includes(guest.id) ? 'bg-indigo-50/40' : 'hover:bg-gray-50'
+                          }`}
+                        >
+                          <td className="px-4 py-3.5 whitespace-nowrap">
+                            <input
+                              type="checkbox"
+                              className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                              checked={!isEventLocked && selectedGuestIds.includes(guest.id)}
+                              disabled={isEventLocked}
+                              onChange={(e) => handleSelectGuest(guest.id, e.target.checked)}
+                            />
+                          </td>
+                          <td className="px-3 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">
+                            {startIndex + index + 1}
+                          </td>
+                          <td className="px-3 py-3.5 whitespace-nowrap">
+                            {canDirectEditRank && !isEventLocked ? (
+                              <div className="relative flex items-center">
+                                <input
+                                  type="text"
+                                  value={
+                                    guest.id && inlineTitleDrafts[guest.id] !== undefined
+                                      ? inlineTitleDrafts[guest.id]
+                                      : guest.title || ''
+                                  }
+                                  onChange={(e) => {
+                                    if (!guest.id) return;
+                                    setInlineTitleDrafts((prev) => ({
+                                      ...prev,
+                                      [guest.id!]: e.target.value,
+                                    }));
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      e.currentTarget.blur();
+                                    } else if (e.key === 'Escape' && guest.id) {
+                                      setInlineTitleDrafts((prev) => ({
+                                        ...prev,
+                                        [guest.id!]: guest.title || '',
+                                      }));
+                                      e.currentTarget.blur();
+                                    }
+                                  }}
+                                  onBlur={(e) => {
+                                    handleQuickSaveGuestTitle(guest, e.target.value);
+                                  }}
+                                  placeholder="+ Pangkat/Gelar..."
+                                  className="w-36 px-2.5 py-1 text-xs font-medium text-gray-800 bg-gray-50/70 hover:bg-white focus:bg-white border border-gray-200 focus:border-indigo-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition placeholder:text-gray-400 placeholder:font-normal"
+                                  title="Ketik Pangkat/Jabatan (contoh: Letkol, Mayor, Bpk., Ibu) lalu tekan Enter"
+                                />
+                                {savingTitleGuestId === guest.id && (
+                                  <Loader2 className="w-3.5 h-3.5 text-indigo-600 animate-spin absolute right-2" />
+                                )}
+                              </div>
+                            ) : guest.title ? (
+                              <span className="text-xs font-medium text-gray-700">{guest.title}</span>
+                            ) : (
+                              <span className="text-xs text-gray-400">-</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3.5 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">{guest.name}</div>
+                            {guest.ticketCode && (
+                              <div className="text-[11px] font-mono tabular-nums text-gray-400 mt-0.5">
+                                {guest.ticketCode}
+                              </div>
+                            )}
+                          </td>
+                          {(activeTab === 'guest-list' || activeTab === 'attended') && (
                             <>
-                               <button
-                                    onClick={() => handleEditWishesClick(guest)}
-                                    className="text-slate-500 hover:text-indigo-600 flex items-center justify-center p-1.5 rounded-lg hover:bg-indigo-50 transition-colors"
-                                    title="Edit Ucapan"
-                               >
-                                 <Edit className="w-4 h-4" />
-                               </button>
-                               <button
-                                    onClick={() => handleDeleteWishes(guest.id!)}
-                                    className="text-slate-500 hover:text-rose-600 flex items-center justify-center p-1.5 rounded-lg hover:bg-rose-50 transition-colors"
-                                    title="Hapus Ucapan"
-                               >
-                                 <Trash2 className="w-4 h-4" />
-                               </button>
+                              <td className="px-4 py-3.5 whitespace-nowrap text-sm text-gray-600">
+                                {guest.address || '-'}
+                              </td>
+                              <td className="px-4 py-3.5 whitespace-nowrap text-sm tabular-nums text-gray-600">
+                                {guest.phone || '-'}
+                              </td>
+                              <td className="px-4 py-3.5 whitespace-nowrap text-xs font-medium text-indigo-700">
+                                {guest.category || <span className="text-gray-400 font-normal">-</span>}
+                              </td>
+                              <td className="px-4 py-3.5 whitespace-nowrap text-xs text-gray-600">
+                                {guest.invitationType || <span className="text-gray-400">-</span>}
+                              </td>
+                            </>
+                          )}
+                          <td className="px-4 py-3.5 whitespace-nowrap text-xs text-gray-700">
+                            {guest.session || <span className="text-gray-400">-</span>}
+                          </td>
+                          <td className="px-4 py-3.5 whitespace-nowrap text-xs font-semibold tabular-nums">
+                            {guest.rsvpStatus === 'declined' ? (
+                              <span className="text-rose-600">0 Org</span>
+                            ) : (
+                              <span className="text-gray-800">{Math.max(1, Number(guest.pax) || 1)} Org</span>
+                            )}
+                          </td>
+                          {activeTab === 'rsvp' ? (
+                            <>
+                              <td className="px-4 py-3.5 whitespace-nowrap text-xs font-medium">
+                                <span
+                                  className={
+                                    guest.rsvpStatus === 'attending'
+                                      ? 'text-emerald-700'
+                                      : guest.rsvpStatus === 'declined'
+                                      ? 'text-rose-700'
+                                      : 'text-amber-700'
+                                  }
+                                >
+                                  {guest.rsvpStatus === 'attending'
+                                    ? 'Hadir'
+                                    : guest.rsvpStatus === 'declined'
+                                    ? 'Tidak Hadir'
+                                    : 'Pending'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3.5 text-sm text-gray-600 max-w-xs truncate" title={guest.wishes || '-'}>
+                                <div className="flex items-center gap-2">
+                                  {guest.stickerUrl && <span className="text-lg leading-none">{guest.stickerUrl}</span>}
+                                  <span className="truncate">{guest.wishes || '-'}</span>
+                                </div>
+                              </td>
                             </>
                           ) : (
                             <>
-                               <button 
-                                   onClick={() => handleToggleAttendance(guest.id!, guest.attended)}
-                                   className={`flex items-center justify-center p-1.5 rounded-lg transition-colors ${
-                                     guest.attended 
-                                       ? 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50' 
-                                       : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'
-                                   }`}
-                                   title={guest.attended ? 'Batalkan Kehadiran' : 'Konfirmasi Kehadiran'}
-                               >
-                                 {guest.attended ? <XCircle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
-                               </button>
-                               <button 
-                                   onClick={() => setActiveQrGuest(guest)}
-                                   className="text-slate-500 hover:text-indigo-600 flex items-center justify-center p-1.5 rounded-lg hover:bg-indigo-50 transition-colors" 
-                                   title="Lihat / Bagikan QR"
-                               >
-                                 <QrCode className="w-4 h-4" />
-                               </button>
-                               {!isStaff && (
-                                 <>
-                                   <button 
-                                       onClick={() => handleEditGuestClick(guest)} 
-                                       className="text-slate-500 hover:text-indigo-600 flex items-center justify-center p-1.5 rounded-lg hover:bg-indigo-50 transition-colors" 
-                                       title="Edit Tamu"
-                                   >
-                                     <Edit className="w-4 h-4" />
-                                   </button>
-                                   <button 
-                                       onClick={() => promptDeleteGuest(guest.id!)} 
-                                       className="text-slate-500 hover:text-rose-600 flex items-center justify-center p-1.5 rounded-lg hover:bg-rose-50 transition-colors" 
-                                       title="Hapus Tamu"
-                                   >
-                                     <Trash2 className="w-4 h-4" />
-                                   </button>
-                                 </>
-                               )}
+                              <td className="px-4 py-3.5 whitespace-nowrap text-xs font-medium">
+                                {(() => {
+                                  const dispatchEntry = guest.id ? waDispatchMap[guest.id] : undefined;
+                                  const st = dispatchEntry?.status || 'pending';
+                                  if (st === 'sent') {
+                                    return (
+                                      <span
+                                        className="text-emerald-700"
+                                        title={dispatchEntry?.sentAt ? `Terkirim ${new Date(dispatchEntry.sentAt).toLocaleString('id-ID')}` : 'Terkirim'}
+                                      >
+                                        Terkirim ({dispatchEntry?.method === 'manual' ? 'Manual' : 'Fonnte'})
+                                      </span>
+                                    );
+                                  }
+                                  if (st === 'failed') {
+                                    return (
+                                      <span className="text-rose-600" title={dispatchEntry?.lastError || 'Gagal mengirim'}>
+                                        Gagal
+                                      </span>
+                                    );
+                                  }
+                                  return <span className="text-gray-400">Belum</span>;
+                                })()}
+                              </td>
+                              <td className="px-4 py-3.5 whitespace-nowrap text-xs font-medium">
+                                <span
+                                  className={
+                                    guest.rsvpStatus === 'attending'
+                                      ? 'text-emerald-700'
+                                      : guest.rsvpStatus === 'declined'
+                                      ? 'text-rose-700'
+                                      : 'text-amber-700'
+                                  }
+                                >
+                                  {guest.rsvpStatus === 'attending'
+                                    ? 'Hadir'
+                                    : guest.rsvpStatus === 'declined'
+                                    ? 'Tidak Hadir'
+                                    : 'Pending'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3.5 whitespace-nowrap text-xs">
+                                <div className="flex flex-col items-start gap-0.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`font-semibold ${guest.attended ? 'text-emerald-700' : 'text-gray-400'}`}>
+                                      {guest.attended ? 'Hadir' : 'Belum Hadir'}
+                                    </span>
+                                    {guest.attended && (
+                                      <span className="text-[11px] text-gray-500">
+                                        · {guest.checkInMethod === 'manual' ? 'Manual' : 'Scan QR'}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {guest.attended && guest.checkInStaff && (
+                                    <span className="text-[11px] text-gray-500">
+                                      Oleh: <span className="font-medium text-indigo-600">{guest.checkInStaff}</span>
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3.5 whitespace-nowrap text-xs tabular-nums text-gray-500">
+                                {guest.attendedAt && parseFirestoreDate(guest.attendedAt)
+                                  ? parseFirestoreDate(guest.attendedAt)!.toLocaleString('id-ID', {
+                                      dateStyle: 'medium',
+                                      timeStyle: 'short',
+                                    })
+                                  : '-'}
+                              </td>
+                              <td className="px-4 py-3.5 whitespace-nowrap text-xs">
+                                {guest.souvenirTaken ? (
+                                  <div className="flex flex-col items-start gap-0.5">
+                                    <span className="font-semibold text-indigo-700">
+                                      {guest.souvenirName || 'Diambil'}
+                                    </span>
+                                    {guest.souvenirTakenBy && (
+                                      <span className="text-[11px] text-gray-500">
+                                        Oleh: {guest.souvenirTakenBy}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-400">Belum</span>
+                                )}
+                              </td>
                             </>
                           )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            
-            {/* Pagination Controls */}
-            <div className="px-4 py-3.5 flex flex-col sm:flex-row items-center justify-between border-t border-gray-200 sm:px-6 gap-3 bg-gray-50/50">
-              <div>
-                <p className="text-sm text-gray-700">
-                  Menampilkan <span className="font-semibold text-gray-900">{filteredGuests.length === 0 ? 0 : startIndex + 1}</span> - <span className="font-semibold text-gray-900">{endIndex}</span> dari <span className="font-semibold text-indigo-600">{filteredGuests.length}</span> total tamu
-                </p>
-              </div>
-
-              {itemsPerPage !== 'all' && totalPages > 1 && (
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => setCurrentPage(1)}
-                    disabled={currentPage === 1}
-                    className="px-2.5 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    title="Halaman Pertama"
-                  >
-                    «
-                  </button>
-                  <button
-                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
-                    className="px-3 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Sebelumnya
-                  </button>
-                  
-                  <span className="px-3 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md">
-                    Halaman <span className="text-indigo-600 font-bold">{currentPage}</span> dari {totalPages}
-                  </span>
-                  
-                  <button
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                    disabled={currentPage === totalPages}
-                    className="px-3 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Selanjutnya
-                  </button>
-                  <button
-                    onClick={() => setCurrentPage(totalPages)}
-                    disabled={currentPage === totalPages}
-                    className="px-2.5 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    title="Halaman Terakhir"
-                  >
-                    »
-                  </button>
+                          <td
+                            className={`px-4 py-3.5 whitespace-nowrap text-sm font-medium sticky right-0 z-10 shadow-[-4px_0_12px_-3px_rgba(0,0,0,0.04)] ${
+                              selectedGuestIds.includes(guest.id)
+                                ? 'bg-indigo-50/40'
+                                : 'bg-white group-hover:bg-gray-50'
+                            }`}
+                          >
+                            <div className="flex items-center justify-end space-x-1">
+                              {isEventLocked ? (
+                                <span
+                                  className="inline-flex items-center gap-1 text-xs text-gray-400 cursor-not-allowed"
+                                  title="Aksi tamu dikunci sementara — lakukan Top-Up Paket untuk membuka kembali"
+                                >
+                                  <Lock className="w-3.5 h-3.5" />
+                                  <span>Terkunci</span>
+                                </span>
+                              ) : activeTab === 'rsvp' ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleEditWishesClick(guest)}
+                                    className="text-blue-600 hover:text-blue-900 flex items-center justify-center p-1.5 rounded-full hover:bg-blue-50 transition-colors cursor-pointer"
+                                    title="Edit Ucapan"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteWishes(guest.id!)}
+                                    className="text-red-600 hover:text-red-900 flex items-center justify-center p-1.5 rounded-full hover:bg-red-50 transition-colors cursor-pointer"
+                                    title="Hapus Ucapan"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleAttendance(guest.id!, guest.attended)}
+                                    className={`flex items-center justify-center p-1.5 rounded-full transition-colors cursor-pointer ${
+                                      guest.attended
+                                        ? 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50'
+                                        : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'
+                                    }`}
+                                    title={guest.attended ? 'Batalkan Kehadiran' : 'Konfirmasi Kehadiran'}
+                                  >
+                                    {guest.attended ? <XCircle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveQrGuest(guest)}
+                                    className="text-indigo-600 hover:text-indigo-900 flex items-center justify-center p-1.5 rounded-full hover:bg-indigo-50 transition-colors cursor-pointer"
+                                    title="Lihat / Bagikan QR"
+                                  >
+                                    <QrCode className="w-4 h-4" />
+                                  </button>
+                                  {!isStaff && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEditGuestClick(guest)}
+                                        className="text-blue-600 hover:text-blue-900 flex items-center justify-center p-1.5 rounded-full hover:bg-blue-50 transition-colors cursor-pointer"
+                                        title="Edit Tamu"
+                                      >
+                                        <Edit className="w-4 h-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => promptDeleteGuest(guest.id!)}
+                                        className="text-red-600 hover:text-red-900 flex items-center justify-center p-1.5 rounded-full hover:bg-red-50 transition-colors cursor-pointer"
+                                        title="Hapus Tamu"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              )}
-            </div>
-            </>
-          )}
+
+                {/* Pagination Footer (Create Event Standard) */}
+                <div className="px-4 py-3.5 flex flex-col sm:flex-row items-center justify-between border-t border-gray-200 sm:px-5 gap-3 bg-gray-50/50">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600 tabular-nums">
+                    <span>
+                      Menampilkan{' '}
+                      <span className="font-semibold text-gray-900">
+                        {filteredGuests.length === 0 ? 0 : startIndex + 1}
+                      </span>{' '}
+                      – <span className="font-semibold text-gray-900">{endIndex}</span> dari{' '}
+                      <span className="font-semibold text-indigo-600">{filteredGuests.length}</span> tamu
+                    </span>
+                    {hasActiveGuestFilter && (
+                      <>
+                        <span className="text-xs text-gray-400">({guests.length} total)</span>
+                        <button
+                          type="button"
+                          onClick={resetGuestFilters}
+                          className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 underline cursor-pointer"
+                        >
+                          Reset
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  {itemsPerPage !== 'all' && totalPages > 1 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(1)}
+                        disabled={currentPage === 1}
+                        className="px-2.5 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                        title="Halaman Pertama"
+                      >
+                        «
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                        className="px-3 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      >
+                        Sebelumnya
+                      </button>
+                      <span className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg tabular-nums">
+                        Hal <span className="text-indigo-600 font-bold">{currentPage}</span> / {totalPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                        className="px-3 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      >
+                        Selanjutnya
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(totalPages)}
+                        disabled={currentPage === totalPages}
+                        className="px-2.5 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                        title="Halaman Terakhir"
+                      >
+                        »
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      </div>
-      </>
       )}
 
       <Modal isOpen={isBlastModalOpen} onClose={() => setIsBlastModalOpen(false)} title="Blast WhatsApp">

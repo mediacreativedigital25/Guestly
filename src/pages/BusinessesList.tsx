@@ -25,7 +25,8 @@ import {
   Users,
   CalendarDays,
   Shield,
-  Lock
+  Lock,
+  X
 } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
@@ -58,6 +59,8 @@ export default function BusinessesList() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'verified' | 'incomplete'>('all');
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   // Add Business / Partner Modal State
   const [isAdding, setIsAdding] = useState(false);
@@ -186,6 +189,23 @@ export default function BusinessesList() {
     const totalPartnerEvents = enrichedBusinesses.reduce((acc, b) => acc + b.eventCount, 0);
     return { total, verified, incomplete, totalPartnerEvents };
   }, [enrichedBusinesses]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, itemsPerPage]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredBusinesses.length / itemsPerPage));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, filteredBusinesses.length);
+  const paginatedBusinesses = filteredBusinesses.slice(startIndex, endIndex);
+  const hasActiveFilters = Boolean(searchQuery.trim() || statusFilter !== 'all');
+
+  const resetFilters = () => {
+    setSearchQuery('');
+    setStatusFilter('all');
+    setCurrentPage(1);
+  };
 
   const handleOpenAddModal = () => {
     setError('');
@@ -518,301 +538,379 @@ Anda kini dapat membuat dan mengelola acara serta menambahkan tim Admin & Staff 
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-        <div>
-          <p className="text-sm text-gray-500">
-            Pendaftaran dan verifikasi resmi identitas usaha (Nama Usaha & Alamat Lengkap) untuk Partner Guestly (WO / EO / Agensi).
-          </p>
+    <div className="space-y-4">
+      {/* Compact Summary Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-xs">
+          <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Total Partner / Owner</div>
+          <div className="mt-1.5 flex items-baseline justify-between gap-2">
+            <span className="text-2xl font-bold font-mono text-gray-900">{stats.total}</span>
+            <span className="text-[11px] text-indigo-700 font-semibold bg-indigo-50 border border-indigo-200/70 px-2 py-0.5 rounded-full">Mitra</span>
+          </div>
         </div>
 
+        <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-xs">
+          <div className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider">Terverifikasi</div>
+          <div className="mt-1.5 flex items-baseline justify-between gap-2">
+            <span className="text-2xl font-bold font-mono text-emerald-700">{stats.verified}</span>
+            <span className="text-[11px] text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+              Event Aktif
+            </span>
+          </div>
+        </div>
+
+        <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-xs">
+          <div className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider">Belum Lengkap</div>
+          <div className="mt-1.5 flex items-baseline justify-between gap-2">
+            <span className="text-2xl font-bold font-mono text-amber-700">{stats.incomplete}</span>
+            <span className="text-[11px] text-amber-800 font-semibold bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+              Terkunci
+            </span>
+          </div>
+        </div>
+
+        <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-xs">
+          <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Total Acara Partner</div>
+          <div className="mt-1.5 flex items-baseline justify-between gap-2">
+            <span className="text-2xl font-bold font-mono text-gray-900">{stats.totalPartnerEvents}</span>
+            <span className="text-[11px] text-gray-600 font-semibold bg-gray-100 border border-gray-200 px-2 py-0.5 rounded-full">Acara</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Box 1: Unified Filter & Search Box */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-2.5 sm:p-3">
+        <div className="flex flex-col md:flex-row md:items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari nama usaha, alamat, kota, email, atau nama owner..."
+              className="w-full h-8.5 pl-9 pr-8 text-xs bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                title="Hapus pencarian"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'all' | 'verified' | 'incomplete')}
+              className="h-8.5 px-2.5 text-xs bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="all">Semua Status ({stats.total})</option>
+              <option value="verified">Terverifikasi Lengkap ({stats.verified})</option>
+              <option value="incomplete">Belum Lengkap Alamat ({stats.incomplete})</option>
+            </select>
+
+            <select
+              value={itemsPerPage}
+              onChange={(e) => setItemsPerPage(Number(e.target.value))}
+              className="h-8.5 px-2.5 text-xs bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+            >
+              <option value={10}>Tampilkan 10</option>
+              <option value={25}>Tampilkan 25</option>
+              <option value={50}>Tampilkan 50</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Primary Action Bar (Left-Aligned between Filter Box & Table Box) */}
+      <div className="flex flex-wrap items-center gap-2">
         <button
+          type="button"
           onClick={handleOpenAddModal}
-          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium shadow-xs self-start sm:self-auto"
+          className="inline-flex items-center gap-1.5 h-9 px-3.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-xs font-semibold shadow-xs transition-colors cursor-pointer"
         >
           <Plus className="w-4 h-4" />
-          Daftarkan Partner / Bisnis Baru
+          <span>Daftarkan Partner / Bisnis Baru</span>
         </button>
       </div>
 
-      {/* Info Banner Explaining End-User vs Partner Guestly */}
-      <div className="bg-indigo-50/70 border border-indigo-100 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="p-2 bg-indigo-100 text-indigo-700 rounded-lg shrink-0 mt-0.5">
-            <Building2 className="w-5 h-5" />
+      {/* Box 2: Businesses Table Container */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        {loading ? (
+          <div className="flex justify-center p-10">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
           </div>
-          <div className="text-xs text-gray-700 space-y-1">
-            <div className="font-bold text-sm text-indigo-950">
-              Kebijakan Verifikasi Partner Guestly (Pendaftaran Terpusat oleh Super Admin)
-            </div>
-            <p>
-              • <strong>End-User (Mandiri):</strong> Klien pribadi yang menggunakan Guestly langsung di bawah <em>Guestly Official</em> tidak wajib memiliki data usaha.
+        ) : filteredBusinesses.length === 0 ? (
+          <div className="p-10 text-center flex flex-col items-center justify-center gap-2">
+            <Building2 className="w-10 h-10 text-gray-300" />
+            <p className="text-sm font-medium text-gray-600">
+              {hasActiveFilters
+                ? 'Tidak ada data Partner / Bisnis yang cocok dengan pencarian atau filter.'
+                : 'Belum ada data Partner / Bisnis yang terdaftar.'}
             </p>
-            <p>
-              • <strong>Partner Guestly (Owner / WO / EO):</strong> Wajib didaftarkan <strong>Nama Usaha & Alamat Lengkap</strong> oleh Super Admin di halaman ini sebelum akun Partner maupun Admin-nya diizinkan membuat acara baru (<em>Create Event</em>).
-            </p>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
+              >
+                Reset Pencarian &amp; Filter
+              </button>
+            )}
           </div>
-        </div>
-      </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-12">
+                      No
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Nama Usaha / Partner
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Alamat Lengkap &amp; Kontak
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Owner / PIC
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Tim, Klien &amp; Acara
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Status Verifikasi
+                    </th>
+                    <th className="px-4 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">
+                      Aksi
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {paginatedBusinesses.map(({ owner, isVerified, adminCount, staffCount, clientCount, eventCount }, index) => {
+                    const clientQuotaVal = owner.clientCredit !== undefined ? owner.clientCredit : (owner.clientQuota || 0);
+                    const eventQuotaVal = owner.eventCredit !== undefined ? owner.eventCredit : (owner.eventQuota || 0);
+                    const isManualBypass = Boolean(owner.allowManualEvent ?? owner.eventManual);
 
-      {/* Summary Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-          <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Akun Partner / Owner</div>
-          <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-2xl font-bold text-gray-900">{stats.total}</span>
-            <span className="text-xs text-indigo-600 font-medium bg-indigo-50 px-2 py-0.5 rounded-full">Mitra Bisnis</span>
-          </div>
-        </div>
+                    return (
+                      <tr key={owner.id} className="hover:bg-gray-50/80 transition-colors">
+                        <td className="px-4 py-3.5 whitespace-nowrap text-xs font-mono text-gray-500">
+                          {startIndex + index + 1}
+                        </td>
 
-        <div className="bg-white p-4 rounded-xl border border-emerald-200 shadow-xs">
-          <div className="text-xs font-medium text-emerald-700 uppercase tracking-wider">Partner Terverifikasi Lengkap</div>
-          <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-2xl font-bold text-emerald-700">{stats.verified}</span>
-            <span className="text-xs text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded-full">
-              Create Event Aktif
-            </span>
-          </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-xs">
-          <div className="text-xs font-medium text-amber-700 uppercase tracking-wider">Data Usaha Belum Lengkap</div>
-          <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-2xl font-bold text-amber-700">{stats.incomplete}</span>
-            <span className="text-xs text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded-full">
-              Terkunci Create Event
-            </span>
-          </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-          <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Acara Partner</div>
-          <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-2xl font-bold text-gray-900">{stats.totalPartnerEvents}</span>
-            <span className="text-xs text-gray-600 font-medium bg-gray-100 px-2 py-0.5 rounded-full">Acara Dikelola</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Search & Filter Bar */}
-      <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Cari nama usaha, alamat, kota, atau nama owner..."
-            className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-indigo-500 focus:border-indigo-500"
-          />
-        </div>
-
-        <div className="flex items-center gap-2">
-          <select
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value as any)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white font-medium"
-          >
-            <option value="all">Semua Status Partner ({stats.total})</option>
-            <option value="verified">✅ Terverifikasi Lengkap ({stats.verified})</option>
-            <option value="incomplete">⚠️ Belum Lengkap Alamat ({stats.incomplete})</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Businesses Table */}
-      {loading ? (
-        <div className="flex justify-center p-10 bg-white rounded-xl border border-gray-200">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-        </div>
-      ) : filteredBusinesses.length === 0 ? (
-        <div className="bg-white p-12 text-center rounded-xl border border-gray-200">
-          <Building2 className="w-10 h-10 text-gray-400 mx-auto mb-3" />
-          <p className="text-gray-700 font-medium">Belum ada data Partner / Bisnis yang sesuai filter.</p>
-          <p className="text-sm text-gray-500 mt-1">
-            Klik tombol <strong>Daftarkan Partner / Bisnis Baru</strong> untuk mendaftarkan usaha mitra Guestly.
-          </p>
-        </div>
-      ) : (
-        <div className="bg-white shadow-xs rounded-xl border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Nama Usaha / Partner
-                  </th>
-                  <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Alamat Lengkap & Kontak
-                  </th>
-                  <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Owner / Penanggung Jawab
-                  </th>
-                  <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Tim, Klien & Acara
-                  </th>
-                  <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Status Verifikasi & Akses
-                  </th>
-                  <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Aksi
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredBusinesses.map(({ owner, isVerified, adminCount, staffCount, clientCount, eventCount }) => {
-                  const clientQuotaVal = owner.clientCredit !== undefined ? owner.clientCredit : (owner.clientQuota || 0);
-                  const eventQuotaVal = owner.eventCredit !== undefined ? owner.eventCredit : (owner.eventQuota || 0);
-                  const isManualBypass = Boolean(owner.allowManualEvent ?? owner.eventManual);
-
-                  return (
-                    <tr key={owner.id} className="hover:bg-gray-50/80 transition-colors">
-                      {/* Nama Usaha */}
-                      <td className="px-5 py-4">
-                        <div className="flex items-start gap-3">
-                          {owner.logoUrl ? (
-                            <img
-                              src={owner.logoUrl}
-                              alt={owner.businessName || owner.name}
-                              className="w-10 h-10 rounded-lg object-contain border border-gray-200 bg-white shrink-0"
-                            />
-                          ) : (
-                            <div className="w-10 h-10 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-sm shrink-0">
-                              <Building2 className="w-5 h-5" />
-                            </div>
-                          )}
-                          <div>
-                            <div className="text-sm font-bold text-gray-900">
-                              {owner.businessName || <span className="text-red-600 italic">Nama Usaha Belum Diisi</span>}
-                            </div>
-                            <span className="inline-block mt-0.5 text-[11px] font-medium px-2 py-0.5 rounded bg-gray-100 text-gray-700">
-                              {owner.businessCategory || 'Wedding Organizer (WO)'}
-                            </span>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Alamat Lengkap & Kontak */}
-                      <td className="px-5 py-4 max-w-xs">
-                        {owner.businessAddress ? (
-                          <div className="space-y-1">
-                            <div className="text-xs text-gray-800 flex items-start gap-1.5">
-                              <MapPin className="w-3.5 h-3.5 text-indigo-600 shrink-0 mt-0.5" />
-                              <span>
-                                {owner.businessAddress}
-                                {owner.businessCity ? `, ${owner.businessCity}` : ''}
+                        {/* Nama Usaha */}
+                        <td className="px-4 py-3.5">
+                          <div className="flex items-start gap-3">
+                            {owner.logoUrl ? (
+                              <img
+                                src={owner.logoUrl}
+                                alt={owner.businessName || owner.name}
+                                className="w-9 h-9 rounded-lg object-contain border border-gray-200 bg-white shrink-0"
+                              />
+                            ) : (
+                              <div className="w-9 h-9 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-xs shrink-0">
+                                <Building2 className="w-4 h-4" />
+                              </div>
+                            )}
+                            <div>
+                              <div className="text-sm font-semibold text-gray-900">
+                                {owner.businessName || <span className="text-red-600 italic">Nama Usaha Belum Diisi</span>}
+                              </div>
+                              <span className="inline-block mt-0.5 text-[11px] font-medium px-2 py-0.5 rounded bg-gray-100 text-gray-700">
+                                {owner.businessCategory || 'Wedding Organizer (WO)'}
                               </span>
                             </div>
-                            {owner.phone && (
-                              <div className="text-xs text-gray-500 flex items-center gap-1.5">
-                                <Phone className="w-3 h-3 text-gray-400 shrink-0" />
-                                <span>{owner.phone}</span>
-                              </div>
-                            )}
-                            {owner.waGroupReminderEnabled && owner.waGroupId?.trim() && (
-                              <div
-                                className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded w-fit"
-                                title={`ID Grup: ${owner.waGroupId} · H-3/H-1 ${owner.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME} WIB · Hari H ${owner.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME} WIB`}
-                              >
-                                <Users className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
-                                <span className="truncate max-w-[200px]">
-                                  Grup WA: {owner.waGroupName?.trim() || 'Aktif'} ({owner.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME} / H {owner.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME})
+                          </div>
+                        </td>
+
+                        {/* Alamat Lengkap & Kontak */}
+                        <td className="px-4 py-3.5 max-w-xs">
+                          {owner.businessAddress ? (
+                            <div className="space-y-1">
+                              <div className="text-xs text-gray-800 flex items-start gap-1.5">
+                                <MapPin className="w-3.5 h-3.5 text-indigo-600 shrink-0 mt-0.5" />
+                                <span>
+                                  {owner.businessAddress}
+                                  {owner.businessCity ? `, ${owner.businessCity}` : ''}
                                 </span>
                               </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-50 text-red-700 border border-red-200 text-xs font-medium">
-                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                            Alamat Usaha Belum Didaftarkan
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Owner / PIC */}
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <div className="text-sm font-semibold text-gray-900">{owner.name}</div>
-                        <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
-                          <Mail className="w-3 h-3 text-gray-400" />
-                          {owner.email}
-                        </div>
-                        <span className="inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
-                          {getRoleLabel(owner.role)}
-                        </span>
-                      </td>
-
-                      {/* Statistik Naungan */}
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <div className="flex flex-wrap gap-1.5 mb-1.5">
-                          <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">
-                            <Users className="w-3 h-3" /> {adminCount} Admin, {staffCount} Staff
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
-                            {clientCount} Client (Kuota: {isManualBypass ? '∞' : clientQuotaVal})
-                          </span>
-                          <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
-                            <CalendarDays className="w-3 h-3" /> {eventCount} Event (Kuota: {isManualBypass ? '∞' : eventQuotaVal})
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Status Verifikasi & Create Event */}
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        {isVerified ? (
-                          <div className="space-y-1">
-                            <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Partner Terverifikasi
-                            </span>
-                            <div className="text-[11px] text-emerald-700 font-medium pl-1">
-                              Create Event: Diizinkan
+                              {owner.phone && (
+                                <div className="text-xs text-gray-500 flex items-center gap-1.5">
+                                  <Phone className="w-3 h-3 text-gray-400 shrink-0" />
+                                  <span>{owner.phone}</span>
+                                </div>
+                              )}
+                              {owner.waGroupReminderEnabled && owner.waGroupId?.trim() && (
+                                <div
+                                  className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded w-fit"
+                                  title={`ID Grup: ${owner.waGroupId} · H-3/H-1 ${owner.waGroupReminderTime || DEFAULT_GROUP_REMINDER_TIME} WIB · Hari H ${owner.waGroupReminderH0Time || DEFAULT_GROUP_REMINDER_H0_TIME} WIB`}
+                                >
+                                  <Users className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                  <span className="truncate max-w-[180px]">
+                                    Grup WA: {owner.waGroupName?.trim() || 'Aktif'}
+                                  </span>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        ) : (
-                          <div className="space-y-1">
-                            <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                              <Lock className="w-3.5 h-3.5" /> Belum Terdaftar Lengkap
-                            </span>
-                            <div className="text-[11px] text-red-600 font-medium pl-1">
-                              Create Event: Terkunci
+                          ) : (
+                            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-50 text-rose-700 border border-rose-200 text-xs font-medium">
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                              Alamat Belum Diisi
                             </div>
-                          </div>
-                        )}
-                      </td>
+                          )}
+                        </td>
 
-                      {/* Aksi */}
-                      <td className="px-5 py-4 whitespace-nowrap text-sm font-medium">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleOpenEditModal(owner)}
-                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                              isVerified
-                                ? 'text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100'
-                                : 'text-white bg-amber-600 hover:bg-amber-700 shadow-xs'
-                            }`}
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                            {isVerified ? 'Edit Bisnis' : 'Lengkapi & Verifikasi'}
-                          </button>
-                          <button
-                            onClick={() => handleDeleteBusiness(owner)}
-                            className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 p-1.5 rounded-lg transition-colors"
-                            title="Hapus Partner"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+                        {/* Owner / PIC */}
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <div className="text-sm font-semibold text-gray-900">{owner.name}</div>
+                          <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                            <Mail className="w-3 h-3 text-gray-400" />
+                            {owner.email}
+                          </div>
+                          <span className="inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                            {getRoleLabel(owner.role)}
+                          </span>
+                        </td>
+
+                        {/* Statistik Naungan */}
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <div className="flex flex-wrap gap-1.5 mb-1">
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200/70">
+                              <Users className="w-3 h-3" /> {adminCount} Admin, {staffCount} Staff
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            <span className="text-xs font-medium px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                              {clientCount} Client (Kuota: {isManualBypass ? '∞' : clientQuotaVal})
+                            </span>
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
+                              <CalendarDays className="w-3 h-3" /> {eventCount} Event (Kuota: {isManualBypass ? '∞' : eventQuotaVal})
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Status Verifikasi & Create Event */}
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          {isVerified ? (
+                            <div className="space-y-1">
+                              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Terverifikasi
+                              </span>
+                              <div className="text-[11px] text-emerald-700 font-medium pl-1">
+                                Create Event: Aktif
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                                <Lock className="w-3.5 h-3.5" /> Belum Lengkap
+                              </span>
+                              <div className="text-[11px] text-rose-600 font-medium pl-1">
+                                Create Event: Terkunci
+                              </div>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Aksi */}
+                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                          <div className="inline-flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditModal(owner)}
+                              className={`p-1.5 rounded-full transition-colors cursor-pointer ${
+                                isVerified
+                                  ? 'text-indigo-600 hover:bg-indigo-50'
+                                  : 'text-amber-600 hover:bg-amber-50'
+                              }`}
+                              title={isVerified ? 'Edit Bisnis Partner' : 'Lengkapi & Verifikasi Partner'}
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteBusiness(owner)}
+                              className="p-1.5 rounded-full text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                              title="Hapus Partner"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Footer */}
+            <div className="px-4 py-3 border-t border-gray-200 bg-gray-50/70 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-gray-600">
+              <div className="flex items-center gap-2">
+                <span>
+                  Menampilkan <strong className="text-gray-900">{startIndex + 1}</strong> –{' '}
+                  <strong className="text-gray-900">{endIndex}</strong> dari{' '}
+                  <strong className="text-gray-900">{filteredBusinesses.length}</strong> partner
+                </span>
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={resetFilters}
+                    className="text-indigo-600 hover:text-indigo-800 font-medium underline cursor-pointer"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => setCurrentPage(1)}
+                  className="px-2 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title="Halaman Pertama"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Sebelumnya
+                </button>
+                <span className="px-2.5 py-1 text-gray-700 font-medium">
+                  Hal {safeCurrentPage} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Selanjutnya
+                </button>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => setCurrentPage(totalPages)}
+                  className="px-2 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title="Halaman Terakhir"
+                >
+                  »
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
 
       {/* Modal: Daftarkan Partner / Bisnis Baru */}
       <Modal

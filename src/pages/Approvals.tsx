@@ -1,14 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { collection, query, where, doc, updateDoc, serverTimestamp, addDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../AuthContext';
 import { GuestEditRequest } from '../types';
-import { Check, X, Clock, AlertCircle, Eye, History, Filter } from 'lucide-react';
+import { Check, X, Clock, AlertCircle, Eye, History, Search } from 'lucide-react';
 import { canUserAccessEvent, parseFirestoreDate, getOperatorLabel, getUserBusinessId } from '../lib/utils';
 import { showAlert } from '../lib/alerts';
 import { Modal } from '../components/Modal';
 import { sendFonnteMessage } from '../lib/fonnte';
+import { DateRangeFilterBar, isWithinDateRange } from '../components/DateRangeFilterBar';
 
 export default function Approvals() {
   const { appUser } = useAuth();
@@ -20,12 +21,17 @@ export default function Approvals() {
   const [requesterMap, setRequesterMap] = useState<Record<string, string>>({});
   const [clientPhoneMap, setClientPhoneMap] = useState<Record<string, string>>({});
 
-  // Tab & Filter States
+  // Tab, Search, Filter & Pagination States
   const [activeTab, setActiveTab] = useState<'pending' | 'history'>(() =>
     searchParams.get('tab') === 'history' ? 'history' : 'pending'
   );
+  const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'add' | 'edit'>('all');
   const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | 'approved' | 'rejected'>('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   useEffect(() => {
     const tabParam = searchParams.get('tab');
@@ -404,6 +410,74 @@ export default function Approvals() {
     }
   };
 
+  const pendingRequests = useMemo(
+    () =>
+      requests
+        .filter(r => r.status === 'pending')
+        .sort((a, b) => {
+          const tA = parseFirestoreDate(a.requestedAt)?.getTime() || 0;
+          const tB = parseFirestoreDate(b.requestedAt)?.getTime() || 0;
+          return tB - tA;
+        }),
+    [requests]
+  );
+
+  const historyRequests = useMemo(
+    () =>
+      requests
+        .filter(r => r.status === 'approved' || r.status === 'rejected')
+        .sort((a, b) => {
+          const tA =
+            parseFirestoreDate(a.resolvedAt)?.getTime() ||
+            parseFirestoreDate(a.requestedAt)?.getTime() ||
+            0;
+          const tB =
+            parseFirestoreDate(b.resolvedAt)?.getTime() ||
+            parseFirestoreDate(b.requestedAt)?.getTime() ||
+            0;
+          return tB - tA;
+        }),
+    [requests]
+  );
+
+  const baseList = activeTab === 'pending' ? pendingRequests : historyRequests;
+
+  const displayedRequests = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return baseList.filter(req => {
+      const reqType = req.type === 'add' ? 'add' : 'edit';
+      if (typeFilter !== 'all' && reqType !== typeFilter) {
+        return false;
+      }
+      if (activeTab === 'history' && historyStatusFilter !== 'all' && req.status !== historyStatusFilter) {
+        return false;
+      }
+      const dateSource = activeTab === 'history' ? (req.resolvedAt || req.requestedAt) : req.requestedAt;
+      if ((startDate || endDate) && !isWithinDateRange(parseFirestoreDate(dateSource), startDate, endDate)) {
+        return false;
+      }
+      if (q) {
+        const requesterName = getRequesterName(req).toLowerCase();
+        const eventTitle = (req.eventTitle || '').toLowerCase();
+        const guestNewName = (req.requestedData?.name || '').toLowerCase();
+        const guestOldName = (req.originalData?.name || '').toLowerCase();
+        if (
+          !requesterName.includes(q) &&
+          !eventTitle.includes(q) &&
+          !guestNewName.includes(q) &&
+          !guestOldName.includes(q)
+        ) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [baseList, typeFilter, activeTab, historyStatusFilter, startDate, endDate, searchTerm, requesterMap]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, searchTerm, typeFilter, historyStatusFilter, startDate, endDate, itemsPerPage]);
+
   if (!appUser) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh]">
@@ -414,118 +488,73 @@ export default function Approvals() {
     );
   }
 
-  const pendingRequests = requests
-    .filter(r => r.status === 'pending')
-    .sort((a, b) => {
-      const tA = parseFirestoreDate(a.requestedAt)?.getTime() || 0;
-      const tB = parseFirestoreDate(b.requestedAt)?.getTime() || 0;
-      return tB - tA;
-    });
+  const totalPages = Math.max(1, Math.ceil(displayedRequests.length / itemsPerPage));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, displayedRequests.length);
+  const paginatedRequests = displayedRequests.slice(startIndex, endIndex);
 
-  const historyRequests = requests
-    .filter(r => r.status === 'approved' || r.status === 'rejected')
-    .sort((a, b) => {
-      const tA =
-        parseFirestoreDate(a.resolvedAt)?.getTime() ||
-        parseFirestoreDate(a.requestedAt)?.getTime() ||
-        0;
-      const tB =
-        parseFirestoreDate(b.resolvedAt)?.getTime() ||
-        parseFirestoreDate(b.requestedAt)?.getTime() ||
-        0;
-      return tB - tA;
-    });
+  const hasActiveFilters = Boolean(
+    searchTerm.trim() ||
+      typeFilter !== 'all' ||
+      (activeTab === 'history' && historyStatusFilter !== 'all') ||
+      startDate ||
+      endDate
+  );
 
-  const baseList = activeTab === 'pending' ? pendingRequests : historyRequests;
-
-  const displayedRequests = baseList.filter(req => {
-    const reqType = req.type === 'add' ? 'add' : 'edit';
-    if (typeFilter !== 'all' && reqType !== typeFilter) {
-      return false;
-    }
-    if (activeTab === 'history' && historyStatusFilter !== 'all' && req.status !== historyStatusFilter) {
-      return false;
-    }
-    return true;
-  });
+  const resetFilters = () => {
+    setSearchTerm('');
+    setTypeFilter('all');
+    setHistoryStatusFilter('all');
+    setStartDate('');
+    setEndDate('');
+    setCurrentPage(1);
+  };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
-      <div className="bg-white shadow-xs rounded-xl overflow-hidden border border-slate-200">
-        {/* Header & Deskripsi */}
-        <div className="px-4 py-5 border-b border-slate-200 sm:px-6">
-          <h3 className="text-lg leading-6 font-semibold text-slate-900">
-            Daftar Permintaan ({displayedRequests.length})
-          </h3>
-          <p className="mt-1 text-sm text-slate-500">
-            {appUser.role === 'client'
-              ? 'Status pengajuan penambahan atau perubahan data tamu beserta riwayat persetujuannya.'
-              : 'Kelola permintaan perubahan data tamu dari Client serta lihat riwayat pengajuan yang telah diproses.'}
-          </p>
-        </div>
-
-        {/* Bar Navigasi Tab (Tab 1: Menunggu | Tab 2: Riwayat) & Filter Jenis Pengajuan */}
-        <div className="px-4 sm:px-6 py-3.5 bg-slate-50/70 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {/* Tabs */}
-          <div className="inline-flex p-1 bg-slate-200/70 rounded-xl w-full sm:w-auto">
-            <button
-              type="button"
-              onClick={() => handleTabChange('pending')}
-              className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                activeTab === 'pending'
-                  ? 'bg-white text-indigo-700 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Clock className="w-3.5 h-3.5" />
-              <span>Menunggu</span>
-              <span
-                className={`px-2 py-0.5 rounded-full text-[11px] font-mono ${
-                  activeTab === 'pending'
-                    ? 'bg-amber-100 text-amber-800'
-                    : 'bg-slate-300/70 text-slate-700'
-                }`}
+    <div className="space-y-4">
+      {/* Box 1: Unified Filter & Search Box */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-2.5 sm:p-3">
+        <DateRangeFilterBar
+          label={activeTab === 'history' ? 'Rentang Tgl Diproses' : 'Rentang Tgl Pengajuan'}
+          startDate={startDate}
+          endDate={endDate}
+          onStartDateChange={setStartDate}
+          onEndDateChange={setEndDate}
+          onClear={() => {
+            setStartDate('');
+            setEndDate('');
+          }}
+        />
+        <div className="flex flex-col md:flex-row md:items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Cari pengaju, nama acara, atau nama tamu..."
+              className="w-full h-8.5 pl-9 pr-8 text-xs bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                title="Hapus pencarian"
               >
-                {pendingRequests.length}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleTabChange('history')}
-              className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                activeTab === 'history'
-                  ? 'bg-white text-indigo-700 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <History className="w-3.5 h-3.5" />
-              <span>Riwayat</span>
-              <span
-                className={`px-2 py-0.5 rounded-full text-[11px] font-mono ${
-                  activeTab === 'history'
-                    ? 'bg-indigo-100 text-indigo-800'
-                    : 'bg-slate-300/70 text-slate-700'
-                }`}
-              >
-                {historyRequests.length}
-              </span>
-            </button>
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
-          {/* Filter Jenis Pengajuan (& Filter Status Riwayat jika di Tab 2) */}
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500 mr-1">
-              <Filter className="w-3.5 h-3.5 text-slate-400" />
-              <span>Filter:</span>
-            </div>
-
             <select
               value={typeFilter}
-              onChange={e => setTypeFilter(e.target.value as 'all' | 'add' | 'edit')}
-              className="border border-slate-300 bg-white text-slate-700 text-xs font-medium rounded-lg px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500 cursor-pointer"
+              onChange={(e) => setTypeFilter(e.target.value as 'all' | 'add' | 'edit')}
+              className="h-8.5 px-2.5 text-xs bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
             >
-              <option value="all">Semua Jenis Pengajuan</option>
+              <option value="all">Semua Jenis</option>
               <option value="add">Penambahan Tamu</option>
               <option value="edit">Edit Tamu</option>
             </select>
@@ -533,117 +562,292 @@ export default function Approvals() {
             {activeTab === 'history' && (
               <select
                 value={historyStatusFilter}
-                onChange={e =>
+                onChange={(e) =>
                   setHistoryStatusFilter(e.target.value as 'all' | 'approved' | 'rejected')
                 }
-                className="border border-slate-300 bg-white text-slate-700 text-xs font-medium rounded-lg px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500 cursor-pointer"
+                className="h-8.5 px-2.5 text-xs bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
               >
-                <option value="all">Semua Status Riwayat</option>
+                <option value="all">Semua Status</option>
                 <option value="approved">Disetujui</option>
                 <option value="rejected">Ditolak</option>
               </select>
             )}
+
+            <select
+              value={itemsPerPage}
+              onChange={(e) => setItemsPerPage(Number(e.target.value))}
+              className="h-8.5 px-2.5 text-xs bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+            >
+              <option value={10}>Tampilkan 10</option>
+              <option value={25}>Tampilkan 25</option>
+              <option value={50}>Tampilkan 50</option>
+            </select>
           </div>
         </div>
+      </div>
 
+      {/* Action / Tab Switcher Bar (Left-Aligned between Filter Box & Table Box) */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => handleTabChange('pending')}
+          className={`inline-flex items-center gap-2 h-9 px-3.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+            activeTab === 'pending'
+              ? 'bg-indigo-600 text-white shadow-xs hover:bg-indigo-700'
+              : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5" />
+          <span>Menunggu</span>
+          <span
+            className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono ${
+              activeTab === 'pending'
+                ? 'bg-white/20 text-white'
+                : 'bg-amber-100 text-amber-800'
+            }`}
+          >
+            {pendingRequests.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleTabChange('history')}
+          className={`inline-flex items-center gap-2 h-9 px-3.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+            activeTab === 'history'
+              ? 'bg-indigo-600 text-white shadow-xs hover:bg-indigo-700'
+              : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+          }`}
+        >
+          <History className="w-3.5 h-3.5" />
+          <span>Riwayat</span>
+          <span
+            className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono ${
+              activeTab === 'history'
+                ? 'bg-white/20 text-white'
+                : 'bg-gray-100 text-gray-700'
+            }`}
+          >
+            {historyRequests.length}
+          </span>
+        </button>
+      </div>
+
+      {/* Box 2: Table Container */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-slate-500 text-sm">Memuat data...</div>
+          <div className="p-10 text-center text-gray-500 text-sm">Memuat data pengajuan...</div>
         ) : displayedRequests.length === 0 ? (
-          <div className="p-10 text-center flex flex-col items-center justify-center">
+          <div className="p-10 text-center flex flex-col items-center justify-center gap-2">
             {activeTab === 'pending' ? (
-              <>
-                <Check className="w-12 h-12 text-emerald-200 mb-3" />
-                <p className="text-slate-500 text-sm">
-                  {typeFilter === 'all'
-                    ? 'Tidak ada permintaan pengajuan yang sedang menunggu persetujuan.'
-                    : 'Tidak ada permintaan menunggu untuk filter jenis pengajuan ini.'}
-                </p>
-              </>
+              <Check className="w-10 h-10 text-emerald-300" />
             ) : (
-              <>
-                <History className="w-12 h-12 text-slate-300 mb-3" />
-                <p className="text-slate-500 text-sm">
-                  Belum ada riwayat pengajuan yang sesuai dengan filter.
-                </p>
-              </>
+              <History className="w-10 h-10 text-gray-300" />
+            )}
+            <p className="text-gray-600 text-sm font-medium">
+              {hasActiveFilters
+                ? 'Tidak ada permintaan yang cocok dengan pencarian atau filter.'
+                : activeTab === 'pending'
+                ? 'Tidak ada permintaan pengajuan yang sedang menunggu persetujuan.'
+                : 'Belum ada riwayat pengajuan yang diproses.'}
+            </p>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
+              >
+                Reset Pencarian &amp; Filter
+              </button>
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200">
-              <thead className="bg-slate-50/90">
-                <tr>
-                  <th className="px-4 sm:px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider w-14">
-                    No
-                  </th>
-                  <th className="px-4 sm:px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                    Pengaju
-                  </th>
-                  <th className="px-4 sm:px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                    Nama Acara
-                  </th>
-                  <th className="px-4 sm:px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                    Jenis Pengajuan
-                  </th>
-                  <th className="px-4 sm:px-6 py-3.5 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider w-32">
-                    Aksi
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-slate-100">
-                {displayedRequests.map((req, index) => (
-                  <tr key={req.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-xs font-mono text-slate-500">
-                      {index + 1}
-                    </td>
-                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-semibold text-slate-900">
-                        {getRequesterName(req)}
-                      </div>
-                      <div className="text-xs text-slate-400">Client</div>
-                    </td>
-                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100">
-                        {req.eventTitle}
-                      </span>
-                    </td>
-                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap">
-                      <div className="flex flex-col items-start gap-1">
-                        {req.status === 'pending' && (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                            <Clock className="w-3 h-3 mr-1" />
-                            {req.type === 'add' ? 'Penambahan Tamu' : 'Edit Tamu'} (Menunggu)
-                          </span>
-                        )}
-                        {req.status === 'approved' && (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            <Check className="w-3 h-3 mr-1" />
-                            {req.type === 'add' ? 'Penambahan Tamu' : 'Edit Tamu'} (Disetujui)
-                          </span>
-                        )}
-                        {req.status === 'rejected' && (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                            <X className="w-3 h-3 mr-1" />
-                            {req.type === 'add' ? 'Penambahan Tamu' : 'Edit Tamu'} (Ditolak)
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedRequest(req)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 rounded-lg transition-colors cursor-pointer"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>Detail</span>
-                      </button>
-                    </td>
+          <>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-12">
+                      No
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Pengaju
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Nama Acara
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Tamu &amp; Jenis
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Tanggal
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-4 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">
+                      Aksi
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {paginatedRequests.map((req, index) => {
+                    const reqDate = parseFirestoreDate(
+                      activeTab === 'history' ? req.resolvedAt || req.requestedAt : req.requestedAt
+                    );
+                    const guestDisplayName = req.requestedData?.name || req.originalData?.name || '-';
+                    return (
+                      <tr key={req.id} className="hover:bg-gray-50/80 transition-colors">
+                        <td className="px-4 py-3.5 whitespace-nowrap text-xs font-mono text-gray-500">
+                          {startIndex + index + 1}
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <div className="text-sm font-semibold text-gray-900">
+                            {getRequesterName(req)}
+                          </div>
+                          <div className="text-xs text-gray-400">Client</div>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200/70">
+                            {req.eventTitle}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">{guestDisplayName}</div>
+                          <div className="text-xs text-gray-500">
+                            {req.type === 'add' ? 'Penambahan Tamu' : 'Edit Data Tamu'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-xs text-gray-600">
+                          {reqDate
+                            ? reqDate.toLocaleDateString('id-ID', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric',
+                              })
+                            : '-'}
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          {req.status === 'pending' && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                              <Clock className="w-3 h-3" />
+                              Menunggu
+                            </span>
+                          )}
+                          {req.status === 'approved' && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <Check className="w-3 h-3" />
+                              Disetujui
+                            </span>
+                          )}
+                          {req.status === 'rejected' && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+                              <X className="w-3 h-3" />
+                              Ditolak
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                          <div className="inline-flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedRequest(req)}
+                              className="p-1.5 rounded-full text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
+                              title="Lihat Detail"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            {appUser.role !== 'client' && req.status === 'pending' && (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={isProcessing}
+                                  onClick={() => handleApprove(req)}
+                                  className="p-1.5 rounded-full text-emerald-600 hover:bg-emerald-50 transition-colors cursor-pointer disabled:opacity-50"
+                                  title="Setujui Permintaan"
+                                >
+                                  <Check className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isProcessing}
+                                  onClick={() => handleReject(req)}
+                                  className="p-1.5 rounded-full text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer disabled:opacity-50"
+                                  title="Tolak Permintaan"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Footer */}
+            <div className="px-4 py-3 border-t border-gray-200 bg-gray-50/70 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-gray-600">
+              <div className="flex items-center gap-2">
+                <span>
+                  Menampilkan <strong className="text-gray-900">{startIndex + 1}</strong> –{' '}
+                  <strong className="text-gray-900">{endIndex}</strong> dari{' '}
+                  <strong className="text-gray-900">{displayedRequests.length}</strong> permintaan
+                </span>
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={resetFilters}
+                    className="text-indigo-600 hover:text-indigo-800 font-medium underline cursor-pointer"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => setCurrentPage(1)}
+                  className="px-2 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title="Halaman Pertama"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Sebelumnya
+                </button>
+                <span className="px-2.5 py-1 text-gray-700 font-medium">
+                  Hal {safeCurrentPage} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Selanjutnya
+                </button>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => setCurrentPage(totalPages)}
+                  className="px-2 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title="Halaman Terakhir"
+                >
+                  »
+                </button>
+              </div>
+            </div>
+          </>
         )}
       </div>
 
