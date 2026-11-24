@@ -282,16 +282,50 @@ export default function SendInvitations() {
           }
         }
 
-        // Load WA Templates
+        // Load WA Templates from canonical settings/waTemplates doc (plus legacy wa_templates fallback if any)
         try {
-          const tplSnap = await getDocs(collection(db, 'wa_templates'));
-          const tpls = tplSnap.docs.map((d) => ({ id: d.id, ...d.data() } as WATemplate));
-          setWaTemplates(tpls);
-          const savedTplId = localStorage.getItem(`waTemplateId_${eventId}`) || '';
-          const matchedTpl = tpls.find((t) => t.id === savedTplId) || tpls[0];
-          if (matchedTpl) {
-            setSelectedTemplateId(matchedTpl.id || '');
-            setMessageText(matchedTpl.content || DEFAULT_WA_MESSAGE);
+          const mergedTemplates: WATemplate[] = [];
+          const seenIds = new Set<string>();
+
+          const settingsSnap = await getDoc(doc(db, 'settings', 'waTemplates'));
+          if (settingsSnap.exists() && Array.isArray(settingsSnap.data()?.templates)) {
+            (settingsSnap.data().templates as WATemplate[]).forEach((t, idx) => {
+              const id = t.id || `tpl-settings-${idx}`;
+              if (!seenIds.has(id)) {
+                seenIds.add(id);
+                mergedTemplates.push({ ...t, id });
+              }
+            });
+          }
+
+          if (mergedTemplates.length === 0) {
+            try {
+              const legacySnap = await getDocs(collection(db, 'wa_templates'));
+              legacySnap.docs.forEach((d) => {
+                if (!seenIds.has(d.id)) {
+                  seenIds.add(d.id);
+                  mergedTemplates.push({ id: d.id, ...d.data() } as WATemplate);
+                }
+              });
+            } catch {
+              // ignore legacy collection errors
+            }
+          }
+
+          setWaTemplates(mergedTemplates);
+
+          const savedTplRaw = localStorage.getItem(`waTemplateId_${eventId}`);
+          if (savedTplRaw === '') {
+            setSelectedTemplateId('');
+            setMessageText(DEFAULT_WA_MESSAGE);
+          } else {
+            const matchedTpl =
+              (savedTplRaw ? mergedTemplates.find((t) => t.id === savedTplRaw) : undefined) ||
+              mergedTemplates[0];
+            if (matchedTpl) {
+              setSelectedTemplateId(matchedTpl.id || '');
+              setMessageText(matchedTpl.content || DEFAULT_WA_MESSAGE);
+            }
           }
         } catch {
           // ignore
@@ -1500,9 +1534,9 @@ export default function SendInvitations() {
               <select
                 value={selectedTemplateId}
                 onChange={(e) => handleSelectTemplate(e.target.value)}
-                className="h-8.5 border border-slate-300 rounded-lg px-2.5 text-xs font-medium bg-white text-slate-800 focus:ring-indigo-500 focus:border-indigo-500 max-w-[190px]"
+                className="h-8.5 border border-slate-300 rounded-lg px-2.5 text-xs font-medium bg-white text-slate-800 focus:ring-indigo-500 focus:border-indigo-500 max-w-[210px]"
               >
-                {waTemplates.length === 0 && <option value="">Default Pesan Sistem</option>}
+                <option value="">Default Pesan Sistem</option>
                 {waTemplates.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}
