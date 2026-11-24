@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, getDocs, addDoc, updateDoc, doc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
 import { GuestlyService } from '../../types';
 import { Modal } from '../../components/Modal';
-import { Plus, Edit, Trash2, ArrowUp, ArrowDown, CheckCircle2 } from 'lucide-react';
+import { Plus, Edit, Trash2, ArrowUp, ArrowDown, CheckCircle2, Search, X, Package } from 'lucide-react';
 import { showAlert, showConfirm, showCancelAlert } from '../../lib/alerts';
 
 export default function AdminServices() {
@@ -13,6 +13,14 @@ export default function AdminServices() {
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Filters & Pagination (consistent with Create Event / EventsList)
+  const [searchTerm, setSearchTerm] = useState('');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'package' | 'addon'>('all');
+  const [roleFilter, setRoleFilter] = useState<'all' | 'everyone' | 'partner' | 'client'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Form State
   const [name, setName] = useState('');
@@ -175,251 +183,486 @@ export default function AdminServices() {
     }
   };
 
+  const filteredServices = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return services.filter((service) => {
+      if (typeFilter !== 'all' && service.type !== typeFilter) return false;
+      if (roleFilter === 'everyone' && (service.targetRole || 'all') !== 'all') return false;
+      if (roleFilter === 'partner' && service.targetRole !== 'partner') return false;
+      if (roleFilter === 'client' && service.targetRole !== 'client') return false;
+      if (statusFilter === 'active' && !service.isActive) return false;
+      if (statusFilter === 'inactive' && service.isActive) return false;
+
+      if (!q) return true;
+      const haystack = [
+        service.name,
+        service.description,
+        service.type === 'package' ? 'paket' : 'add-on addon',
+        service.targetRole === 'partner' ? 'partner' : service.targetRole === 'client' ? 'client' : 'semua',
+        ...(Array.isArray(service.features) ? service.features : []),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [services, searchTerm, typeFilter, roleFilter, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredServices.length / itemsPerPage));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, filteredServices.length);
+  const paginatedServices = useMemo(
+    () => filteredServices.slice(startIndex, endIndex),
+    [filteredServices, startIndex, endIndex]
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, typeFilter, roleFilter, statusFilter, itemsPerPage]);
+
+  const hasActiveFilter =
+    searchTerm.trim() !== '' ||
+    typeFilter !== 'all' ||
+    roleFilter !== 'all' ||
+    statusFilter !== 'all';
+
+  const resetFilters = () => {
+    setSearchTerm('');
+    setTypeFilter('all');
+    setRoleFilter('all');
+    setStatusFilter('all');
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <p className="text-sm text-gray-500">Kelola master paket dan fitur yang tersedia di Guestly</p>
-        </div>
-         <div className="flex flex-wrap items-center gap-3">
-          <button 
-             onClick={async () => {
-                const confirmed = await showConfirm("Buat otomatis paket Add-on WA Blast (Lite, Standard, Premium)?");
-                if(confirmed) {
-                   setIsSaving(true);
-                   try {
-                     const timeNow = serverTimestamp();
-                     const templates = [
-                       {
-                         name: "WA Blast Lite",
-                         description: "Maks 150 Tamu • 1x Pengiriman • Template Standar",
-                         type: "addon",
-                         targetRole: "all",
-                         activePeriodDays: 0,
-                         eventQuota: 0,
-                         clientQuota: 0,
-                         guestQuota: 0,
-                         waBlastQuota: 150,
-                         price: 19000,
-                         normalPrice: 29000,
-                         isActive: true,
-                         createdAt: timeNow,
-                         updatedAt: timeNow
-                       },
-                       {
-                         name: "WA Blast Standard",
-                         description: "Maks 500 Tamu • 2x Pengiriman • Template Custom",
-                         type: "addon",
-                         targetRole: "all",
-                         activePeriodDays: 0,
-                         eventQuota: 0,
-                         clientQuota: 0,
-                         guestQuota: 0,
-                         waBlastQuota: 1000,
-                         price: 49000,
-                         normalPrice: 69000,
-                         isActive: true,
-                         createdAt: timeNow,
-                         updatedAt: timeNow
-                       },
-                       {
-                         name: "WA Blast Premium",
-                         description: "Maks 1.000 Tamu • 3x Pengiriman • Template Custom • Reminder H-3 & H-1",
-                         type: "addon",
-                         targetRole: "all",
-                         activePeriodDays: 0,
-                         eventQuota: 0,
-                         clientQuota: 0,
-                         guestQuota: 0,
-                         waBlastQuota: 3000,
-                         price: 99000,
-                         normalPrice: 149000,
-                         isActive: true,
-                         createdAt: timeNow,
-                         updatedAt: timeNow
-                       }
-                     ];
-                     
-                     let newServices: any[] = [];
-                     for (const payload of templates) {
-                        const docRef = await addDoc(collection(db, 'services'), payload);
-                        newServices.push({ id: docRef.id, ...payload, createdAt: new Date() });
-                     }
-                     
-                     setServices([...services, ...newServices]);
-                     showAlert("Berhasil", "Add-on WA Blast berhasil dibuat!", "success");
-                   } catch(err) {
-                     showAlert("Gagal", "Terjadi kesalahan saat memuat.", "error");
-                   } finally {
-                     setIsSaving(false);
-                   }
-                }
-             }}
-             className="flex items-center gap-2 bg-white text-indigo-600 border border-indigo-600 px-4 py-2 rounded-md hover:bg-indigo-50 transition text-sm font-medium cursor-pointer"
-          >
-             Buat Template WA Blast Otomatis
-          </button>
-          <button
-             type="button"
-             onClick={async () => {
-                const confirmed = await showConfirm("Buat otomatis Add-on Perpanjangan Masa Aktif Acara (+30 Hari & +60 Hari)?");
-                if (confirmed) {
-                   setIsSaving(true);
-                   try {
-                     const timeNow = serverTimestamp();
-                     const renewalTemplates = [
-                       {
-                         name: "Perpanjangan Masa Aktif +30 Hari",
-                         description: "Tambah masa aktif acara +30 hari (membuka kembali seluruh akses publik, Scanner QR, & Layar Sapa)",
-                         type: "addon",
-                         targetRole: "all",
-                         activePeriodDays: 30,
-                         eventQuota: 0,
-                         clientQuota: 0,
-                         guestQuota: 0,
-                         waBlastQuota: 0,
-                         price: 49000,
-                         normalPrice: 75000,
-                         isActive: true,
-                         createdAt: timeNow,
-                         updatedAt: timeNow
-                       },
-                       {
-                         name: "Perpanjangan Masa Aktif +60 Hari",
-                         description: "Paket hemat perpanjangan masa aktif acara +60 hari penuh",
-                         type: "addon",
-                         targetRole: "all",
-                         activePeriodDays: 60,
-                         eventQuota: 0,
-                         clientQuota: 0,
-                         guestQuota: 0,
-                         waBlastQuota: 0,
-                         price: 89000,
-                         normalPrice: 135000,
-                         isActive: true,
-                         createdAt: timeNow,
-                         updatedAt: timeNow
-                       }
-                     ];
-                     const created: any[] = [];
-                     for (const payload of renewalTemplates) {
-                       const docRef = await addDoc(collection(db, 'services'), payload);
-                       created.push({ id: docRef.id, ...payload, createdAt: new Date() });
-                     }
-                     setServices([...services, ...created]);
-                     showAlert("Berhasil", "Add-on Perpanjangan Masa Aktif berhasil dibuat!", "success");
-                   } catch (err) {
-                     showAlert("Gagal", "Terjadi kesalahan saat membuat add-on perpanjangan.", "error");
-                   } finally {
-                     setIsSaving(false);
-                   }
-                }
-             }}
-             className="flex items-center gap-2 bg-white text-[#8C3A50] border border-[#8C3A50] px-4 py-2 rounded-xl hover:bg-rose-50 transition text-sm font-semibold cursor-pointer"
-          >
-             Buat Add-on Perpanjangan (+30/+60 Hr)
-          </button>
-          <button 
-            onClick={openCreateModal}
-            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 transition font-semibold text-sm shadow-xs cursor-pointer"
-          >
-            <Plus className="w-4 h-4" /> Tambah Layanan Manual
-          </button>
+    <div className="space-y-4">
+      {/* Unified Filter Box (Consistent with Create Event / EventsList) */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-2.5 sm:p-3">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-2">
+          {/* Search */}
+          <div className="relative flex-1 min-w-0">
+            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Cari nama layanan, deskripsi, atau fitur..."
+              className="w-full h-8.5 pl-8.5 pr-7 text-xs sm:text-sm bg-gray-50/70 border border-gray-200 rounded-lg text-gray-800 placeholder:text-gray-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5 rounded transition-colors cursor-pointer"
+                title="Hapus pencarian"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {/* Filter Tipe */}
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as 'all' | 'package' | 'addon')}
+              className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none min-w-[115px]"
+              title="Filter tipe layanan"
+            >
+              <option value="all">Semua Tipe</option>
+              <option value="package">Paket</option>
+              <option value="addon">Add-on</option>
+            </select>
+
+            {/* Filter Kategori */}
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value as 'all' | 'everyone' | 'partner' | 'client')}
+              className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none min-w-[130px]"
+              title="Filter kategori target"
+            >
+              <option value="all">Semua Kategori</option>
+              <option value="everyone">Semua</option>
+              <option value="partner">Partner</option>
+              <option value="client">Client</option>
+            </select>
+
+            {/* Filter Status */}
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
+              className="h-8.5 pl-2.5 pr-7 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer flex-1 sm:flex-none min-w-[125px]"
+              title="Filter status layanan"
+            >
+              <option value="all">Semua Status</option>
+              <option value="active">Aktif</option>
+              <option value="inactive">Tidak Aktif</option>
+            </select>
+
+            {/* Tampilkan 10, 25, 50 */}
+            <div className="flex items-center gap-1.5 h-8.5 px-2.5 bg-white border border-gray-200 rounded-lg text-xs text-gray-600 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition shrink-0">
+              <span className="text-xs text-gray-500 whitespace-nowrap">Tampilkan</span>
+              <select
+                value={itemsPerPage}
+                onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                className="bg-transparent text-xs sm:text-sm font-semibold text-gray-800 focus:outline-none cursor-pointer pr-0.5"
+                title="Jumlah baris per halaman"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+      {/* Primary Action Bar (Between Filter Box & Table Box, Left Aligned — Consistent with Create Event) */}
+      <div className="flex flex-wrap items-center justify-start gap-2">
+        <button 
+          type="button"
+          onClick={openCreateModal}
+          className="h-9 px-3.5 text-xs sm:text-sm font-medium inline-flex items-center justify-center gap-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-xs transition-colors whitespace-nowrap cursor-pointer"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Tambah Layanan Manual</span>
+        </button>
+
+        <button 
+          type="button"
+          onClick={async () => {
+            const confirmed = await showConfirm("Buat otomatis paket Add-on WA Blast (Lite, Standard, Premium)?");
+            if (confirmed) {
+              setIsSaving(true);
+              try {
+                const timeNow = serverTimestamp();
+                const templates = [
+                  {
+                    name: "WA Blast Lite",
+                    description: "Maks 150 Tamu • 1x Pengiriman • Template Standar",
+                    type: "addon",
+                    targetRole: "all",
+                    activePeriodDays: 0,
+                    eventQuota: 0,
+                    clientQuota: 0,
+                    guestQuota: 0,
+                    waBlastQuota: 150,
+                    price: 19000,
+                    normalPrice: 29000,
+                    isActive: true,
+                    createdAt: timeNow,
+                    updatedAt: timeNow
+                  },
+                  {
+                    name: "WA Blast Standard",
+                    description: "Maks 500 Tamu • 2x Pengiriman • Template Custom",
+                    type: "addon",
+                    targetRole: "all",
+                    activePeriodDays: 0,
+                    eventQuota: 0,
+                    clientQuota: 0,
+                    guestQuota: 0,
+                    waBlastQuota: 1000,
+                    price: 49000,
+                    normalPrice: 69000,
+                    isActive: true,
+                    createdAt: timeNow,
+                    updatedAt: timeNow
+                  },
+                  {
+                    name: "WA Blast Premium",
+                    description: "Maks 1.000 Tamu • 3x Pengiriman • Template Custom • Reminder H-3 & H-1",
+                    type: "addon",
+                    targetRole: "all",
+                    activePeriodDays: 0,
+                    eventQuota: 0,
+                    clientQuota: 0,
+                    guestQuota: 0,
+                    waBlastQuota: 3000,
+                    price: 99000,
+                    normalPrice: 149000,
+                    isActive: true,
+                    createdAt: timeNow,
+                    updatedAt: timeNow
+                  }
+                ];
+                
+                const newServices: any[] = [];
+                for (const payload of templates) {
+                  const docRef = await addDoc(collection(db, 'services'), payload);
+                  newServices.push({ id: docRef.id, ...payload, createdAt: new Date() });
+                }
+                
+                setServices([...services, ...newServices]);
+                showAlert("Berhasil", "Add-on WA Blast berhasil dibuat!", "success");
+              } catch (err) {
+                showAlert("Gagal", "Terjadi kesalahan saat memuat.", "error");
+              } finally {
+                setIsSaving(false);
+              }
+            }
+          }}
+          className="h-9 px-3.5 text-xs sm:text-sm font-medium inline-flex items-center justify-center gap-1.5 bg-white text-indigo-600 border border-indigo-200 hover:bg-indigo-50 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+        >
+          Buat Template WA Blast Otomatis
+        </button>
+
+        <button
+          type="button"
+          onClick={async () => {
+            const confirmed = await showConfirm("Buat otomatis Add-on Perpanjangan Masa Aktif Acara (+30 Hari & +60 Hari)?");
+            if (confirmed) {
+              setIsSaving(true);
+              try {
+                const timeNow = serverTimestamp();
+                const renewalTemplates = [
+                  {
+                    name: "Perpanjangan Masa Aktif +30 Hari",
+                    description: "Tambah masa aktif acara +30 hari (membuka kembali seluruh akses publik, Scanner QR, & Layar Sapa)",
+                    type: "addon",
+                    targetRole: "all",
+                    activePeriodDays: 30,
+                    eventQuota: 0,
+                    clientQuota: 0,
+                    guestQuota: 0,
+                    waBlastQuota: 0,
+                    price: 49000,
+                    normalPrice: 75000,
+                    isActive: true,
+                    createdAt: timeNow,
+                    updatedAt: timeNow
+                  },
+                  {
+                    name: "Perpanjangan Masa Aktif +60 Hari",
+                    description: "Paket hemat perpanjangan masa aktif acara +60 hari penuh",
+                    type: "addon",
+                    targetRole: "all",
+                    activePeriodDays: 60,
+                    eventQuota: 0,
+                    clientQuota: 0,
+                    guestQuota: 0,
+                    waBlastQuota: 0,
+                    price: 89000,
+                    normalPrice: 135000,
+                    isActive: true,
+                    createdAt: timeNow,
+                    updatedAt: timeNow
+                  }
+                ];
+                const created: any[] = [];
+                for (const payload of renewalTemplates) {
+                  const docRef = await addDoc(collection(db, 'services'), payload);
+                  created.push({ id: docRef.id, ...payload, createdAt: new Date() });
+                }
+                setServices([...services, ...created]);
+                showAlert("Berhasil", "Add-on Perpanjangan Masa Aktif berhasil dibuat!", "success");
+              } catch (err) {
+                showAlert("Gagal", "Terjadi kesalahan saat membuat add-on perpanjangan.", "error");
+              } finally {
+                setIsSaving(false);
+              }
+            }
+          }}
+          className="h-9 px-3.5 text-xs sm:text-sm font-medium inline-flex items-center justify-center gap-1.5 bg-white text-[#8C3A50] border border-rose-200 hover:bg-rose-50 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+        >
+          Buat Add-on Perpanjangan (+30/+60 Hr)
+        </button>
+      </div>
+
+      {/* Box 2: Table Container */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         {loading ? (
           <div className="p-6 text-center text-gray-500">Memuat data layanan...</div>
         ) : services.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">Belum ada layanan yang ditambahkan.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Nama Layanan</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Tipe</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider">Kategori</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider text-right">Harga</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider text-center">Status</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 tracking-wider text-right">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {services.map((service) => (
-                  <tr key={service.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-gray-900">{service.name}</span>
-                        {service.includeWeddingPlanner && (
-                          <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 text-[#8C3A50] border border-rose-200">
-                            + Wedding Planner
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-gray-500 truncate max-w-xs">
-                        {service.description}
-                        {Array.isArray(service.features) && service.features.length > 0 && (
-                          <span className="ml-1.5 text-indigo-600 font-medium">
-                            ({service.features.length} fitur)
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <span className={`inline-flex px-2 py-1 rounded-full text-xs font-semibold capitalize ${
-                        service.type === 'package' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
-                      }`}>
-                        {service.type === 'package' ? 'Paket' : 'Add-on'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <span className={`inline-flex px-2 py-1 rounded-full text-xs font-semibold capitalize ${
-                        service.targetRole === 'client' ? 'bg-orange-100 text-orange-800' : 
-                        service.targetRole === 'partner' ? 'bg-teal-100 text-teal-800' : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {service.targetRole === 'client' ? 'Client' : service.targetRole === 'partner' ? 'Partner' : 'Semua'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
-                      {service.normalPrice && service.normalPrice > service.price ? (
-                        <div className="flex flex-col items-end">
-                          <span className="text-gray-400 line-through text-xs mb-0.5">Rp {service.normalPrice.toLocaleString('id-ID')}</span>
-                          <span className="text-green-600 font-medium">Rp {service.price.toLocaleString('id-ID')}</span>
-                        </div>
-                      ) : (
-                        <span>Rp {service.price.toLocaleString('id-ID')}</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
-                      <span className={`inline-flex px-2 py-1 rounded-full text-xs font-semibold ${
-                        service.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {service.isActive ? 'Aktif' : 'Tidak Aktif'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-right">
-                      <button 
-                        onClick={() => openEditModal(service)} 
-                        className="text-indigo-600 hover:text-indigo-900 p-2 rounded-md hover:bg-indigo-50 transition-colors inline-block"
-                        title="Edit"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={() => setDeletingId(service.id!)} 
-                        className="text-red-600 hover:text-red-900 p-2 rounded-md hover:bg-red-50 transition-colors inline-block ml-2"
-                        title="Hapus"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="p-12 text-center space-y-2">
+            <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto text-gray-400">
+              <Package className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-semibold text-gray-800">Belum Ada Layanan</h3>
+            <p className="text-sm text-gray-500">Tambahkan master paket atau add-on pertama Anda melalui tombol di atas.</p>
           </div>
+        ) : filteredServices.length === 0 ? (
+          <div className="p-10 text-center space-y-3">
+            <p className="text-sm text-gray-500">Tidak ada layanan yang sesuai dengan pencarian atau filter.</p>
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
+            >
+              Reset Pencarian &amp; Filter
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-12">No</th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Nama Layanan</th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tipe</th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Kategori</th>
+                    <th className="px-4 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Harga</th>
+                    <th className="px-4 py-3.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                    <th className="px-4 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {paginatedServices.map((service, index) => (
+                    <tr key={service.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500">
+                        {startIndex + index + 1}
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-gray-900">{service.name}</span>
+                          {service.includeWeddingPlanner && (
+                            <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 text-[#8C3A50] border border-rose-200">
+                              + Wedding Planner
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-500 truncate max-w-xs mt-0.5">
+                          {service.description}
+                          {Array.isArray(service.features) && service.features.length > 0 && (
+                            <span className="ml-1.5 text-indigo-600 font-medium">
+                              ({service.features.length} fitur)
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap text-sm">
+                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                          service.type === 'package'
+                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                            : 'bg-purple-50 text-purple-700 border border-purple-200'
+                        }`}>
+                          {service.type === 'package' ? 'Paket' : 'Add-on'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap text-sm">
+                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                          service.targetRole === 'client'
+                            ? 'bg-orange-50 text-orange-700 border border-orange-200'
+                            : service.targetRole === 'partner'
+                            ? 'bg-teal-50 text-teal-700 border border-teal-200'
+                            : 'bg-gray-100 text-gray-700 border border-gray-200'
+                        }`}>
+                          {service.targetRole === 'client' ? 'Client' : service.targetRole === 'partner' ? 'Partner' : 'Semua'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap text-sm text-right font-mono">
+                        {service.normalPrice && service.normalPrice > service.price ? (
+                          <div className="flex flex-col items-end">
+                            <span className="text-gray-400 line-through text-xs">Rp {service.normalPrice.toLocaleString('id-ID')}</span>
+                            <span className="text-emerald-600 font-bold">Rp {service.price.toLocaleString('id-ID')}</span>
+                          </div>
+                        ) : (
+                          <span className="font-bold text-gray-900">Rp {service.price.toLocaleString('id-ID')}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap text-sm text-center">
+                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                          service.isActive
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-gray-100 text-gray-600 border border-gray-200'
+                        }`}>
+                          {service.isActive ? 'Aktif' : 'Tidak Aktif'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap text-right text-sm font-medium">
+                        <div className="flex items-center justify-end space-x-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(service)}
+                            className="text-blue-600 hover:text-blue-900 flex items-center justify-center p-1.5 rounded-full hover:bg-blue-50 transition-colors cursor-pointer"
+                            title="Edit Layanan"
+                            aria-label="Edit Layanan"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeletingId(service.id!)}
+                            className="text-red-600 hover:text-red-900 flex items-center justify-center p-1.5 rounded-full hover:bg-red-50 transition-colors cursor-pointer"
+                            title="Hapus Layanan"
+                            aria-label="Hapus Layanan"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Footer (Consistent with Create Event / EventsList) */}
+            <div className="px-4 py-3.5 flex flex-col sm:flex-row items-center justify-between border-t border-gray-200 sm:px-5 gap-3 bg-gray-50/50">
+              <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
+                <span>
+                  Menampilkan <span className="font-semibold text-gray-900">{filteredServices.length === 0 ? 0 : startIndex + 1}</span> – <span className="font-semibold text-gray-900">{endIndex}</span> dari <span className="font-semibold text-indigo-600">{filteredServices.length}</span> layanan
+                </span>
+                {hasActiveFilter && (
+                  <>
+                    <span className="text-xs text-gray-400">({services.length} total)</span>
+                    <button
+                      type="button"
+                      onClick={resetFilters}
+                      className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 underline cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                {totalPages > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage(1)}
+                      disabled={safeCurrentPage === 1}
+                      className="px-2.5 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      title="Halaman Pertama"
+                    >
+                      «
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      disabled={safeCurrentPage === 1}
+                      className="px-3 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    >
+                      Sebelumnya
+                    </button>
+                    <span className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg">
+                      Hal <span className="text-indigo-600 font-bold">{safeCurrentPage}</span> / {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={safeCurrentPage === totalPages}
+                      className="px-3 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    >
+                      Selanjutnya
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage(totalPages)}
+                      disabled={safeCurrentPage === totalPages}
+                      className="px-2.5 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      title="Halaman Terakhir"
+                    >
+                      »
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </>
         )}
       </div>
 

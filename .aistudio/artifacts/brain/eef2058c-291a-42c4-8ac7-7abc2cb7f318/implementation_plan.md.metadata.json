@@ -1,6 +1,6 @@
 {
-  "summary":  "Revisi rencana penyeragaman UI difokuskan khusus pada Grup B (6 halaman daftar & tabel: Approvals, Bisnis Partner, Manajemen User, Sesi Aktif, Template WA, dan Layanan Saya) mengikuti standar halaman Create Event.",
-  "updatedAt":  "2026-11-22T18:09:41.923436516Z",
+  "summary":  "Rencana penyederhanaan menyeluruh tampilan halaman Detail Acara untuk semua Role (dengan mode paling ringkas bagi Staff): memadatkan header acara menjadi 2 baris, mengganti 5 kartu KPI menjadi 1 strip metrik horizontal, meringkas filter menjadi 1 baris plus Filter Lanjutan buka-tutup, serta menggabungkan kolom pendukung tabel agar Status Kehadiran dan Souvenir langsung terlihat tanpa scroll samping.",
+  "updatedAt":  "2026-11-23T23:20:38.976976107Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

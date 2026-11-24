@@ -243,6 +243,8 @@ export interface WATemplate {
   updatedAt: any;
 }
 
+export type StaffConfirmationSource = 'keluarga' | 'vendor' | 'keluarga_vendor';
+
 export interface Guest {
   id?: string;
   eventId: string;
@@ -279,6 +281,14 @@ export interface Guest {
   souvenirName?: string;
   souvenirQuantity?: number;
   souvenirTakenBy?: string;
+  addedByRole?: Role;
+  addedByUid?: string;
+  addedByName?: string;
+  addedByStaffType?: StaffType;
+  addedVia?: 'event_details' | 'scanner';
+  staffConfirmationSource?: StaffConfirmationSource;
+  staffConfirmationNote?: string;
+  staffConfirmedAt?: string;
   createdAt: any;
   updatedAt: any;
 }

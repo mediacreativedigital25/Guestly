@@ -2,9 +2,12 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { supabaseDb } from '../lib/supabaseDb';
-import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel, isEventExpired, isEventInactiveOrExpired, shouldHideServiceInfo } from '../lib/utils';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel, isEventExpired, isEventInactiveOrExpired, shouldHideServiceInfo, formatGuestFullName } from '../lib/utils';
+import { showAlert } from '../lib/alerts';
 import { useAuth } from '../AuthContext';
-import { Guest, SouvenirItem, SouvenirLog, EventRecord } from '../types';
+import { Guest, SouvenirItem, SouvenirLog, EventRecord, StaffConfirmationSource } from '../types';
 import { 
   CheckCircle, 
   AlertCircle, 
@@ -46,9 +49,13 @@ import {
   X,
   Lock,
   CreditCard,
-  RotateCcw
+  RotateCcw,
+  UserPlus,
+  Loader2
 } from 'lucide-react';
 import ScannerStressTestModal from '../components/ScannerStressTestModal';
+import { Modal } from '../components/Modal';
+import { StaffGuestConfirmationModal, formatStaffConfirmationSource } from '../components/StaffGuestConfirmationModal';
 import { souvenirStorage, parseSouvenirBatchQrPayload } from '../services/souvenirStorage';
 import { offlineSyncService, OfflineSnapshotMeta } from '../services/offlineSyncService';
 
@@ -170,8 +177,10 @@ export default function Scanner() {
   const [searchParams] = useSearchParams();
   const { appUser } = useAuth();
   const currentOperator = getOperatorLabel(appUser);
-  const isStaffCheckinOnly = appUser?.role === 'staff' && appUser?.staffType === 'checkin';
-  const isStaffSouvenirOnly = appUser?.role === 'staff' && appUser?.staffType === 'souvenir';
+  const isStaff = appUser?.role === 'staff';
+  const isStaffCheckinOnly = isStaff && appUser?.staffType === 'checkin';
+  const isStaffSouvenirOnly = isStaff && appUser?.staffType === 'souvenir';
+  const isStaffAllIn = isStaff && !isStaffCheckinOnly && !isStaffSouvenirOnly;
 
   const [scanResult, setScanResult] = useState<{
     status: 'success' | 'error';
@@ -218,12 +227,34 @@ export default function Scanner() {
   const [souvenirLogs, setSouvenirLogs] = useState<SouvenirLog[]>([]);
   const [stats, setStats] = useState({ total: 0, attended: 0, souvenirTaken: 0 });
   const [isStressTestOpen, setIsStressTestOpen] = useState(false);
+
+  // Walk-In Guest Registration States (All Staff & Operators)
+  const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
+  const [walkInTitle, setWalkInTitle] = useState('');
+  const [walkInName, setWalkInName] = useState('');
+  const [walkInPhone, setWalkInPhone] = useState('');
+  const [walkInAddress, setWalkInAddress] = useState('');
+  const [walkInCategory, setWalkInCategory] = useState('');
+  const [walkInInvitationType, setWalkInInvitationType] = useState('');
+  const [walkInSession, setWalkInSession] = useState('');
+  const [walkInPax, setWalkInPax] = useState('1');
+  const [isSavingWalkIn, setIsSavingWalkIn] = useState(false);
+  const [pendingStaffWalkIn, setPendingStaffWalkIn] = useState<{
+    payload: any;
+    displayName: string;
+    pax: number;
+    category?: string;
+  } | null>(null);
   
   // Souvenir Station Integration
   const [stationMode, setStationMode] = useState<'checkin' | 'checkin_souvenir' | 'souvenir_only'>(() => {
     const modeParam = searchParams.get('mode');
     if (modeParam === 'souvenir') return 'souvenir_only';
     if (modeParam === 'checkin') return 'checkin';
+    if (modeParam === 'checkin_souvenir') return 'checkin_souvenir';
+    if (isStaffSouvenirOnly) return 'souvenir_only';
+    if (isStaffCheckinOnly) return 'checkin';
+    if (isStaffAllIn) return 'checkin_souvenir';
     return 'checkin';
   });
   const [souvenirs, setSouvenirs] = useState<SouvenirItem[]>([]);
@@ -238,8 +269,9 @@ export default function Scanner() {
       const modeParam = searchParams.get('mode');
       if (modeParam === 'souvenir') setStationMode('souvenir_only');
       else if (modeParam === 'checkin') setStationMode('checkin');
+      else if (modeParam === 'checkin_souvenir' || isStaffAllIn) setStationMode('checkin_souvenir');
     }
-  }, [isStaffSouvenirOnly, isStaffCheckinOnly, searchParams]);
+  }, [isStaffSouvenirOnly, isStaffCheckinOnly, isStaffAllIn, searchParams]);
 
   // VIP & VVIP Modal Auto-Dismiss (5 seconds) and Keyboard Close
   useEffect(() => {
@@ -403,6 +435,164 @@ export default function Scanner() {
     const merged = souvenirStorage.mergeGuestsWithSouvenirs(eventId, withPendingQueue);
     lastDeltaSyncRef.current = new Date(Date.now() - 5000).toISOString();
     recomputeDerivedState(merged);
+  };
+
+  const openWalkInModal = (prefillName: string = '') => {
+    if (!isOnline || isForceOffline) {
+      showAlert(
+        'Koneksi Internet Diperlukan',
+        'Pendaftaran tamu Walk-In baru memerlukan koneksi internet aktif agar kode tiket dan catatan audit petugas langsung tersimpan ke server.',
+        'warning'
+      );
+      return;
+    }
+    setWalkInTitle('');
+    setWalkInName(prefillName.trim());
+    setWalkInPhone('');
+    setWalkInAddress('');
+    setWalkInCategory('');
+    setWalkInInvitationType('');
+    setWalkInSession('');
+    setWalkInPax('1');
+    setIsWalkInModalOpen(true);
+  };
+
+  const persistWalkInGuest = async (
+    basePayload: any,
+    staffConfirmation?: { source: StaffConfirmationSource; note: string }
+  ) => {
+    if (!eventId) return;
+    try {
+      setIsSavingWalkIn(true);
+      const payload: any = { ...basePayload };
+
+      if (isStaff && staffConfirmation) {
+        payload.addedByRole = 'staff';
+        payload.addedByUid = appUser?.uid || appUser?.id || '';
+        payload.addedByName = appUser?.name || currentOperator || 'Staff';
+        payload.addedByStaffType = appUser?.staffType || 'all';
+        payload.addedVia = 'scanner';
+        payload.staffConfirmationSource = staffConfirmation.source;
+        if (staffConfirmation.note) {
+          payload.staffConfirmationNote = staffConfirmation.note;
+        }
+        payload.staffConfirmedAt = new Date().toISOString();
+      }
+
+      const guestRef = await addDoc(collection(db, 'events', eventId, 'guests'), payload);
+      const nowIso = new Date().toISOString();
+      const savedGuest: Guest = {
+        ...payload,
+        id: guestRef.id,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+
+      const nextList = [...allGuestsRef.current, savedGuest];
+      applyGuestsListToState(nextList, true);
+
+      setPendingStaffWalkIn(null);
+      setIsWalkInModalOpen(false);
+      setWalkInTitle('');
+      setWalkInName('');
+      setWalkInPhone('');
+      setWalkInAddress('');
+      setWalkInCategory('');
+      setWalkInInvitationType('');
+      setWalkInSession('');
+      setWalkInPax('1');
+
+      setManualGuestSearch(savedGuest.name);
+      setManualGuestFilter('unattended');
+      setScanMode('search');
+
+      showAlert(
+        'Tamu Walk-In Ditambahkan',
+        isStaff && staffConfirmation
+          ? `${savedGuest.name} (${savedGuest.ticketCode}) tersimpan · Konfirmasi: ${formatStaffConfirmationSource(staffConfirmation.source)}`
+          : `${savedGuest.name} (${savedGuest.ticketCode}) berhasil didaftarkan dan siap di-Check-In.`,
+        'success'
+      );
+    } catch (error) {
+      showAlert('Gagal', 'Gagal menyimpan tamu baru. Periksa koneksi atau izin akses Anda.', 'error');
+      handleFirestoreError(error, OperationType.CREATE, `events/${eventId}/guests`);
+    } finally {
+      setIsSavingWalkIn(false);
+    }
+  };
+
+  const handleSubmitWalkInGuest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!eventId || isSavingWalkIn) return;
+
+    if (!isOnline || isForceOffline) {
+      showAlert(
+        'Koneksi Internet Diperlukan',
+        'Pendaftaran tamu Walk-In baru memerlukan koneksi internet aktif agar kode tiket dan catatan audit petugas langsung tersimpan ke server.',
+        'warning'
+      );
+      return;
+    }
+
+    if (
+      appUser &&
+      !['superadmin', 'owner', 'partner', 'admin'].includes(appUser.role) &&
+      appUser.guestQuota !== undefined &&
+      appUser.guestQuota > 0 &&
+      allGuestsRef.current.length >= appUser.guestQuota
+    ) {
+      showAlert(
+        'Kuota Habis',
+        `Batas maksimal kuota tamu (${appUser.guestQuota} tamu) telah tercapai. Hubungi Owner/Admin untuk menambah kuota.`,
+        'warning'
+      );
+      return;
+    }
+
+    const cleanedTitle = walkInTitle.trim();
+    const cleanedBaseName = walkInName.trim();
+    if (!cleanedBaseName) {
+      showAlert('Peringatan', 'Nama tamu wajib diisi.', 'warning');
+      return;
+    }
+
+    const cleanedFullName = formatGuestFullName(cleanedBaseName, cleanedTitle);
+    if (allGuestsRef.current.some(g => g.name.toLowerCase() === cleanedFullName.toLowerCase())) {
+      showAlert('Peringatan', `Tamu dengan nama "${cleanedFullName}" sudah tersedia di daftar.`, 'warning');
+      return;
+    }
+
+    const ticketCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const parsedPax = Math.max(1, Number(walkInPax) || 1);
+    const payload: any = {
+      eventId,
+      title: cleanedTitle,
+      name: cleanedFullName,
+      ticketCode,
+      pax: parsedPax,
+      rsvpStatus: 'pending',
+      attended: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    if (walkInAddress.trim()) payload.address = walkInAddress.trim();
+    if (walkInPhone.trim()) payload.phone = walkInPhone.trim();
+    if (walkInCategory) payload.category = walkInCategory;
+    if (walkInInvitationType) payload.invitationType = walkInInvitationType;
+    if (walkInSession) payload.session = walkInSession;
+
+    if (isStaff) {
+      setPendingStaffWalkIn({
+        payload,
+        displayName: cleanedFullName,
+        pax: parsedPax,
+        category: walkInCategory || undefined,
+      });
+      return;
+    }
+
+    await persistWalkInGuest(payload);
   };
 
   // O(1) / Incremental Update: Merge 1 or a few changed guests without re-downloading 2,000+ rows
@@ -2026,13 +2216,6 @@ export default function Scanner() {
       {/* Top Header & Navigation - Streamlined 1-Row Bar */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-3 sm:p-3.5 rounded-lg shadow-2xs border border-slate-200 gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <Link
-            to={appUser?.role === 'staff' ? '/auth/login/events' : `/auth/login/events/${eventId}`}
-            className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors border border-transparent hover:border-slate-200 shrink-0"
-            title={appUser?.role === 'staff' ? 'Kembali ke Acara Tugas' : 'Kembali ke Detail Acara'}
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
           <div className="min-w-0">
             <h1 className="text-sm sm:text-base font-bold text-slate-900 flex items-center gap-1.5 truncate">
               <ScanLine className="w-4 h-4 text-indigo-600 shrink-0" />
@@ -2102,8 +2285,23 @@ export default function Scanner() {
           </div>
         </div>
 
-        {/* Right Controls: Mode Switcher + Tools Dropdown */}
-        <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
+        {/* Right Controls: Walk-In + Mode Switcher + Tools Dropdown */}
+        <div className="flex flex-wrap items-center justify-end gap-2 self-end md:self-auto shrink-0">
+          {/* Quick Walk-In Guest Button (All Staff & Operators) */}
+          <button
+            type="button"
+            onClick={() => openWalkInModal()}
+            className="h-7.5 sm:h-8 inline-flex items-center gap-1.5 px-2.5 sm:px-3 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors cursor-pointer shadow-2xs whitespace-nowrap shrink-0"
+            title={
+              isStaff
+                ? 'Tambah tamu susulan / Walk-In (memerlukan konfirmasi Keluarga/Vendor)'
+                : 'Tambah tamu susulan / Walk-In'
+            }
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>Tamu Walk-In</span>
+          </button>
+
           {/* Mode Switcher */}
           <div className="flex items-center p-0.5 bg-slate-100 border border-slate-200 rounded-md">
             <button
@@ -2758,6 +2956,18 @@ export default function Scanner() {
                     <p className="text-[11px] text-slate-400 mt-0.5">
                       Coba periksa kembali ejaan nama atau ubah filter status di atas.
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => openWalkInModal(manualGuestSearch)}
+                      className="mt-3 inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span>
+                        {manualGuestSearch.trim()
+                          ? `Daftarkan "${manualGuestSearch.trim()}" (Walk-In)`
+                          : 'Tambah Tamu Walk-In'}
+                      </span>
+                    </button>
                   </div>
                 ) : (
                   filteredManualGuests.slice(0, 50).map((guest) => {
@@ -3859,6 +4069,195 @@ export default function Scanner() {
           onRefreshStats={fetchStats}
         />
       )}
+
+      {/* Walk-In Guest Registration Modal */}
+      <Modal
+        isOpen={isWalkInModalOpen}
+        onClose={() => {
+          if (!isSavingWalkIn) {
+            setIsWalkInModalOpen(false);
+          }
+        }}
+        title="Tambah Tamu Walk-In"
+        maxWidth="max-w-xl"
+      >
+        <form onSubmit={handleSubmitWalkInGuest} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Pangkat / Jabatan</label>
+              <input
+                type="text"
+                value={walkInTitle}
+                onChange={(e) => setWalkInTitle(e.target.value)}
+                placeholder="Bpk. / Ibu / Dr."
+                className="w-full h-9 px-3 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Nama Tamu <span className="text-rose-600">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                autoFocus
+                value={walkInName}
+                onChange={(e) => setWalkInName(e.target.value)}
+                placeholder="Nama lengkap tamu"
+                className="w-full h-9 px-3 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+            {(walkInTitle.trim() || walkInName.trim()) && (
+              <div className="sm:col-span-3 px-3 py-2 rounded-lg bg-indigo-50/70 border border-indigo-100 flex items-center justify-between text-xs">
+                <span className="text-slate-600">Nama Tercatat:</span>
+                <span className="font-semibold text-indigo-900">
+                  {formatGuestFullName(walkInName, walkInTitle)}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">No HP / WhatsApp</label>
+              <input
+                type="text"
+                value={walkInPhone}
+                onChange={(e) => setWalkInPhone(e.target.value)}
+                placeholder="08123456789"
+                className="w-full h-9 px-3 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Alamat / Instansi</label>
+              <input
+                type="text"
+                value={walkInAddress}
+                onChange={(e) => setWalkInAddress(e.target.value)}
+                placeholder="Kota / Asal instansi"
+                className="w-full h-9 px-3 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Kategori Tamu</label>
+              <select
+                value={walkInCategory}
+                onChange={(e) => setWalkInCategory(e.target.value)}
+                className="w-full h-9 px-3 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              >
+                <option value="">-- Pilih Kategori --</option>
+                {(eventData?.guestCategories && eventData.guestCategories.length > 0
+                  ? eventData.guestCategories
+                  : ['Reguler', 'VIP', 'VVIP', 'Keluarga']
+                ).map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Tipe Undangan</label>
+              <select
+                value={walkInInvitationType}
+                onChange={(e) => setWalkInInvitationType(e.target.value)}
+                className="w-full h-9 px-3 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              >
+                <option value="">-- Pilih Tipe --</option>
+                {(eventData?.invitationTypes && eventData.invitationTypes.length > 0
+                  ? eventData.invitationTypes
+                  : ['Digital', 'Cetak', 'Walk-In']
+                ).map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {eventData?.sessions && eventData.sessions.length > 0 && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Sesi Acara</label>
+                <select
+                  value={walkInSession}
+                  onChange={(e) => setWalkInSession(e.target.value)}
+                  className="w-full h-9 px-3 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                >
+                  <option value="">-- Pilih Sesi --</option>
+                  {eventData.sessions.map((ses) => (
+                    <option key={ses} value={ses}>
+                      {ses}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Jumlah Orang (Pax)</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={999}
+                  required
+                  value={walkInPax}
+                  onChange={(e) => setWalkInPax(e.target.value.replace(/[^0-9]/g, ''))}
+                  onBlur={() => {
+                    const num = parseInt(walkInPax, 10);
+                    if (!num || num < 1) setWalkInPax('1');
+                  }}
+                  className="w-full h-9 pl-3 pr-14 text-sm tabular-nums border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-xs text-slate-500">
+                  Orang
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              disabled={isSavingWalkIn}
+              onClick={() => setIsWalkInModalOpen(false)}
+              className="h-9 px-4 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              disabled={isSavingWalkIn}
+              className="h-9 px-4 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {isSavingWalkIn ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Menyimpan...</span>
+                </>
+              ) : (
+                <span>Simpan Tamu</span>
+              )}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Mandatory Staff Confirmation Popup before saving Walk-In Guest */}
+      <StaffGuestConfirmationModal
+        isOpen={Boolean(pendingStaffWalkIn)}
+        guestName={pendingStaffWalkIn?.displayName || ''}
+        guestPax={pendingStaffWalkIn?.pax}
+        guestCategory={pendingStaffWalkIn?.category}
+        staffName={appUser?.name || currentOperator}
+        isSubmitting={isSavingWalkIn}
+        onCancel={() => {
+          if (!isSavingWalkIn) setPendingStaffWalkIn(null);
+        }}
+        onConfirm={async (source, note) => {
+          if (!pendingStaffWalkIn) return;
+          await persistWalkInGuest(pendingStaffWalkIn.payload, { source, note });
+        }}
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { doc, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useSettings } from '../../SettingsContext';
 import { MediaUploader } from '../../components/media/MediaUploader';
@@ -28,6 +28,7 @@ export default function PublicPayment() {
   const { settings } = useSettings();
 
   const [invoice, setInvoice] = useState<any | null>(null);
+  const [childInvoices, setChildInvoices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,6 +79,38 @@ export default function PublicPayment() {
     return () => unsubscribe();
   }, [invoiceId, settings?.activePaymentMethod]);
 
+  // Fetch child invoices if this is a consolidated (GB) invoice
+  useEffect(() => {
+    const childIds: string[] = Array.isArray(invoice?.childInvoiceIds) ? invoice.childInvoiceIds : [];
+    if (childIds.length === 0) {
+      setChildInvoices([]);
+      return;
+    }
+
+    let cancelled = false;
+    Promise.all(
+      childIds.map(async (cid) => {
+        try {
+          const snap = await getDoc(doc(db, 'invoices', cid));
+          if (snap.exists()) {
+            return { id: snap.id, ...snap.data() };
+          }
+          return { id: cid, serviceName: 'Invoice Layanan', amount: 0 };
+        } catch {
+          return { id: cid, serviceName: 'Invoice Layanan', amount: 0 };
+        }
+      })
+    ).then((results) => {
+      if (!cancelled) {
+        setChildInvoices(results);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [invoice?.id, JSON.stringify(invoice?.childInvoiceIds || [])]);
+
   const handleCopy = (text: string, type: 'amount' | 'acc' | 'id') => {
     navigator.clipboard.writeText(text);
     if (type === 'amount') {
@@ -115,12 +148,36 @@ export default function PublicPayment() {
   };
 
   const adminPhone = settings?.adminPhone || '6285158636606';
+  const todayFormatted = new Date().toLocaleDateString('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+  const formatShortDate = (ts: any) => {
+    if (!ts) return '-';
+    const d = ts?.toDate ? ts.toDate() : ts?.toMillis ? new Date(ts.toMillis()) : new Date(ts);
+    return isNaN(d.getTime())
+      ? '-'
+      : d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
   const waConfirmText = encodeURIComponent(
-    `Halo Admin, saya ingin konfirmasi pembayaran untuk pesanan #${invoice?.id || invoiceId}.\n\n` +
-    `Layanan: ${invoice?.serviceName || 'Layanan Acara'}\n` +
-    `Total: Rp ${(invoice?.amount || 0).toLocaleString('id-ID')}\n` +
-    `Status: Sudah ditransfer / dibayar via QRIS.\n\n` +
-    `Mohon dicek dan diaktifkan kuotanya. Terima kasih!`
+    childInvoices.length > 0
+      ? `*[KONFIRMASI PEMBAYARAN SEKALIGUS (BULK PAYMENT)]*\n` +
+        `📅 Tanggal Transaksi: ${todayFormatted}\n` +
+        `👤 Nama Akun / Partner: ${invoice?.userName || 'Partner'}\n` +
+        `💳 Metode Pembayaran: ${activeTab === 'qris' ? 'QRIS' : 'Transfer Bank Manual'}\n` +
+        `🆔 No. Invoice Gabungan: ${invoice?.id || invoiceId}\n\n` +
+        `Halo Admin, saya ingin melakukan konfirmasi pembayaran gabungan untuk ${childInvoices.length} Invoice berikut:\n` +
+        childInvoices
+          .map((c) => `- ${c.id} ${formatShortDate(c.createdAt)} - Rp ${(c.amount || 0).toLocaleString('id-ID')}`)
+          .join('\n') +
+        `\n\n💰 *Total Pembayaran: Rp ${(invoice?.amount || 0).toLocaleString('id-ID')}*\n\n` +
+        `Berikut saya lampirkan bukti transfer pembayarannya. Mohon bantu verifikasi. Terima kasih!`
+      : `Halo Admin, saya ingin konfirmasi pembayaran untuk pesanan #${invoice?.id || invoiceId}.\n\n` +
+        `Tanggal Transaksi: ${todayFormatted}\n` +
+        `Total: Rp ${(invoice?.amount || 0).toLocaleString('id-ID')}\n` +
+        `Metode: ${activeTab === 'qris' ? 'QRIS' : 'Transfer Bank Manual'}\n\n` +
+        `Mohon dicek dan diaktifkan kuotanya. Terima kasih!`
   );
 
   if (loading) {
@@ -338,11 +395,60 @@ export default function PublicPayment() {
           {/* Breakdown Items */}
           <div className="p-5 sm:p-6">
             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
-              Rincian Layanan &amp; Paket
+              {childInvoices.length > 0
+                ? `Rincian Invoice Gabungan (${childInvoices.length} Invoice)`
+                : 'Rincian Layanan & Paket'}
             </h3>
 
             <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 text-xs sm:text-sm">
-              {invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0 ? (
+              {childInvoices.length > 0 ? (
+                childInvoices.map((child: any, idx: number) => (
+                  <div key={child.id || idx} className="p-3.5 bg-white space-y-2">
+                    <div className="flex justify-between items-start gap-3">
+                      <div className="space-y-0.5 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono font-bold text-indigo-700">#{child.id}</span>
+                          <span className="text-[11px] text-slate-500 inline-flex items-center gap-1">
+                            <Calendar className="w-3 h-3 text-slate-400" />
+                            {formatShortDate(child.createdAt)}
+                          </span>
+                        </div>
+                        <div className="font-semibold text-slate-900">
+                          {child.serviceName || 'Layanan Acara'}
+                        </div>
+                      </div>
+                      <div className="text-right font-mono font-bold text-slate-900 shrink-0">
+                        Rp {(child.amount || 0).toLocaleString('id-ID')}
+                      </div>
+                    </div>
+
+                    {Array.isArray(child.items) && child.items.length > 0 && (
+                      <div className="pl-3 border-l-2 border-slate-200 space-y-1 pt-0.5">
+                        {child.items.map((item: any, itemIdx: number) => (
+                          <div key={itemIdx} className="flex justify-between items-center gap-2 text-xs text-slate-600">
+                            <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                              <span className="truncate">{item.serviceName}</span>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${
+                                item.type === 'package'
+                                  ? 'bg-rose-50 text-[#8C3A50] border-rose-200'
+                                  : 'bg-purple-50 text-purple-700 border-purple-200'
+                              }`}>
+                                {item.type === 'package' ? 'Paket Utama' : 'Add-on'}
+                              </span>
+                              {(item.quantity || 1) > 1 && (
+                                <span className="font-mono text-[11px] text-slate-500">x{item.quantity}</span>
+                              )}
+                            </div>
+                            <span className="font-mono text-slate-700 shrink-0">
+                              Rp {((item.price || 0) * (item.quantity || 1)).toLocaleString('id-ID')}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))
+              ) : invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0 ? (
                 invoice.items.map((item: any, idx: number) => (
                   <div key={idx} className="p-3.5 flex justify-between items-center gap-3 bg-white">
                     <div className="space-y-0.5">
@@ -381,39 +487,46 @@ export default function PublicPayment() {
             </div>
 
             {/* Quota Added Highlights */}
-            {(invoice.totalActivePeriodDays || invoice.totalEventQuota || invoice.totalGuestQuota || invoice.totalWaBlastQuota) && (
-              <div className="mt-4 p-3.5 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-100/80 rounded-xl text-xs">
-                <span className="font-bold text-purple-900 block mb-1 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-purple-600" /> Kuota yang Didapatkan Setelah Lunas:
-                </span>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-slate-700 font-medium">
-                  {invoice.totalActivePeriodDays ? (
-                    <div className="bg-white/70 p-2 rounded-lg border border-purple-100">
-                      <span className="text-[10px] text-slate-500 block">Masa Aktif:</span>
-                      <strong className="text-purple-700">+{invoice.totalActivePeriodDays} Hari</strong>
-                    </div>
-                  ) : null}
-                  {invoice.totalEventQuota ? (
-                    <div className="bg-white/70 p-2 rounded-lg border border-purple-100">
-                      <span className="text-[10px] text-slate-500 block">Kuota Acara:</span>
-                      <strong className="text-purple-700">+{invoice.totalEventQuota} Acara</strong>
-                    </div>
-                  ) : null}
-                  {invoice.totalGuestQuota ? (
-                    <div className="bg-white/70 p-2 rounded-lg border border-purple-100">
-                      <span className="text-[10px] text-slate-500 block">Kuota Tamu:</span>
-                      <strong className="text-purple-700">+{invoice.totalGuestQuota.toLocaleString('id-ID')}</strong>
-                    </div>
-                  ) : null}
-                  {invoice.totalWaBlastQuota ? (
-                    <div className="bg-white/70 p-2 rounded-lg border border-purple-100">
-                      <span className="text-[10px] text-slate-500 block">WA Blast:</span>
-                      <strong className="text-purple-700">+{invoice.totalWaBlastQuota.toLocaleString('id-ID')}</strong>
-                    </div>
-                  ) : null}
+            {(() => {
+              const totalActivePeriodDays = invoice.totalActivePeriodDays || childInvoices.reduce((s, c) => s + (c.totalActivePeriodDays || 0), 0);
+              const totalEventQuota = invoice.totalEventQuota || childInvoices.reduce((s, c) => s + (c.totalEventQuota || 0), 0);
+              const totalGuestQuota = invoice.totalGuestQuota || childInvoices.reduce((s, c) => s + (c.totalGuestQuota || 0), 0);
+              const totalWaBlastQuota = invoice.totalWaBlastQuota || childInvoices.reduce((s, c) => s + (c.totalWaBlastQuota || 0), 0);
+              if (!totalActivePeriodDays && !totalEventQuota && !totalGuestQuota && !totalWaBlastQuota) return null;
+              return (
+                <div className="mt-4 p-3.5 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-100/80 rounded-xl text-xs">
+                  <span className="font-bold text-purple-900 block mb-1 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-purple-600" /> Kuota yang Didapatkan Setelah Lunas:
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-slate-700 font-medium">
+                    {totalActivePeriodDays ? (
+                      <div className="bg-white/70 p-2 rounded-lg border border-purple-100">
+                        <span className="text-[10px] text-slate-500 block">Masa Aktif:</span>
+                        <strong className="text-purple-700">+{totalActivePeriodDays} Hari</strong>
+                      </div>
+                    ) : null}
+                    {totalEventQuota ? (
+                      <div className="bg-white/70 p-2 rounded-lg border border-purple-100">
+                        <span className="text-[10px] text-slate-500 block">Kuota Acara:</span>
+                        <strong className="text-purple-700">+{totalEventQuota} Acara</strong>
+                      </div>
+                    ) : null}
+                    {totalGuestQuota ? (
+                      <div className="bg-white/70 p-2 rounded-lg border border-purple-100">
+                        <span className="text-[10px] text-slate-500 block">Kuota Tamu:</span>
+                        <strong className="text-purple-700">+{totalGuestQuota.toLocaleString('id-ID')}</strong>
+                      </div>
+                    ) : null}
+                    {totalWaBlastQuota ? (
+                      <div className="bg-white/70 p-2 rounded-lg border border-purple-100">
+                        <span className="text-[10px] text-slate-500 block">WA Blast:</span>
+                        <strong className="text-purple-700">+{totalWaBlastQuota.toLocaleString('id-ID')}</strong>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Total Highlight */}
             <div className="mt-5 p-4 bg-slate-900 text-white rounded-xl flex items-center justify-between shadow-xs">

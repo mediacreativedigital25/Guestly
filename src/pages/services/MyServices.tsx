@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../AuthContext';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
@@ -14,11 +14,14 @@ import {
   ShieldCheck,
   Infinity as InfinityIcon,
   ArrowRight,
-  Receipt
+  Receipt,
+  Search,
+  X
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { getRoleLabel, getUserBusinessId, canUserAccessEvent, isPartnerBusinessRegistered } from '../../lib/utils';
+import { getRoleLabel, getUserBusinessId, canUserAccessEvent, isPartnerBusinessRegistered, parseFirestoreDate } from '../../lib/utils';
 import { EventRecord } from '../../types';
+import { DateRangeFilterBar, isWithinDateRange } from '../../components/DateRangeFilterBar';
 
 export default function MyServices() {
   const { appUser, currentUser } = useAuth();
@@ -28,6 +31,14 @@ export default function MyServices() {
     clientsUsed: 0,
   });
   const [loading, setLoading] = useState(true);
+
+  // Filter & Pagination State
+  const [searchTerm, setSearchTerm] = useState('');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'multi' | 'single'>('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   const isPartnerOrOwner = Boolean(
     appUser && ['owner', 'partner', 'superadmin', 'admin'].includes(appUser.role)
@@ -140,8 +151,45 @@ export default function MyServices() {
     return formatted !== '-' ? formatted : null;
   };
 
+  const filteredInvoices = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return invoices.filter((inv) => {
+      const isMulti = Boolean((inv.items && inv.items.length > 1) || inv.isConsolidated || (inv.childInvoiceIds && inv.childInvoiceIds.length > 0));
+      if (typeFilter === 'multi' && !isMulti) return false;
+      if (typeFilter === 'single' && isMulti) return false;
+      if ((startDate || endDate) && !isWithinDateRange(parseFirestoreDate(inv.createdAt), startDate, endDate)) {
+        return false;
+      }
+      if (q) {
+        const idMatch = String(inv.id || '').toLowerCase().includes(q);
+        const nameMatch = String(inv.serviceName || '').toLowerCase().includes(q);
+        return idMatch || nameMatch;
+      }
+      return true;
+    });
+  }, [invoices, searchTerm, typeFilter, startDate, endDate]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, typeFilter, startDate, endDate, itemsPerPage]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / itemsPerPage));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, filteredInvoices.length);
+  const paginatedInvoices = filteredInvoices.slice(startIndex, endIndex);
+  const hasActiveFilters = Boolean(searchTerm.trim() || typeFilter !== 'all' || startDate || endDate);
+
+  const resetFilters = () => {
+    setSearchTerm('');
+    setTypeFilter('all');
+    setStartDate('');
+    setEndDate('');
+    setCurrentPage(1);
+  };
+
   if (loading) {
-    return <div className="p-6 text-center text-gray-500">Memuat data layanan...</div>;
+    return <div className="p-6 text-center text-gray-500 text-sm">Memuat data layanan...</div>;
   }
 
   const activeUntilFormatted = getActiveUntilDate();
@@ -166,36 +214,18 @@ export default function MyServices() {
   const isVerifiedBusiness = isPartnerBusinessRegistered(appUser);
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
-      {/* Top Actions */}
-      <div className="flex items-center justify-end gap-3">
-        <Link
-          to="/auth/login/invoices/my"
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium transition-colors"
-        >
-          <Receipt className="w-4 h-4 text-gray-500" />
-          Lihat Invoice
-        </Link>
-        <Link
-          to="/auth/login/services/catalog"
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold shadow-xs transition-colors"
-        >
-          <ShoppingBag className="w-4 h-4" />
-          Tambah / Upgrade Layanan
-        </Link>
-      </div>
-
-      {/* Status Card */}
-      <div className="bg-white rounded-xl shadow-xs border border-gray-200 p-6 md:p-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 mb-6 border-b border-gray-100">
-          <div className="flex items-start sm:items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center shrink-0">
-              <CheckCircle className="w-6 h-6 text-emerald-600" />
+    <div className="space-y-4">
+      {/* Status & Quota Summary Card */}
+      <div className="bg-white rounded-xl shadow-xs border border-gray-200 p-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 mb-5 border-b border-gray-100">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center shrink-0">
+              <CheckCircle className="w-5 h-5 text-emerald-600" />
             </div>
             <div>
-              <div className="flex flex-wrap items-center gap-2.5">
-                <h2 className="text-xl font-bold text-gray-900">Status Akun Aktif</h2>
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base font-bold text-gray-900">Status Akun Aktif</h2>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                   Aktif
                 </span>
                 {isPartnerOrOwner && isVerifiedBusiness && (
@@ -368,114 +398,202 @@ export default function MyServices() {
         </div>
       </div>
 
-      {/* Purchase / Allocation History */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="text-lg font-bold text-gray-900">Riwayat Pembelian &amp; Aktivasi Layanan</h3>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Daftar paket layanan, add-on, maupun alokasi lisensi yang aktif pada akun Anda.
-            </p>
+      {/* Box 1: Unified Filter & Search Box */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-2.5 sm:p-3">
+        <DateRangeFilterBar
+          label="Rentang Tgl Pembelian"
+          startDate={startDate}
+          endDate={endDate}
+          onStartDateChange={setStartDate}
+          onEndDateChange={setEndDate}
+          onClear={() => {
+            setStartDate('');
+            setEndDate('');
+          }}
+        />
+        <div className="flex flex-col md:flex-row md:items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Cari ID invoice atau nama layanan..."
+              className="w-full h-8.5 pl-9 pr-8 text-xs bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                title="Hapus pencarian"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as 'all' | 'multi' | 'single')}
+              className="h-8.5 px-2.5 text-xs bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="all">Semua Layanan</option>
+              <option value="single">Layanan Satuan</option>
+              <option value="multi">Bundling / Gabungan</option>
+            </select>
+
+            <select
+              value={itemsPerPage}
+              onChange={(e) => setItemsPerPage(Number(e.target.value))}
+              className="h-8.5 px-2.5 text-xs bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+            >
+              <option value={10}>Tampilkan 10</option>
+              <option value={25}>Tampilkan 25</option>
+              <option value={50}>Tampilkan 50</option>
+            </select>
           </div>
         </div>
+      </div>
 
+      {/* Primary Action Bar (Left-Aligned between Filter Box & Table Box) */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Link
+          to="/auth/login/services/catalog"
+          className="inline-flex items-center gap-1.5 h-9 px-3.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-xs font-semibold shadow-xs transition-colors"
+        >
+          <ShoppingBag className="w-3.5 h-3.5" />
+          <span>Tambah / Upgrade Layanan</span>
+        </Link>
+        <Link
+          to="/auth/login/invoices/my"
+          className="inline-flex items-center gap-1.5 h-9 px-3.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-xs font-semibold transition-colors"
+        >
+          <Receipt className="w-3.5 h-3.5 text-gray-500" />
+          <span>Lihat Invoice</span>
+        </Link>
+      </div>
+
+      {/* Box 2: Purchase / Allocation History Table */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         {invoices.length === 0 ? (
-          <div className="bg-white rounded-xl shadow-xs border border-gray-200 overflow-hidden">
-            {(eventQuotaValue > 0 || clientQuotaValue > 0 || isPartnerOrOwner) ? (
-              <div className="divide-y divide-gray-100">
-                <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-indigo-50/30">
-                  <div className="flex items-start gap-3.5">
-                    <div className="p-2.5 rounded-xl bg-indigo-100 text-indigo-700 shrink-0 mt-0.5">
-                      <ShieldCheck className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h4 className="text-sm font-bold text-gray-900">
-                          Alokasi Lisensi &amp; Kuota {isPartnerOrOwner ? 'Partner Guestly' : 'Akun'}
-                        </h4>
-                        <span className="px-2 py-0.5 text-[11px] font-semibold rounded-full bg-green-100 text-green-800">
-                          Aktif
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-600 mt-1">
-                        Kuota akun Anda ({eventQuotaValue} Acara
-                        {isPartnerOrOwner ? `, ${clientQuotaValue} Client` : ''}) telah diaktifkan langsung melalui sistem manajemen lisensi Guestly.
-                      </p>
-                      <p className="text-[11px] text-gray-400 mt-1">
-                        Terdaftar sejak: {formatDate(appUser?.createdAt)}
-                      </p>
-                    </div>
+          (eventQuotaValue > 0 || clientQuotaValue > 0 || isPartnerOrOwner) ? (
+            <div className="divide-y divide-gray-100">
+              <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-indigo-50/30">
+                <div className="flex items-start gap-3.5">
+                  <div className="p-2.5 rounded-xl bg-indigo-100 text-indigo-700 shrink-0 mt-0.5">
+                    <ShieldCheck className="w-5 h-5" />
                   </div>
-                  <Link
-                    to="/auth/login/services/catalog"
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-white border border-indigo-200 px-3.5 py-2 rounded-lg transition-colors self-start sm:self-center shrink-0"
-                  >
-                    <span>Tambah Kuota / Add-on</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </Link>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-sm font-bold text-gray-900">
+                        Alokasi Lisensi &amp; Kuota {isPartnerOrOwner ? 'Partner Guestly' : 'Akun'}
+                      </h4>
+                      <span className="px-2 py-0.5 text-[11px] font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        Aktif
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-600 mt-1">
+                      Kuota akun Anda ({eventQuotaValue} Acara
+                      {isPartnerOrOwner ? `, ${clientQuotaValue} Client` : ''}) telah diaktifkan langsung melalui sistem manajemen lisensi Guestly.
+                    </p>
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      Terdaftar sejak: {formatDate(appUser?.createdAt)}
+                    </p>
+                  </div>
                 </div>
-                <div className="px-6 py-3.5 bg-gray-50 text-xs text-gray-500 flex items-center justify-between">
-                  <span>Belum ada transaksi pembelian mandiri melalui checkout katalog.</span>
-                  <Link to="/auth/login/invoices/my" className="text-indigo-600 hover:underline font-medium">
-                    Cek Halaman Invoice &rarr;
-                  </Link>
-                </div>
-              </div>
-            ) : (
-              <div className="p-8 text-center text-gray-500 space-y-3">
-                <p>Belum ada riwayat pembelian layanan.</p>
                 <Link
                   to="/auth/login/services/catalog"
-                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:text-indigo-800"
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-white border border-indigo-200 px-3.5 py-2 rounded-lg transition-colors self-start sm:self-center shrink-0"
                 >
-                  <span>Lihat Katalog Layanan</span>
-                  <ArrowRight className="w-4 h-4" />
+                  <span>Tambah Kuota / Add-on</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
               </div>
+              <div className="px-5 py-3 bg-gray-50 text-xs text-gray-500 flex items-center justify-between">
+                <span>Belum ada transaksi pembelian mandiri melalui checkout katalog.</span>
+                <Link to="/auth/login/invoices/my" className="text-indigo-600 hover:underline font-medium">
+                  Cek Halaman Invoice &rarr;
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="p-10 text-center text-gray-500 space-y-2.5">
+              <p className="text-sm font-medium text-gray-600">Belum ada riwayat pembelian layanan.</p>
+              <Link
+                to="/auth/login/services/catalog"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+              >
+                <span>Lihat Katalog Layanan</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          )
+        ) : filteredInvoices.length === 0 ? (
+          <div className="p-10 text-center flex flex-col items-center justify-center gap-2">
+            <ShoppingBag className="w-10 h-10 text-gray-300" />
+            <p className="text-sm font-medium text-gray-600">
+              Tidak ada layanan yang cocok dengan pencarian atau filter.
+            </p>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
+              >
+                Reset Pencarian &amp; Filter
+              </button>
             )}
           </div>
         ) : (
-          <div className="bg-white rounded-xl shadow-xs border border-gray-200 overflow-hidden">
+          <>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-12">
+                      No
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                       ID Invoice / Layanan
                     </th>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                       Tanggal Pembelian
                     </th>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                       Nominal
                     </th>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                       Status
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {invoices.map((invoice) => (
-                    <tr key={invoice.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4 whitespace-nowrap">
+                  {paginatedInvoices.map((invoice, index) => (
+                    <tr key={invoice.id} className="hover:bg-gray-50/80 transition-colors">
+                      <td className="px-4 py-3.5 whitespace-nowrap text-xs font-mono text-gray-500">
+                        {startIndex + index + 1}
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <p className="text-sm font-semibold text-gray-900">{invoice.serviceName}</p>
                           {invoice.items && invoice.items.length > 1 && (
-                            <span className="px-1.5 py-0.2 bg-purple-50 text-purple-700 text-[10px] font-bold rounded border border-purple-200">
+                            <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 text-[10px] font-bold rounded border border-purple-200">
                               {invoice.items.length} item
                             </span>
                           )}
                         </div>
                         <p className="text-xs font-mono text-indigo-600">#{invoice.id}</p>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      <td className="px-4 py-3.5 whitespace-nowrap text-xs text-gray-600">
                         {formatDate(invoice.createdAt)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-medium text-gray-900">
+                      <td className="px-4 py-3.5 whitespace-nowrap text-sm font-mono font-medium text-gray-900">
                         Rp {(invoice.amount || 0).toLocaleString('id-ID')}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="px-2.5 py-0.5 inline-flex text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <span className="px-2.5 py-0.5 inline-flex text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                           Lunas &amp; Aktif
                         </span>
                       </td>
@@ -484,7 +602,67 @@ export default function MyServices() {
                 </tbody>
               </table>
             </div>
-          </div>
+
+            {/* Pagination Footer */}
+            <div className="px-4 py-3 border-t border-gray-200 bg-gray-50/70 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-gray-600">
+              <div className="flex items-center gap-2">
+                <span>
+                  Menampilkan <strong className="text-gray-900">{startIndex + 1}</strong> –{' '}
+                  <strong className="text-gray-900">{endIndex}</strong> dari{' '}
+                  <strong className="text-gray-900">{filteredInvoices.length}</strong> layanan
+                </span>
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={resetFilters}
+                    className="text-indigo-600 hover:text-indigo-800 font-medium underline cursor-pointer"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => setCurrentPage(1)}
+                  className="px-2 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title="Halaman Pertama"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Sebelumnya
+                </button>
+                <span className="px-2.5 py-1 text-gray-700 font-medium">
+                  Hal {safeCurrentPage} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Selanjutnya
+                </button>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => setCurrentPage(totalPages)}
+                  className="px-2 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title="Halaman Terakhir"
+                >
+                  »
+                </button>
+              </div>
+            </div>
+          </>
         )}
       </div>
     </div>

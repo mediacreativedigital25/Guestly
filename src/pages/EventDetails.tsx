@@ -6,7 +6,7 @@ import QRCode from 'react-qr-code';
 import { collection, query, getDocs, addDoc, serverTimestamp, doc, getDoc, deleteDoc, updateDoc, deleteField, onSnapshot, writeBatch } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { supabaseDb } from '../lib/supabaseDb';
-import { Guest, EventRecord, WATemplate, EInviteTemplate } from '../types';
+import { Guest, EventRecord, WATemplate, EInviteTemplate, StaffConfirmationSource } from '../types';
 import { parseFirestoreDate, canUserAccessEvent, getOperatorLabel, getRoleLabel, exportCardToPng, resolveMediaUrl, getGuestBaseName, formatGuestFullName, isEventExpired, isEventInactiveOrExpired, getDaysRemaining, resolveEventActiveUntil, computeDefaultActiveUntil, DEFAULT_EVENT_ACTIVE_DAYS, shouldHideServiceInfo, isVendorManagedClient, isSelfRegisteredClient } from '../lib/utils';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
@@ -24,6 +24,7 @@ import { souvenirStorage } from '../services/souvenirStorage';
 import { subscribeWaDispatch, saveGuestWaStatus, clearWaDispatchMap, WaDispatchMap } from '../services/waDispatchService';
 import { toWhatsAppInternational } from '../lib/fonnte';
 import { EventGroupReminderModal } from '../components/EventGroupReminderModal';
+import { StaffGuestConfirmationModal, formatStaffConfirmationSource } from '../components/StaffGuestConfirmationModal';
 
 export default function EventDetails() {
   const { eventId, guestId: routeGuestId } = useParams<{ eventId: string; guestId?: string }>();
@@ -70,6 +71,13 @@ export default function EventDetails() {
   const [newGuestInvitationType, setNewGuestInvitationType] = useState('');
   const [newGuestSession, setNewGuestSession] = useState('');
   const [newGuestPax, setNewGuestPax] = useState<string>('1');
+  const [isSavingNewGuest, setIsSavingNewGuest] = useState(false);
+  const [pendingStaffGuest, setPendingStaffGuest] = useState<{
+    payload: any;
+    displayName: string;
+    pax: number;
+    category?: string;
+  } | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [rsvpFilter, setRsvpFilter] = useState('all');
   const [attendanceFilter, setAttendanceFilter] = useState('all');
@@ -423,7 +431,10 @@ export default function EventDetails() {
   // Sync URL sub-routes (/events/:eventId/guests/add, /events/:eventId/guests/:guestId/edit)
   useEffect(() => {
     const path = location.pathname;
-    if (isEventLocked && (path.endsWith('/guests/add') || (routeGuestId && path.endsWith('/edit')))) {
+    if (
+      (isEventLocked && (path.endsWith('/guests/add') || (routeGuestId && path.endsWith('/edit')))) ||
+      (isStaff && routeGuestId && path.endsWith('/edit'))
+    ) {
       setIsAddingGuest(false);
       setIsEditingGuest(false);
       setEditingGuestId(null);
@@ -458,55 +469,29 @@ export default function EventDetails() {
         setIsAddingGuest(false);
       }
     }
-  }, [location.pathname, routeGuestId, guests.length, isEventLocked]);
+  }, [location.pathname, routeGuestId, guests.length, isEventLocked, isStaff]);
 
-  const handleAddGuest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isEventLocked) {
-      showEventLockedAlert();
-      return;
-    }
-    
-    if (
-      appUser &&
-      !['superadmin', 'owner', 'partner', 'admin'].includes(appUser.role) &&
-      appUser.guestQuota !== undefined &&
-      appUser.guestQuota > 0 &&
-      guests.length >= appUser.guestQuota
-    ) {
-      showAlert('Kuota Habis', `Anda telah mencapai batas maksimal kuota tamu (${appUser.guestQuota} tamu). Silakan beli atau upgrade layanan Anda.`, 'warning');
-      return;
-    }
-    
-    const cleanedGuestTitle = newGuestTitle.trim();
-    const cleanedBaseName = newGuestName.trim();
-    const cleanedGuestName = formatGuestFullName(cleanedBaseName, cleanedGuestTitle);
-    if (guests.some(g => g.name.toLowerCase() === cleanedGuestName.toLowerCase())) {
-      showAlert('Peringatan', `Tamu dengan nama "${cleanedGuestName}" sudah tersedia di daftar.`, 'warning');
-      return;
-    }
-
+  const persistNewGuestPayload = async (
+    basePayload: any,
+    staffConfirmation?: { source: StaffConfirmationSource; note: string }
+  ) => {
     try {
-      const ticketCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-      const parsedPax = Math.max(1, Number(newGuestPax) || 1);
-      const payload: any = {
-        eventId: eventId!,
-        title: cleanedGuestTitle,
-        name: cleanedGuestName,
-        ticketCode: ticketCode,
-        pax: parsedPax,
-        rsvpStatus: 'pending',
-        attended: false,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      };
-      
-      if (newGuestAddress) payload.address = newGuestAddress;
-      if (newGuestPhone) payload.phone = newGuestPhone;
-      if (newGuestCategory) payload.category = newGuestCategory;
-      if (newGuestInvitationType) payload.invitationType = newGuestInvitationType;
-      if (newGuestSession) payload.session = newGuestSession;
-      
+      setIsSavingNewGuest(true);
+      const payload: any = { ...basePayload };
+
+      if (isStaff && staffConfirmation) {
+        payload.addedByRole = 'staff';
+        payload.addedByUid = appUser?.uid || appUser?.id || '';
+        payload.addedByName = appUser?.name || currentOperator || 'Staff';
+        payload.addedByStaffType = appUser?.staffType || 'all';
+        payload.addedVia = 'event_details';
+        payload.staffConfirmationSource = staffConfirmation.source;
+        if (staffConfirmation.note) {
+          payload.staffConfirmationNote = staffConfirmation.note;
+        }
+        payload.staffConfirmedAt = new Date().toISOString();
+      }
+
       if (isManagedClient) {
         await addDoc(collection(db, 'guest_edit_requests'), {
           eventId: eventId!,
@@ -520,15 +505,15 @@ export default function EventDetails() {
           type: 'add',
           originalData: {},
           requestedData: {
-            title: cleanedGuestTitle,
-            name: cleanedGuestName,
-            address: newGuestAddress || '',
-            phone: newGuestPhone || '',
-            category: newGuestCategory || '',
-            invitationType: newGuestInvitationType || '',
-            session: newGuestSession || '',
-            pax: parsedPax,
-            ticketCode: ticketCode,
+            title: payload.title || '',
+            name: payload.name,
+            address: payload.address || '',
+            phone: payload.phone || '',
+            category: payload.category || '',
+            invitationType: payload.invitationType || '',
+            session: payload.session || '',
+            pax: payload.pax,
+            ticketCode: payload.ticketCode,
             rsvpStatus: 'pending',
             attended: false,
           },
@@ -538,10 +523,17 @@ export default function EventDetails() {
         showAlert('Berhasil', "Permintaan penambahan tamu berhasil dikirim dan menunggu persetujuan Admin/Vendor.", "success");
       } else {
         const guestRef = await addDoc(collection(db, 'events', eventId!, 'guests'), payload);
-        setGuests([...guests, { id: guestRef.id, ...payload } as unknown as Guest]);
-        showAlert('Berhasil', "Tamu berhasil ditambahkan!", "success");
+        setGuests(prev => [...prev, { id: guestRef.id, ...payload } as unknown as Guest]);
+        showAlert(
+          'Tamu Ditambahkan',
+          isStaff && staffConfirmation
+            ? `${payload.name} (${payload.ticketCode}) tersimpan · Konfirmasi: ${formatStaffConfirmationSource(staffConfirmation.source)}`
+            : `${payload.name} (${payload.ticketCode}) berhasil ditambahkan.`,
+          'success'
+        );
       }
 
+      setPendingStaffGuest(null);
       setNewGuestTitle('');
       setNewGuestName('');
       setNewGuestAddress('');
@@ -555,9 +547,75 @@ export default function EventDetails() {
         navigate(`/auth/login/events/${eventId}`);
       }
     } catch (error) {
-      showAlert("Gagal", "Failed to add guest. Check permissions.", "error");
+      showAlert("Gagal", "Gagal menambahkan tamu. Periksa izin akses atau koneksi Anda.", "error");
       handleFirestoreError(error, OperationType.CREATE, `events/${eventId}/guests`);
+    } finally {
+      setIsSavingNewGuest(false);
     }
+  };
+
+  const handleAddGuest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSavingNewGuest) return;
+    if (isEventLocked) {
+      showEventLockedAlert();
+      return;
+    }
+
+    if (
+      appUser &&
+      !['superadmin', 'owner', 'partner', 'admin'].includes(appUser.role) &&
+      appUser.guestQuota !== undefined &&
+      appUser.guestQuota > 0 &&
+      guests.length >= appUser.guestQuota
+    ) {
+      showAlert('Kuota Habis', `Anda telah mencapai batas maksimal kuota tamu (${appUser.guestQuota} tamu). Silakan beli atau upgrade layanan Anda.`, 'warning');
+      return;
+    }
+
+    const cleanedGuestTitle = newGuestTitle.trim();
+    const cleanedBaseName = newGuestName.trim();
+    if (!cleanedBaseName) {
+      showAlert('Peringatan', 'Nama tamu wajib diisi.', 'warning');
+      return;
+    }
+    const cleanedGuestName = formatGuestFullName(cleanedBaseName, cleanedGuestTitle);
+    if (guests.some(g => g.name.toLowerCase() === cleanedGuestName.toLowerCase())) {
+      showAlert('Peringatan', `Tamu dengan nama "${cleanedGuestName}" sudah tersedia di daftar.`, 'warning');
+      return;
+    }
+
+    const ticketCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const parsedPax = Math.max(1, Number(newGuestPax) || 1);
+    const payload: any = {
+      eventId: eventId!,
+      title: cleanedGuestTitle,
+      name: cleanedGuestName,
+      ticketCode: ticketCode,
+      pax: parsedPax,
+      rsvpStatus: 'pending',
+      attended: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+
+    if (newGuestAddress.trim()) payload.address = newGuestAddress.trim();
+    if (newGuestPhone.trim()) payload.phone = newGuestPhone.trim();
+    if (newGuestCategory) payload.category = newGuestCategory;
+    if (newGuestInvitationType) payload.invitationType = newGuestInvitationType;
+    if (newGuestSession) payload.session = newGuestSession;
+
+    if (isStaff) {
+      setPendingStaffGuest({
+        payload,
+        displayName: cleanedGuestName,
+        pax: parsedPax,
+        category: newGuestCategory || undefined,
+      });
+      return;
+    }
+
+    await persistNewGuestPayload(payload);
   };
 
   const [guestToDelete, setGuestToDelete] = useState<string | null>(null);
@@ -2096,11 +2154,11 @@ export default function EventDetails() {
         </div>
       )}
 
-      {/* Event Context Header Card (Unified Create Event Style) */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-3.5 sm:p-4">
-        <div className="flex flex-col lg:flex-row items-start justify-between gap-4">
+      {/* Event Context Header Card (Clean 2-Row Executive Header) */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-4 sm:p-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           {/* Left Column: Photo + Event Main Info */}
-          <div className="flex items-start gap-3.5 min-w-0 flex-1">
+          <div className="flex items-center gap-4 min-w-0 flex-1">
             {/* Event Photo / Thumbnail with quick change overlay */}
             <div className="relative group shrink-0">
               {event?.thumbnailUrl ? (
@@ -2108,11 +2166,11 @@ export default function EventDetails() {
                   src={resolveMediaUrl(event.thumbnailUrl)}
                   alt={event.title}
                   referrerPolicy="no-referrer"
-                  className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl object-cover border border-gray-200 bg-gray-50"
+                  className="w-[100px] h-[100px] rounded-xl object-cover border border-gray-200 bg-gray-50"
                 />
               ) : (
-                <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-gray-50 border border-dashed border-gray-300 flex items-center justify-center text-gray-400">
-                  <ImageIcon className="w-6 h-6" />
+                <div className="w-13 h-13 sm:w-14 sm:h-14 rounded-xl bg-gray-50 border border-dashed border-gray-300 flex items-center justify-center text-gray-400">
+                  <ImageIcon className="w-5 h-5" />
                 </div>
               )}
               {!isStaff && !isEventLocked && (
@@ -2128,15 +2186,15 @@ export default function EventDetails() {
               )}
             </div>
 
-            {/* Title & Core Details */}
+            {/* Title & Core Details (2 Balanced Rows) */}
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-base sm:text-lg font-semibold text-gray-900 truncate" title={event?.title}>
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                <h1 className="text-[16px] text-left font-bold text-gray-900 truncate" title={event?.title}>
                   {event?.title || 'Detail Acara'}
                 </h1>
 
                 {event && (
-                  <div className="inline-flex items-center gap-2">
+                  <div className="inline-flex items-center gap-2 shrink-0">
                     <span
                       className={`text-xs font-semibold capitalize inline-flex items-center gap-1 ${
                         event.status === 'published'
@@ -2151,7 +2209,7 @@ export default function EventDetails() {
                           : undefined
                       }
                     >
-                      <span>·</span>
+                      <span aria-hidden="true" className="text-gray-300">·</span>
                       <span>{event.status}</span>
                       {isEventLocked && <Lock className="w-3 h-3 text-amber-600" />}
                     </span>
@@ -2170,17 +2228,11 @@ export default function EventDetails() {
                     )}
                   </div>
                 )}
-
-                {isStaff && (
-                  <span className="text-xs text-gray-500">
-                    · Petugas: <strong className="font-semibold text-indigo-600">{currentOperator}</strong>
-                  </span>
-                )}
               </div>
 
               {/* Clean Unboxed Metadata Row */}
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 mt-1 tabular-nums">
-                <span className="inline-flex items-center gap-1 text-gray-700 font-medium">
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-gray-500 mt-1.5 tabular-nums">
+                <span className="inline-flex items-center gap-1.5 text-gray-700 font-medium">
                   <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                   <span>
                     {event?.date && parseFirestoreDate(event.date)
@@ -2221,37 +2273,15 @@ export default function EventDetails() {
                     </span>
                   </>
                 )}
-              </div>
-
-              {/* Compact Unboxed Configuration Summary */}
-              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-gray-500 mt-1.5">
-                {event?.guestCategories && event.guestCategories.length > 0 && (
-                  <span>
-                    <span className="text-gray-400">Kategori:</span>{' '}
-                    <span className="text-gray-700 font-medium">{event.guestCategories.join(', ')}</span>
-                  </span>
-                )}
-
-                {event?.sessions && event.sessions.length > 0 && (
-                  <>
-                    {event?.guestCategories && event.guestCategories.length > 0 && (
-                      <span aria-hidden="true" className="text-gray-300">·</span>
-                    )}
-                    <span>
-                      <span className="text-gray-400">Sesi:</span>{' '}
-                      <span className="text-gray-700 font-medium">{event.sessions.join(', ')}</span>
-                    </span>
-                  </>
-                )}
 
                 <span aria-hidden="true" className="text-gray-300">·</span>
                 <button
                   type="button"
                   onClick={() => setIsConfigExpanded(!isConfigExpanded)}
                   className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 transition-colors cursor-pointer"
-                  title={isConfigExpanded ? 'Sembunyikan detail konfigurasi' : 'Lihat tipe undangan & frame'}
+                  title={isConfigExpanded ? 'Sembunyikan info & konfigurasi acara' : 'Lihat kategori, sesi, tipe undangan & frame'}
                 >
-                  <span>{isConfigExpanded ? 'Sembunyikan Konfigurasi' : 'Konfigurasi Lengkap'}</span>
+                  <span>{isConfigExpanded ? 'Tutup Info Acara' : 'Info & Konfigurasi'}</span>
                   {isConfigExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                 </button>
               </div>
@@ -2259,7 +2289,7 @@ export default function EventDetails() {
           </div>
 
           {/* Right Column: Clean Event Operational Actions */}
-          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-start lg:justify-end shrink-0 pt-2.5 lg:pt-0 border-t lg:border-t-0 border-gray-100">
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-start lg:justify-end shrink-0 pt-3 lg:pt-0 border-t lg:border-t-0 border-gray-100">
             {eventInactive ? (
               <>
                 <button
@@ -2290,6 +2320,8 @@ export default function EventDetails() {
                       ? `/auth/login/events/${eventId}/scan?mode=souvenir`
                       : isStaffCheckinOnly
                       ? `/auth/login/events/${eventId}/scan?mode=checkin`
+                      : isStaff
+                      ? `/auth/login/events/${eventId}/scan?mode=checkin_souvenir`
                       : `/auth/login/events/${eventId}/scan`
                   }
                   className="h-9 px-3.5 inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium text-xs sm:text-sm shadow-xs transition-colors whitespace-nowrap"
@@ -2304,6 +2336,27 @@ export default function EventDetails() {
                       : 'Buka Scanner'}
                   </span>
                 </Link>
+
+                {isStaffSouvenirOnly && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isEventLocked) {
+                        showEventLockedAlert();
+                        return;
+                      }
+                      setIsAddingGuest(true);
+                      if (eventId && !location.pathname.endsWith('/guests/add')) {
+                        navigate(`/auth/login/events/${eventId}/guests/add`);
+                      }
+                    }}
+                    className="h-9 px-3 inline-flex items-center gap-1.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-lg font-medium text-xs sm:text-sm transition-colors cursor-pointer whitespace-nowrap"
+                    title="Tambah tamu susulan dengan konfirmasi Keluarga/Vendor"
+                  >
+                    <Plus className="w-4 h-4 text-indigo-600" />
+                    <span>Tambah Tamu</span>
+                  </button>
+                )}
 
                 {!isStaff && guests.length > 0 && (
                   <Link
@@ -2435,7 +2488,25 @@ export default function EventDetails() {
 
         {/* Expanded Config Details (Collapsible Drawer) */}
         {isConfigExpanded && (
-          <div className="mt-3.5 pt-3.5 border-t border-gray-100 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          <div className="mt-4 pt-3.5 border-t border-gray-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+            <div>
+              <h4 className="font-semibold text-gray-700 mb-1">Kategori Tamu</h4>
+              <p className="text-gray-600">
+                {event?.guestCategories && event.guestCategories.length > 0
+                  ? event.guestCategories.join(' · ')
+                  : '-'}
+              </p>
+            </div>
+
+            <div>
+              <h4 className="font-semibold text-gray-700 mb-1">Sesi Acara</h4>
+              <p className="text-gray-600">
+                {event?.sessions && event.sessions.length > 0
+                  ? event.sessions.join(' · ')
+                  : '-'}
+              </p>
+            </div>
+
             <div>
               <h4 className="font-semibold text-gray-700 mb-1">Tipe Undangan Disediakan</h4>
               <p className="text-gray-600">{availableInvitationTypes.join(' · ')}</p>
@@ -2817,31 +2888,35 @@ export default function EventDetails() {
           {/* PRIMARY ACTION BAR (Between Filter Box & Table Box, Left-Aligned — Create Event Standard) */}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
-              {!isStaff && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isEventLocked) {
-                      showEventLockedAlert();
-                      return;
-                    }
-                    setIsAddingGuest(true);
-                    if (eventId && !location.pathname.endsWith('/guests/add')) {
-                      navigate(`/auth/login/events/${eventId}/guests/add`);
-                    }
-                  }}
-                  disabled={isEventLocked}
-                  className={`h-9 px-3.5 text-xs sm:text-sm font-medium inline-flex items-center justify-center gap-1.5 rounded-lg transition-colors whitespace-nowrap shadow-xs ${
-                    isEventLocked
-                      ? 'text-gray-400 bg-gray-100 border border-gray-200 cursor-not-allowed'
-                      : 'text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer'
-                  }`}
-                  title={isEventLocked ? 'Tambah Tamu dikunci — lakukan Top-Up Paket untuk membuka' : 'Tambah data tamu baru'}
-                >
-                  {isEventLocked ? <Lock className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                  <span>Tambah Tamu</span>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  if (isEventLocked) {
+                    showEventLockedAlert();
+                    return;
+                  }
+                  setIsAddingGuest(true);
+                  if (eventId && !location.pathname.endsWith('/guests/add')) {
+                    navigate(`/auth/login/events/${eventId}/guests/add`);
+                  }
+                }}
+                disabled={isEventLocked}
+                className={`h-9 px-3.5 text-xs sm:text-sm font-medium inline-flex items-center justify-center gap-1.5 rounded-lg transition-colors whitespace-nowrap shadow-xs ${
+                  isEventLocked
+                    ? 'text-gray-400 bg-gray-100 border border-gray-200 cursor-not-allowed'
+                    : 'text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer'
+                }`}
+                title={
+                  isEventLocked
+                    ? 'Tambah Tamu dikunci — lakukan Top-Up Paket untuk membuka'
+                    : isStaff
+                    ? 'Tambah data tamu baru (memerlukan konfirmasi Keluarga/Vendor)'
+                    : 'Tambah data tamu baru'
+                }
+              >
+                {isEventLocked ? <Lock className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                <span>Tambah Tamu</span>
+              </button>
 
               {!isStaff && (
                 isEventLocked ? (
@@ -3277,6 +3352,13 @@ export default function EventDetails() {
                             {guest.ticketCode && (
                               <div className="text-[11px] font-mono tabular-nums text-gray-400 mt-0.5">
                                 {guest.ticketCode}
+                              </div>
+                            )}
+                            {guest.addedByRole === 'staff' && (
+                              <div className="text-[11px] text-amber-700 mt-0.5">
+                                Ditambah Staff: {guest.addedByName || 'Staff'} · Konfirmasi:{' '}
+                                {formatStaffConfirmationSource(guest.staffConfirmationSource)}
+                                {guest.staffConfirmationNote ? ` (${guest.staffConfirmationNote})` : ''}
                               </div>
                             )}
                           </td>
@@ -3869,13 +3951,34 @@ export default function EventDetails() {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700 transition-colors cursor-pointer"
+              disabled={isSavingNewGuest}
+              className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700 transition-colors cursor-pointer disabled:opacity-50"
             >
-              {isManagedClient ? 'Ajukan Tambah Tamu' : 'Simpan Tamu'}
+              {isSavingNewGuest
+                ? 'Menyimpan...'
+                : isManagedClient
+                ? 'Ajukan Tambah Tamu'
+                : 'Simpan Tamu'}
             </button>
           </div>
         </form>
       </Modal>
+
+      <StaffGuestConfirmationModal
+        isOpen={Boolean(pendingStaffGuest)}
+        guestName={pendingStaffGuest?.displayName || ''}
+        guestPax={pendingStaffGuest?.pax}
+        guestCategory={pendingStaffGuest?.category}
+        staffName={appUser?.name || currentOperator}
+        isSubmitting={isSavingNewGuest}
+        onCancel={() => {
+          if (!isSavingNewGuest) setPendingStaffGuest(null);
+        }}
+        onConfirm={async (source, note) => {
+          if (!pendingStaffGuest) return;
+          await persistNewGuestPayload(pendingStaffGuest.payload, { source, note });
+        }}
+      />
 
       <Modal
         isOpen={isEditingGuest}

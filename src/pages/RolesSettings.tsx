@@ -69,7 +69,8 @@ export default function RolesSettings() {
       permissions: [
         '1 Akun ditugaskan fokus pada 1 acara (jika ada banyak acara bersamaan, cukup buat akun baru)',
         'Tersedia 3 mode fokus: Staff Scan Kehadiran, Staff Souvenir, atau All-in-One',
-        'Tidak dapat membuat acara baru (Create Event) maupun mengubah pengaturan acara',
+        'Dapat menambahkan tamu baru / Walk-In di Detail Acara & Scanner setelah konfirmasi wajib dari Pihak Keluarga atau Vendor (tercatat otomatis di audit petugas)',
+        'Tidak dapat mengedit/menghapus tamu, membuat acara baru (Create Event), maupun mengubah pengaturan acara',
         'Modul "Informasi Layanan" disembunyikan sepenuhnya'
       ]
     },

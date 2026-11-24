@@ -1,133 +1,128 @@
-# Rencana Penyeragaman UI — Fokus Grup B (Standar Konsep Create Event)
+# Rencana Penyederhanaan Tampilan: Detail Acara yang Lebih Ringkas & Fokus ke Inti
 
-Sesuai arahan Anda, cakupan eksekusi difokuskan **khusus pada Grup B** yaitu **6 halaman berbasis daftar & tabel** agar seluruhnya memiliki keseragaman penuh dengan halaman **Events (Create Event)**—baik dari struktur kotak filter terpadu, penempatan baris tombol aksi rata kiri, kolom tabel bernomor, tombol aksi ikon melingkar, maupun footer pagination.
+Merapikan dan memadatkan tata letak halaman **Detail Acara** untuk seluruh Role (dengan mode paling ringkas bagi **Role Staff**) agar ruang vertikal di atas tabel jauh lebih hemat, informasi berulang hilang, filter lebih bersih, dan kolom utama (**Tamu**, **Kehadiran**, **Souvenir**, **Aksi**) langsung terlihat utuh di layar pertama tanpa perlu banyak menggulir.
 
 ---
 
-## Ringkasan Keputusan & Konfirmasi Ruang Lingkup
+## Keputusan Terkonfirmasi & Ruang Lingkup
 
 > [!IMPORTANT]
-> **Keputusan Terkonfirmasi**:
-> - **Cakupan Eksekusi**: Hanya **Grup B** (6 halaman tabel/daftar di bawah ini). Halaman di luar Grup B (Grup A, C, D, E) tidak akan diubah.
-> - **Jaminan Fungsional**: Seluruh modal tambah/edit/detail, hak akses per role, fitur WhatsApp/Fonnte, serta rute URL tetap utuh tanpa perubahan logika bisnis.
+> Seluruh arah desain berikut telah dikonfirmasi dan akan diterapkan secara konsisten:
+> - **Cakupan Role**: Berlaku untuk **semua Role** (*Super Admin*, *Owner*, *Admin*, *Partner*, *Client*, dan *Staff*), dengan **Role Staff** mendapatkan tampilan paling fokus (tanpa kolom/filter yang tidak dipakai petugas lapangan).
+> - **Header & Ringkasan Metrik**: **Header Acara 2 baris** + **1 strip metrik ringkas horizontal** (menggantikan 5 kartu KPI tinggi).
+> - **Filter & Pencarian**: **1 baris filter utama** + tombol **Filter Lanjutan** buka-tutup.
+> - **Tabel Tamu**: **Penggabungan kolom pendukung** agar status **Kehadiran** dan **Souvenir** langsung tampak jelas di layar tanpa scroll samping berlebih.
+
+> [!NOTE]
+> **Jaminan Fungsional**: Seluruh fitur yang sudah ada tetap bekerja 100% tanpa pengurangan—termasuk *Edit Pangkat/Jabatan cepat* untuk Owner/Partner/Super Admin, aksi massal (*checkbox* bagi non-Staff), *Popup Konfirmasi Staff* saat tambah tamu, *WA Blast*, *Import/Export*, *Layar Sapa*, dan *Paginasi*.
 
 ---
 
-## 1. Standar Konsep Layout Acuan (Ala Create Event)
+## 1. Perbandingan Tata Letak (Sebelum vs. Sesudah)
 
-Seluruh 6 halaman Grup B akan mengikuti pola konsisten berikut:
+Dengan memadatkan 4 area di atas tabel, tinggi bagian atas berkurang sekitar **190–210 px** sehingga daftar tamu langsung menjadi fokus utama begitu halaman dibuka:
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  [Kartu Ringkasan KPI Ringkas — khusus halaman yang memang butuh KPI]   │
+│ HEADER ACARA RINGKAS (2 Baris)                                          │
+│ [Foto] The Wedding Of Irna dan Acep · Published    [Scanner] [Layar Sapa│
+│        21 Nov 2026 (08:30) · Koat Coffee · Info Acara ▾                 │
 ├─────────────────────────────────────────────────────────────────────────┤
-│  KOTAK 1: FILTER & PENCARIAN TERPADU                                    │
-│  (bg-white, rounded-xl, border-gray-200, shadow-xs, p-2.5 sm:p-3)       │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │ [Rentang Tanggal — bila data berbasis tanggal]                    │  │
-│  │ [🔍 Cari ... (dengan tombol X)] [Filter Kontekstual ▾] [10/25/50▾]│  │
-│  └───────────────────────────────────────────────────────────────────┘  │
+│ STRIP METRIK HORIZONTAL (1 Baris Terpadu, Pemisah Halus)                │
+│  Total Tamu        │ Sudah Check-In      │ Belum Hadir   │ Souvenir     │
+│  56 (162 Org)      │ 33 (98 Org · 59%)   │ 23 undangan   │ 5 / 56       │
+│  *(Non-Staff juga menampilkan kolom ringkas RSVP Hadir di strip ini)*   │
 ├─────────────────────────────────────────────────────────────────────────┤
-│  BARIS AKSI UTAMA (Rata Kiri, di antara Kotak 1 & Kotak 2)              │
-│  [ + Tombol Aksi Utama (Indigo) ]  [ Tombol Sekunder (Outline) ]        │
+│ Tab:  Daftar Tamu (56)   Berhasil Scan (33)   Souvenir & Logistik       │
 ├─────────────────────────────────────────────────────────────────────────┤
-│  KOTAK 2: TABEL DATA & FOOTER PAGINATION                                │
-│  (bg-white, rounded-xl, border-gray-200, shadow-sm, overflow-hidden)    │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │ NO | KOLOM DATA UTAMA | INFORMASI PENDUKUNG | STATUS | AKSI       │  │
-│  │ 1  | ...              | ...                 | [Pill] | (👁)(✏)(🗑) │  │
-│  ├───────────────────────────────────────────────────────────────────┤  │
-│  │ Menampilkan 1 – 10 dari Z data  Reset   [«] [Sebelumnya] Hal 1/N  │  │
-│  │                                         [Selanjutnya] [»]         │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
+│ FILTER 1 BARIS: [🔍 Cari tamu...] [Kehadiran ▾] [Kategori ▾] [Filter ▾] │
+│                 [Tampilkan 50 ▾]   *(Filter Lanjutan buka-tutup)*       │
+├─────────────────────────────────────────────────────────────────────────┤
+│ AKSI: [ + Tambah Tamu ]  [ Export ]  [ Muat Ulang ]        56 tamu      │
+├─────────────────────────────────────────────────────────────────────────┤
+│ TABEL FOKUS (Tanpa Scroll Samping Berlebih)                             │
+│ NO │ TAMU & KONTAK │ KATEGORI & SESI │ PAX │ KEHADIRAN │ SOUVENIR │AKSI │
+│ 1  │ A ari         │ Tamu Mempelai   │7 Org│ Hadir     │ Diambil  │✓ QR │
+│    │ ABC123 · Ckp  │ Akad Nikah      │     │ 09:12     │ Oleh Mira│     │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. Rincian Penyesuaian 6 Halaman Grup B
+## 2. Rincian Penyederhanaan per Bagian
 
-### 1. Approvals
-- **Wadah**: Lebar penuh (`space-y-4`, menghapus batasan `max-w-7xl mx-auto` dan blok judul besar ganda di dalam tabel).
-- **Kotak 1 (Filter Terpadu)**:
-  - Baris 1: **Rentang Tanggal Pengajuan** (`Dari` – `Sampai`).
-  - Baris 2: Input **Pencarian** (nama tamu, acara, pengaju) dengan tombol hapus `X`, filter **Status** (*Semua / Menunggu / Disetujui / Ditolak*), filter **Jenis Permintaan** (*Semua / Tambah / Edit / Hapus*), serta pemilih **Tampilkan 10 / 25 / 50**.
-- **Kotak 2 (Tabel & Pagination)**:
-  - Kolom: `No | Acara / Pengaju | Detail Perubahan Tamu | Tanggal | Status | Aksi`.
-  - Aksi ikon melingkar rata kanan (*Detail*, *Setujui*, *Tolak* sesuai role & status).
-  - Empty state dilengkapi tombol **Reset Pencarian & Filter** serta **Footer Pagination** lengkap.
+### A. Header Konteks Acara (3 Baris → 2 Baris)
+- **Menghapus pengulangan info petugas**: Teks `Petugas: Mira Permata Sari (Staff All-in...)` tidak lagi diulang di samping judul acara karena nama dan peran petugas sudah selalu tampil di pojok kanan atas bar navigasi.
+- **Merapikan Baris 1**: Thumbnail acara lebih proporsional (`48×48px`), judul acara, status (*Published/Draft/Completed*), dan pemilih status khusus Super Admin.
+- **Merapikan Baris 2**: Tanggal & jam `·` Lokasi acara `·` Masa aktif (hanya ditampilkan untuk non-Staff, atau muncul otomatis bila mendekati kedaluwarsa) `·` tombol lipat **Info Acara ▾**.
+- **Isi Drawer Info Acara**: Memindahkan ringkasan *Kategori*, *Sesi*, *Tipe Undangan*, dan *Frame Layar Sapa* ke dalam panel lipat **Info Acara** agar header tetap bersih 2 baris saat default.
+- **Tombol Aksi Kanan**: Tetap satu baris rapi (**Buka Scanner** sebagai aksi utama, diikuti tombol pendukung sesuai role).
 
-### 2. Manajemen User → Bisnis Partner
-- **Wadah**: `space-y-4`, menghapus teks deskripsi mengambang di atas halaman.
-- **Ringkasan KPI**: Dipertahankan secara kompak (Total Partner, Terverifikasi, Belum Lengkap, Total Event) dengan gaya `rounded-xl border-gray-200`.
-- **Kotak 1 (Filter Terpadu)**:
-  - Input **Pencarian** (nama usaha, pemilik, email, alamat, kota) + tombol hapus `X`, filter **Status Verifikasi** (*Semua / Terverifikasi / Belum Lengkap*), dan pemilih **Tampilkan 10 / 25 / 50**.
-- **Baris Aksi Rata Kiri**: Tombol **+ Daftarkan Bisnis Partner** dipindahkan ke bawah Kotak 1 (rata kiri).
-- **Kotak 2 (Tabel & Pagination)**:
-  - Menambahkan kolom **No** di paling kiri.
-  - Kolom aksi memakai tombol ikon melingkar (*Edit*, *Hapus*).
-  - Menambahkan **Footer Pagination** lengkap dan tombol **Reset Pencarian & Filter**.
+### B. Strip Metrik Ringkas Horizontal (5 Kartu Tinggi → 1 Strip Terpadu)
+- Mengganti 5 kartu terpisah dengan **1 wadah strip putih datar** berpemisah garis vertikal halus (`divide-x`), menghilangkan label pojok yang terpotong dua baris (`Pra Check-In`, `Realtime`) serta garis pembatas dalam kartu.
+- **Mode Staff (4 metrik inti hari-H)**:
+  - **Total Tamu**: `56` undangan · `162 Org`
+  - **Sudah Check-In**: `33` · `98 Org (59%)`
+  - **Belum Hadir**: `23` undangan
+  - **Souvenir Diambil**: `5` · `51 belum`
+- **Mode Non-Staff (5 metrik lengkap dalam 1 strip)**:
+  - Menambahkan metrik **RSVP Hadir** (`0 Org · 56 pending`) dengan format ringkas yang sama.
+- Seluruh angka tetap menggunakan `tabular-nums` agar sejajar vertikal.
 
-### 3. Manajemen User → User
-- **Wadah**: `space-y-4`, menghapus paragraf deskripsi mengambang di bagian atas.
-- **Kotak 1 (Filter Terpadu)**:
-  - Input **Pencarian** (nama, email, no. HP, nama bisnis) + tombol hapus `X`.
-  - Filter **Role** (*Semua Role*, *Owner/Partner*, *Admin*, *Staff*, *Client*, dst. sesuai hak akses).
-  - Filter **Bisnis / Vendor** (khusus Super Admin).
-  - Pemilih **Tampilkan 10 / 25 / 50**.
-- **Baris Aksi Rata Kiri**: Tombol **+ Tambah User** dipindahkan rata kiri di antara Kotak 1 dan Kotak 2.
-- **Kotak 2 (Tabel & Pagination)**:
-  - Menambahkan kolom **No** di paling kiri.
-  - Tetap menampilkan informasi bisnis, role, perangkat aktif, dan kuota secara rapi.
-  - Menyeragamkan tombol aksi menjadi ikon melingkar (*Kirim Ulang WA*, *Edit*, *Hapus*, *Logout Perangkat* bila ada).
-  - Menambahkan **Footer Pagination** lengkap (beserta dukungan muat data lanjutan bila data di server masih tersedia).
+### C. Kotak Filter 1 Baris + Filter Lanjutan Buka-Tutup
+- **Baris Utama (selalu terlihat, 1 baris)**:
+  - Input pencarian cepat (dengan tombol hapus `X`)
+  - Filter status utama (*Kehadiran* pada tab Daftar Tamu, atau *Status RSVP* pada tab RSVP)
+  - Filter **Kategori**
+  - Tombol **Filter Lanjutan** (menampilkan indikator angka jumlah filter lanjutan yang aktif, misal `Filter (1)`)
+  - Pilihan batas tampil (**10 / 25 / 50**)
+- **Panel Filter Lanjutan (terlipat saat awal, dibuka hanya saat diperlukan)**:
+  - **Tipe Undangan**
+  - **Status Kirim WA** *(disembunyikan otomatis bagi Role Staff karena Staff tidak mengirim undangan WA)*
+  - **Urutkan Berdasarkan** (*Kategori*, *Terbaru*, *Nama A–Z*)
+  - Tombol **Reset Filter** saat ada filter aktif.
 
-### 4. Manajemen User → Sesi Aktif
-- **Wadah**: Lebar penuh (`space-y-4`, menghapus batasan `max-w-7xl mx-auto`).
-- **Ringkasan KPI**: Kartu statistik sesi (Online, Idle, Offline, Total Perangkat) dirapikan dengan border dan radius `rounded-xl` yang konsisten.
-- **Kotak 1 (Filter Terpadu)**:
-  - Input **Pencarian** (nama user, email, IP, lokasi, perangkat, halaman aktif) + tombol hapus `X`.
-  - Filter **Status Sesi** (*Semua / Online / Idle / Offline*) dan filter **Role**.
-  - Pemilih **Tampilkan 10 / 25 / 50**.
-- **Baris Aksi Rata Kiri**: Tombol aksi operasional (*Muat Ulang Data* / aksi sesi) ditempatkan rata kiri di antara Kotak 1 dan Kotak 2.
-- **Kotak 2 (Tabel & Pagination)**:
-  - Menambahkan kolom **No** di paling kiri.
-  - Tombol aksi ikon melingkar (*Detail Sesi* / *Putus Sesi*).
-  - Menambahkan **Footer Pagination** lengkap dan tombol **Reset Pencarian & Filter**.
-
-### 5. Admin Panel → Template WA
-- **Wadah**: `space-y-4`.
-- **Kotak 1 (Filter Terpadu)**:
-  - Input **Pencarian** (nama template, isi pesan, kategori) + tombol hapus `X`.
-  - Filter **Kategori / Tipe Template** (otomatis mengikuti kategori yang tersedia) + pemilih **Tampilkan 10 / 25 / 50**.
-- **Baris Aksi Rata Kiri**: Tombol **+ Template Baru** dipindahkan dari pojok kanan ke baris aksi rata kiri di antara Kotak 1 dan Kotak 2.
-- **Kotak 2 (Tabel & Pagination)**:
-  - Menambahkan kolom **No** di paling kiri.
-  - Tombol aksi ikon melingkar (*Edit*, *Hapus*).
-  - Menambahkan **Footer Pagination** lengkap dan tombol **Reset Pencarian & Filter**.
-
-### 6. Informasi Layanan → Layanan Saya
-- **Wadah**: Lebar penuh (`space-y-4`, menghapus batasan `max-w-6xl mx-auto`).
-- **Ringkasan Kuota**: Kartu saldo kuota (Kuota Event, Kuota Client, Masa Aktif, dll.) tetap tampil di bagian atas secara rapi dan kompak.
-- **Kotak 1 (Filter Terpadu)**:
-  - Input **Pencarian** (nama layanan / paket / ID pesanan) + tombol hapus `X`.
-  - Filter **Tipe Layanan** (*Semua / Paket / Add-On*) dan/atau **Status** (*Aktif / Selesai*) + pemilih **Tampilkan 10 / 25 / 50**.
-- **Baris Aksi Rata Kiri**: Tombol **Beli Layanan** (utama) dan **Lihat Invoice** (sekunder) dipindahkan rata kiri di antara Kotak 1 dan Kotak 2.
-- **Kotak 2 (Tabel & Pagination)**:
-  - Menambahkan kolom **No** pada daftar/riwayat layanan aktif.
-  - Menambahkan **Footer Pagination** lengkap dan tombol **Reset Pencarian & Filter**.
+### D. Tabel Tamu Ringkas & Minim Scroll Samping
+- **Penggabungan Kolom Pendukung (dari 14–15 kolom menjadi 7–9 kolom bersih)**:
+  1. **Checkbox** *(khusus Non-Staff; disembunyikan penuh untuk Staff karena Staff tidak memiliki aksi massal)*.
+  2. **No** (rata angka `tabular-nums`).
+  3. **Tamu**: Nama lengkap (termasuk gelar/pangkat), kode tiket mono, baris ringkas `Alamat · No. HP` bila ada, input inline *Pangkat/Jabatan* kompak khusus Owner/Partner/Super Admin, serta keterangan audit Staff (bila ditambahkan petugas).
+  4. **Kategori & Sesi**: Nama kategori (tetap bisa diklik untuk mengurutkan) di baris atas, dan `Tipe Undangan · Sesi` sebagai teks tenang di baris kedua.
+  5. **Pax**: Jumlah orang (`7 Org`, `tabular-nums`).
+  6. **Undangan & RSVP** *(khusus Non-Staff pada tab Daftar Tamu/Berhasil Scan; disembunyikan untuk Staff agar fokus hari-H)*: Status kirim WA dan status RSVP dalam 2 baris semantik ringkas.
+  7. **Kehadiran**: Status (`Hadir · Scan QR` / `Belum Hadir`) + waktu hadir & nama petugas di baris bawah.
+  8. **Souvenir**: Nama souvenir / `Belum` + nama petugas penyerah di baris bawah.
+  9. **Aksi**: Tombol ikon melingkar rata kanan (*sticky* tetap aman bila layar sempit).
+- Tab **RSVP & Ucapan** (khusus non-Staff) turut diseragamkan dengan kolom `Tamu` ringkas tanpa kolom *Pangkat/Jabatan* yang lebar terpisah.
 
 ---
 
-## 3. Alur Eksekusi & Verifikasi
+## 3. Keputusan Desain & Pertimbangan Teknis
+
+- **Keputusan 1 — Satu Sumber Data & Komponen, Tampilan Adaptif per Role**
+  - *Pendekatan*: Tetap menggunakan struktur halaman Detail Acara yang sama untuk seluruh Role, namun menyembunyikan metrik RSVP, filter Status Kirim WA, kolom Checkbox, dan kolom Undangan/RSVP secara otomatis ketika pengguna adalah `staff`.
+  - *Alasan*: Menjaga konsistensi pola visual dengan halaman **Create Event**, memudahkan pemeliharaan, dan langsung memberikan pengalaman paling fokus bagi petugas lapangan hari-H.
+- **Keputusan 2 — Menjaga Edit Pangkat Cepat Tanpa Membebani Lebar Tabel**
+  - *Pendekatan*: Kolom terpisah *Pangkat / Jabatan* (yang sebelumnya membuat header terpotong 3 baris dan mendorong kolom *Kehadiran* keluar layar) digabungkan ke dalam sel **Tamu** sebagai input cepat inline yang ringkas khusus bagi Owner/Partner/Super Admin (sementara bagi Role lain, pangkat sudah menyatu secara alami di nama tamu).
+  - *Alasan*: Menghemat ~160px lebar tabel sekaligus menjaga kecepatan edit pangkat dengan `Enter` bagi admin acara.
+- **Keputusan 3 — Filter Lanjutan Berindikator Status Aktif**
+  - *Pendekatan*: Panel filter sekunder ditutup secara default agar hanya 1 baris filter yang tampil, tetapi tombol **Filter** menampilkan jumlah filter lanjutan yang sedang aktif (dan otomatis membuka atau tetap terlihat tombol **Reset**) agar pengguna tidak pernah bingung saat data terfilter.
+
+---
+
+## 4. Pemetaan State & Interaksi
 
 ```text
-[1] Approvals          ─▶ [2] Bisnis Partner ─▶ [3] Manajemen User
-                                                      │
-[6] Layanan Saya       ◀─ [5] Template WA    ◀─ [4] Sesi Aktif
-        │
-        ▼
-[Verifikasi Final: Kompilasi & Lint]
-```
+State UI Baru pada Detail Acara:
+  • isAdvancedFilterOpen (boolean, default false)
+    └── Toggle buka/tutup baris Filter Lanjutan (Tipe Undangan, Status Kirim WA, Urutan)
+  • activeAdvancedFilterCount (derived number)
+    └── Menghitung filter lanjutan aktif (selain default) untuk indikator tombol Filter
 
-Setelah seluruh 6 halaman selesai disesuaikan, aplikasi akan dikompilasi dan di-lint untuk memastikan seluruh perubahan bersih tanpa error baru.
+Alur Interaksi:
+  1. Klik "Info Acara ▾"      ──▶ Membuka/menutup ringkasan Kategori, Sesi, Tipe, & Frame
+  2. Klik "Filter ▾"          ──▶ Membuka/menutup panel Filter Lanjutan tanpa mereset filter
+  3. Klik "Reset Filter"      ──▶ Mengosongkan semua pencarian & filter (utama + lanjutan)
+  4. Klik Header "Kategori"   ──▶ Tetap men-toggle urutan kategori naik/turun
+  5. Edit Pangkat (Non-Staff) ──▶ Ketik & Enter di dalam sel Tamu langsung menyimpan ke server
+```

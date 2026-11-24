@@ -27,7 +27,8 @@ import {
   AlertTriangle,
   Loader2,
   StickyNote,
-  ExternalLink
+  ExternalLink,
+  X
 } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { useNavigate, useLocation, useParams, Link } from 'react-router-dom';
@@ -55,10 +56,12 @@ export default function UsersList() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  // Filter state
+  // Filter & Pagination state
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [businessFilter, setBusinessFilter] = useState<string>('all');
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   // Add User state
   const [isAddingUser, setIsAddingUser] = useState(false);
@@ -1242,12 +1245,31 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
         const q = searchQuery.toLowerCase();
         const nameMatch = u.name?.toLowerCase().includes(q);
         const emailMatch = u.email?.toLowerCase().includes(q);
+        const phoneMatch = u.phone?.toLowerCase().includes(q);
         const bizMatch = (getBusinessLabelForUser(u) || '').toLowerCase().includes(q);
-        if (!nameMatch && !emailMatch && !bizMatch) return false;
+        if (!nameMatch && !emailMatch && !phoneMatch && !bizMatch) return false;
       }
       return true;
     });
   }, [users, roleFilter, businessFilter, searchQuery, businessOwners]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, roleFilter, businessFilter, itemsPerPage]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / itemsPerPage));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, filteredUsers.length);
+  const paginatedUsers = filteredUsers.slice(startIndex, endIndex);
+  const hasActiveFilters = Boolean(searchQuery.trim() || roleFilter !== 'all' || businessFilter !== 'all');
+
+  const resetFilters = () => {
+    setSearchQuery('');
+    setRoleFilter('all');
+    setBusinessFilter('all');
+    setCurrentPage(1);
+  };
 
   if (!canManageUsers) {
     return (
@@ -1384,58 +1406,27 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div>
-          <p className="text-sm text-gray-500">
-            {appUser?.role === 'superadmin' &&
-              'Kelola seluruh Bisnis (Owner), Admin, Staff Lapangan, dan Client beserta pengelompokan bisnisnya.'}
-            {(appUser?.role === 'owner' || appUser?.role === 'partner') &&
-              `Kelola tim Admin Operasional, Staff Lapangan (Scan/Souvenir), dan Client di bawah bisnis ${currentUserBizName || 'Anda'}.`}
-            {appUser?.role === 'admin' &&
-              `Kelola dan tugaskan akun Staff Lapangan (Scan Kehadiran & Souvenir) untuk acara di bisnis ${currentUserBizName || 'Anda'}.`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            to="/auth/login/sessions"
-            className="flex items-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg font-medium text-sm border border-indigo-200 transition-colors shrink-0"
-            title="Buka Pemantau Sesi Aktif Realtime"
-          >
-            <Radio className="w-4 h-4 text-emerald-600 animate-pulse" />
-            <span>Sesi Aktif</span>
-          </Link>
-          <button
-            onClick={handleOpenAddModal}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium shadow-sm shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            {appUser?.role === 'admin' ? 'Tambah Petugas Staff' : 'Tambah User / Petugas'}
-          </button>
-        </div>
-      </div>
-
-      {/* Hierarchy Info Banner */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-start gap-3">
+    <div className="space-y-4">
+      {/* Compact Hierarchy Info Banner */}
+      <div className="bg-white border border-gray-200 rounded-xl p-3.5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex items-start gap-2.5">
           <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600 shrink-0 mt-0.5">
-            <UserCheck className="w-5 h-5" />
+            <UserCheck className="w-4 h-4" />
           </div>
-          <div className="text-xs text-gray-600 space-y-1">
+          <div className="text-xs text-gray-600 space-y-0.5">
             <div className="font-semibold text-gray-900 flex items-center gap-2 flex-wrap">
-              <span>Wewenang Akun Anda: {getRoleLabel(appUser?.role, appUser?.staffType)}</span>
+              <span>Wewenang Akun: {getRoleLabel(appUser?.role, appUser?.staffType)}</span>
               {currentUserBizName && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-semibold">
                   <Building2 className="w-3 h-3" /> {currentUserBizName}
                 </span>
               )}
             </div>
-            <p>
+            <p className="text-gray-500">
               {appUser?.role === 'superadmin' &&
                 'Anda dapat menambahkan Owner (Bisnis Baru) serta mengelompokkan Admin, Staff, dan Client ke bawah naungan bisnis tertentu.'}
               {(appUser?.role === 'owner' || appUser?.role === 'partner') &&
-                'Anda dapat menambahkan Admin Operasional, Staff Lapangan, dan Client. Seluruh akun yang Anda buat otomatis berada di bawah naungan bisnis Anda dan modul Informasi Layanan disembunyikan dari mereka.'}
+                'Anda dapat menambahkan Admin Operasional, Staff Lapangan, dan Client di bawah naungan bisnis Anda.'}
               {appUser?.role === 'admin' &&
                 'Anda dapat menambahkan dan menugaskan Staff Lapangan (Scan Kehadiran & Souvenir) pada acara yang Anda kelola.'}
             </p>
@@ -1443,25 +1434,35 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
         </div>
       </div>
 
-      {/* Filter & Search Bar */}
-      <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Cari nama user, email, atau nama bisnis..."
-            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-          />
-        </div>
-        <div className="flex flex-wrap sm:flex-nowrap gap-2">
-          <div className="flex items-center gap-1.5">
-            <Filter className="w-4 h-4 text-gray-400 shrink-0 hidden sm:block" />
+      {/* Box 1: Unified Filter & Search Box */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-2.5 sm:p-3">
+        <div className="flex flex-col md:flex-row md:items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari nama user, email, no. HP, atau nama bisnis..."
+              className="w-full h-8.5 pl-9 pr-8 text-xs bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                title="Hapus pencarian"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
             <select
               value={roleFilter}
-              onChange={e => setRoleFilter(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white"
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className="h-8.5 px-2.5 text-xs bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
             >
               <option value="all">Semua Role</option>
               {appUser?.role === 'superadmin' && <option value="superadmin">Super Admin</option>}
@@ -1471,23 +1472,54 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
               <option value="greeting">Layar Sapa (Display TV)</option>
               {appUser?.role !== 'admin' && <option value="client">Client</option>}
             </select>
-          </div>
 
-          {appUser?.role === 'superadmin' && businessOwners.length > 0 && (
+            {appUser?.role === 'superadmin' && businessOwners.length > 0 && (
+              <select
+                value={businessFilter}
+                onChange={(e) => setBusinessFilter(e.target.value)}
+                className="h-8.5 px-2.5 text-xs bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer max-w-[200px]"
+              >
+                <option value="all">Semua Bisnis / Owner</option>
+                {businessOwners.map((biz) => (
+                  <option key={biz.id} value={biz.id}>
+                    {biz.businessName}
+                  </option>
+                ))}
+              </select>
+            )}
+
             <select
-              value={businessFilter}
-              onChange={e => setBusinessFilter(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white max-w-[220px]"
+              value={itemsPerPage}
+              onChange={(e) => setItemsPerPage(Number(e.target.value))}
+              className="h-8.5 px-2.5 text-xs bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
             >
-              <option value="all">Semua Bisnis / Owner</option>
-              {businessOwners.map(biz => (
-                <option key={biz.id} value={biz.id}>
-                  🏢 {biz.businessName}
-                </option>
-              ))}
+              <option value={10}>Tampilkan 10</option>
+              <option value={25}>Tampilkan 25</option>
+              <option value={50}>Tampilkan 50</option>
             </select>
-          )}
+          </div>
         </div>
+      </div>
+
+      {/* Primary Action Bar (Left-Aligned between Filter Box & Table Box) */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={handleOpenAddModal}
+          className="inline-flex items-center gap-1.5 h-9 px-3.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+        >
+          <Plus className="w-4 h-4" />
+          <span>{appUser?.role === 'admin' ? 'Tambah Petugas Staff' : 'Tambah User / Petugas'}</span>
+        </button>
+
+        <Link
+          to="/auth/login/sessions"
+          className="inline-flex items-center gap-1.5 h-9 px-3.5 bg-white text-gray-700 hover:bg-gray-50 rounded-lg font-semibold text-xs border border-gray-300 transition-colors"
+          title="Buka Pemantau Sesi Aktif Realtime"
+        >
+          <Radio className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+          <span>Sesi Aktif</span>
+        </Link>
       </div>
 
       {/* Add User Modal */}
@@ -2375,98 +2407,123 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
         </form>
       </Modal>
 
-      {/* Users Table */}
-      {loading ? (
-        <div className="flex justify-center p-8 bg-white rounded-lg shadow-sm border border-gray-100">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-        </div>
-      ) : (
-        <div className="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    User / Petugas
-                  </th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Role & Spesialisasi
-                  </th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Bisnis / Naungan (WO)
-                  </th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Acara Ditugaskan / Kuota
-                  </th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Hak Akses & Layanan
-                  </th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Aksi
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredUsers.map(user => {
-                  const assignedIds = Array.isArray(user.assignedEventIds) ? user.assignedEventIds : [];
-                  const resolvedEvents = assignedIds
-                    .map(id => events.find(e => e.id === id))
-                    .filter((e): e is EventRecord => Boolean(e));
-                  const hasOrphanedAssignment = assignedIds.length > 0 && resolvedEvents.length === 0;
-                  const assignedNames = resolvedEvents.map(e => e.title).filter(Boolean);
-                  const isRegularStaff = user.role === 'staff' && !isGreetingScreenUser(user);
-                  const bizLabel = getBusinessLabelForUser(user);
-                  const canModify = canModifyTargetUser(user);
-                  const serviceHidden = shouldHideServiceInfo(user);
+      {/* Box 2: Users Table Container */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        {loading ? (
+          <div className="flex justify-center p-10">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+          </div>
+        ) : filteredUsers.length === 0 ? (
+          <div className="p-10 text-center flex flex-col items-center justify-center gap-2">
+            <UserCheck className="w-10 h-10 text-gray-300" />
+            <p className="text-sm font-medium text-gray-600">
+              {hasActiveFilters
+                ? 'Tidak ada user yang cocok dengan pencarian atau filter.'
+                : 'Belum ada data user yang terdaftar.'}
+            </p>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
+              >
+                Reset Pencarian &amp; Filter
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-12">
+                      No
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      User / Petugas
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Role &amp; Spesialisasi
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Bisnis / Naungan
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Acara / Kuota
+                    </th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Hak Akses &amp; Layanan
+                    </th>
+                    <th className="px-4 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-36">
+                      Aksi
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {paginatedUsers.map((user, index) => {
+                    const assignedIds = Array.isArray(user.assignedEventIds) ? user.assignedEventIds : [];
+                    const resolvedEvents = assignedIds
+                      .map(id => events.find(e => e.id === id))
+                      .filter((e): e is EventRecord => Boolean(e));
+                    const hasOrphanedAssignment = assignedIds.length > 0 && resolvedEvents.length === 0;
+                    const assignedNames = resolvedEvents.map(e => e.title).filter(Boolean);
+                    const isRegularStaff = user.role === 'staff' && !isGreetingScreenUser(user);
+                    const bizLabel = getBusinessLabelForUser(user);
+                    const canModify = canModifyTargetUser(user);
+                    const serviceHidden = shouldHideServiceInfo(user);
 
-                  return (
-                    <tr key={user.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 h-10 w-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold">
-                            {user.name?.charAt(0)?.toUpperCase() || 'U'}
-                          </div>
-                          <div className="ml-3.5">
-                            <div className="text-sm font-semibold text-gray-900">{user.name}</div>
-                            <div className="text-xs text-gray-500">{user.email}</div>
-                            {user.phone?.trim() ? (
-                              <div className="text-[11px] text-gray-400">{user.phone}</div>
-                            ) : isRegularStaff ? (
-                              <div className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded w-fit">
-                                <AlertTriangle className="w-2.5 h-2.5" /> No. WA belum diisi
-                              </div>
-                            ) : null}
-                            {user.createdByName && (
-                              <div className="text-[10px] text-gray-400 mt-0.5">
-                                Dibuat oleh: <span className="font-medium text-gray-600">{user.createdByName}</span>
-                              </div>
-                            )}
-                            {(() => {
-                              const userDevices = normalizeUserDevices(user);
-                              if (userDevices.length === 0) return null;
-                              const maxDev = getMaxDevicesForRole(user.role);
-                              return (
-                                <div
-                                  className="mt-1 flex items-center gap-1 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded w-fit"
-                                  title={userDevices.map((d, i) => `${i + 1}. ${d.deviceName}`).join('\n')}
-                                >
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                  <span className="font-semibold truncate max-w-[165px]">
-                                    {maxDev > 1 && Number.isFinite(maxDev)
-                                      ? `${userDevices.length}/${maxDev} Device · ${userDevices[0].deviceName}`
-                                      : userDevices[0].deviceName || 'Perangkat Aktif'}
-                                  </span>
+                    return (
+                      <tr key={user.id} className="hover:bg-gray-50/80 transition-colors">
+                        <td className="px-4 py-3.5 whitespace-nowrap text-xs font-mono text-gray-500">
+                          {startIndex + index + 1}
+                        </td>
+
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0 h-9 w-9 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold text-xs">
+                              {user.name?.charAt(0)?.toUpperCase() || 'U'}
+                            </div>
+                            <div className="ml-3">
+                              <div className="text-sm font-semibold text-gray-900">{user.name}</div>
+                              <div className="text-xs text-gray-500">{user.email}</div>
+                              {user.phone?.trim() ? (
+                                <div className="text-[11px] text-gray-400">{user.phone}</div>
+                              ) : isRegularStaff ? (
+                                <div className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded w-fit">
+                                  <AlertTriangle className="w-2.5 h-2.5" /> No. WA belum diisi
                                 </div>
-                              );
-                            })()}
+                              ) : null}
+                              {user.createdByName && (
+                                <div className="text-[10px] text-gray-400 mt-0.5">
+                                  Dibuat oleh: <span className="font-medium text-gray-600">{user.createdByName}</span>
+                                </div>
+                              )}
+                              {(() => {
+                                const userDevices = normalizeUserDevices(user);
+                                if (userDevices.length === 0) return null;
+                                const maxDev = getMaxDevicesForRole(user.role);
+                                return (
+                                  <div
+                                    className="mt-1 flex items-center gap-1 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded w-fit"
+                                    title={userDevices.map((d, i) => `${i + 1}. ${d.deviceName}`).join('\n')}
+                                  >
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                    <span className="font-semibold truncate max-w-[165px]">
+                                      {maxDev > 1 && Number.isFinite(maxDev)
+                                        ? `${userDevices.length}/${maxDev} Device · ${userDevices[0].deviceName}`
+                                        : userDevices[0].deviceName || 'Perangkat Aktif'}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
+                            </div>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <div className="flex flex-col gap-1">
+                        <td className="px-4 py-3.5 whitespace-nowrap">
                           <span
-                            className={`inline-flex items-center w-fit px-2.5 py-1 rounded-full text-xs font-semibold border ${
+                            className={`inline-flex items-center w-fit px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
                               user.role === 'superadmin'
                                 ? 'bg-rose-50 text-[#8C3A50] border-rose-200'
                                 : user.role === 'owner'
@@ -2484,184 +2541,240 @@ Mohon simpan informasi akun ini dengan baik dan jangan membagikannya kepada piha
                           >
                             {getRoleLabel(user.role, user.staffType)}
                           </span>
-                        </div>
-                      </td>
+                        </td>
 
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        {bizLabel ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-amber-50/80 text-amber-900 border border-amber-200">
-                            <Building2 className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                            <span className="truncate max-w-[160px]" title={bizLabel}>
-                              {bizLabel}
-                            </span>
-                          </span>
-                        ) : (
-                          <span className="text-xs text-gray-400 italic">Belum diatur</span>
-                        )}
-                      </td>
-
-                      <td className="px-5 py-4 text-sm text-gray-700">
-                        {user.role === 'staff' || user.role === 'greeting' || user.role === 'admin' ? (
-                          assignedNames.length > 0 ? (
-                            <div className="space-y-1 max-w-xs">
-                              <span
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold border ${
-                                  isGreetingScreenUser(user)
-                                    ? 'bg-rose-50 text-rose-800 border-rose-200'
-                                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                }`}
-                              >
-                                <CalendarDays className="w-3 h-3" /> {assignedNames.length} Acara Ditugaskan
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          {bizLabel ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium bg-amber-50/80 text-amber-900 border border-amber-200">
+                              <Building2 className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                              <span className="truncate max-w-[150px]" title={bizLabel}>
+                                {bizLabel}
                               </span>
-                              <p className="text-xs text-gray-700 font-medium truncate" title={assignedNames.join(', ')}>
-                                {assignedNames.join(', ')}
-                              </p>
-                              {isRegularStaff && user.assignmentNotes?.trim() && (
-                                <p
-                                  className="text-[11px] text-gray-500 truncate flex items-center gap-1"
-                                  title={user.assignmentNotes}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400 italic">Belum diatur</span>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-3.5 text-sm text-gray-700">
+                          {user.role === 'staff' || user.role === 'greeting' || user.role === 'admin' ? (
+                            assignedNames.length > 0 ? (
+                              <div className="space-y-1 max-w-xs">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold border ${
+                                    isGreetingScreenUser(user)
+                                      ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                      : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  }`}
                                 >
-                                  <StickyNote className="w-3 h-3 text-amber-500 shrink-0" />
-                                  <span className="truncate">{user.assignmentNotes}</span>
+                                  <CalendarDays className="w-3 h-3" /> {assignedNames.length} Acara
+                                </span>
+                                <p className="text-xs text-gray-700 font-medium truncate" title={assignedNames.join(', ')}>
+                                  {assignedNames.join(', ')}
                                 </p>
-                              )}
-                            </div>
-                          ) : hasOrphanedAssignment ? (
-                            <div className="space-y-1 max-w-xs">
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                                <AlertTriangle className="w-3 h-3" /> Acara tidak ditemukan / arsip
+                                {isRegularStaff && user.assignmentNotes?.trim() && (
+                                  <p
+                                    className="text-[11px] text-gray-500 truncate flex items-center gap-1"
+                                    title={user.assignmentNotes}
+                                  >
+                                    <StickyNote className="w-3 h-3 text-amber-500 shrink-0" />
+                                    <span className="truncate">{user.assignmentNotes}</span>
+                                  </p>
+                                )}
+                              </div>
+                            ) : hasOrphanedAssignment ? (
+                              <div className="space-y-1 max-w-xs">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                  <AlertTriangle className="w-3 h-3" /> Acara arsip
+                                </span>
+                                <p className="text-[11px] text-gray-400">
+                                  Pilih ulang via Edit
+                                </p>
+                              </div>
+                            ) : user.role === 'admin' ? (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                                Akses Acara Bisnisnya
                               </span>
-                              <p className="text-[11px] text-gray-400">
-                                Pilih ulang acara aktif melalui tombol Edit
-                              </p>
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                                Belum Ditugaskan
+                              </span>
+                            )
+                          ) : user.role === 'client' ? (
+                            <span className="text-xs text-gray-500">Khusus Acara Miliknya</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                                Client: {user.clientCredit !== undefined ? user.clientCredit : (user.clientQuota || 0)}
+                              </span>
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-rose-50 text-[#8C3A50] border border-rose-200">
+                                Event: {user.eventCredit !== undefined ? user.eventCredit : (user.eventQuota || 0)}
+                              </span>
                             </div>
-                          ) : user.role === 'admin' ? (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                              Akses Acara Bisnisnya
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
-                              ⚠️ Belum Ditugaskan Acara
-                            </span>
-                          )
-                        ) : user.role === 'client' ? (
-                          <span className="text-xs text-gray-500">Khusus Acara Miliknya</span>
-                        ) : (
-                          <div className="flex flex-wrap gap-1.5">
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                              Client: {user.clientCredit !== undefined ? user.clientCredit : (user.clientQuota || 0)}
-                            </span>
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-rose-50 text-[#8C3A50] border border-rose-200">
-                              Event: {user.eventCredit !== undefined ? user.eventCredit : (user.eventQuota || 0)}
-                            </span>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-3.5 whitespace-nowrap text-xs">
+                          <div className="flex flex-col gap-1">
+                            {isGreetingScreenUser(user) ? (
+                              <span className="inline-flex items-center gap-1 w-fit px-2 py-0.5 rounded font-semibold bg-rose-50 text-rose-700 border border-rose-200 text-[11px]">
+                                <Monitor className="w-3 h-3" /> Auto-Layar Sapa
+                              </span>
+                            ) : user.role === 'staff' || user.role === 'client' ? (
+                              <span className="inline-flex items-center w-fit px-2 py-0.5 rounded font-medium bg-gray-100 text-gray-700 border border-gray-200 text-[11px]">
+                                Create Event: Terkunci
+                              </span>
+                            ) : user.role === 'superadmin' ||
+                              isPartnerBusinessRegistered(
+                                user,
+                                users.find(u => u.id === user.partnerId)
+                              ) ? (
+                              <span className="inline-flex items-center w-fit px-2 py-0.5 rounded font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px]">
+                                Create Event: Aktif
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center w-fit px-2 py-0.5 rounded font-medium bg-amber-50 text-amber-800 border border-amber-200 text-[11px]">
+                                Create Event: Terkunci
+                              </span>
+                            )}
+                            {serviceHidden && (
+                              <span className="inline-flex items-center gap-1 w-fit px-2 py-0.5 rounded font-medium bg-rose-50 text-rose-700 border border-rose-200 text-[10px]">
+                                <EyeOff className="w-3 h-3" /> Info Layanan Disembunyikan
+                              </span>
+                            )}
                           </div>
-                        )}
-                      </td>
+                        </td>
 
-                      <td className="px-5 py-4 whitespace-nowrap text-xs">
-                        <div className="flex flex-col gap-1">
-                          {isGreetingScreenUser(user) ? (
-                            <span className="inline-flex items-center gap-1 w-fit px-2 py-0.5 rounded font-semibold bg-rose-50 text-rose-700 border border-rose-200 text-[11px]">
-                              <Monitor className="w-3 h-3" /> Auto-Masuk Layar Sapa (Tanpa Dashboard)
-                            </span>
-                          ) : user.role === 'staff' || user.role === 'client' ? (
-                            <span className="inline-flex items-center w-fit px-2 py-0.5 rounded font-medium bg-gray-100 text-gray-700 border border-gray-200 text-[11px]">
-                              Create Event: Terkunci
-                            </span>
-                          ) : user.role === 'superadmin' ||
-                            isPartnerBusinessRegistered(
-                              user,
-                              users.find(u => u.id === user.partnerId)
-                            ) ? (
-                            <span className="inline-flex items-center w-fit px-2 py-0.5 rounded font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px]">
-                              Create Event: Aktif
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center w-fit px-2 py-0.5 rounded font-medium bg-amber-50 text-amber-800 border border-amber-200 text-[11px]">
-                              Create Event: Terkunci (Alamat Bisnis Belum Diisi)
-                            </span>
-                          )}
-                          {serviceHidden && (
-                            <span className="inline-flex items-center gap-1 w-fit px-2 py-0.5 rounded font-medium bg-rose-50 text-rose-700 border border-rose-200 text-[10px]">
-                              <EyeOff className="w-3 h-3" /> Info Layanan Disembunyikan
-                            </span>
-                          )}
-                        </div>
-                      </td>
-
-                      <td className="px-5 py-4 whitespace-nowrap text-sm font-medium">
-                        {canModify ? (
-                          <div className="flex items-center gap-2">
-                            {isRegularStaff && resolvedEvents.length > 0 && (
+                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                          {canModify ? (
+                            <div className="inline-flex items-center justify-end gap-1">
+                              {isRegularStaff && resolvedEvents.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleResendStaffAssignmentWa(user)}
+                                  disabled={resendingWaUserId === user.id}
+                                  className="p-1.5 rounded-full text-emerald-600 hover:bg-emerald-50 transition-colors cursor-pointer disabled:opacity-50"
+                                  title="Kirim / kirim ulang notifikasi penugasan & info login ke WhatsApp Staff"
+                                >
+                                  {resendingWaUserId === user.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <MessageCircle className="w-4 h-4" />
+                                  )}
+                                </button>
+                              )}
+                              {normalizeUserDevices(user).length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleResetUserSession(user)}
+                                  className="p-1.5 rounded-full text-amber-600 hover:bg-amber-50 transition-colors cursor-pointer"
+                                  title={`Reset sesi perangkat: ${normalizeUserDevices(user).map((d) => d.deviceName).join(', ')}`}
+                                >
+                                  <LogOut className="w-4 h-4" />
+                                </button>
+                              )}
                               <button
                                 type="button"
-                                onClick={() => handleResendStaffAssignmentWa(user)}
-                                disabled={resendingWaUserId === user.id}
-                                className="text-emerald-700 hover:text-emerald-900 flex items-center gap-1 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-md hover:bg-emerald-100 transition-colors text-xs font-semibold cursor-pointer disabled:opacity-60"
-                                title="Kirim / kirim ulang notifikasi penugasan & info login ke WhatsApp Staff"
+                                onClick={() => handleOpenEdit(user)}
+                                className="p-1.5 rounded-full text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
+                                title="Edit / Tugaskan User"
                               >
-                                {resendingWaUserId === user.id ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                  <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                                )}
-                                Kirim WA
+                                <Edit className="w-4 h-4" />
                               </button>
-                            )}
-                            {normalizeUserDevices(user).length > 0 && (
-                              <button
-                                onClick={() => handleResetUserSession(user)}
-                                className="text-amber-700 hover:text-amber-900 flex items-center gap-1 bg-amber-50 px-2.5 py-1.5 rounded-md hover:bg-amber-100 transition-colors text-xs font-semibold cursor-pointer"
-                                title={`Putus sesi login di: ${normalizeUserDevices(user).map((d) => d.deviceName).join(', ')}`}
-                              >
-                                <LogOut className="w-3.5 h-3.5 text-amber-600" /> Reset Device
-                              </button>
-                            )}
-                            <button
-                              onClick={() => handleOpenEdit(user)}
-                              className="text-indigo-600 hover:text-indigo-900 flex items-center gap-1 bg-indigo-50 px-3 py-1.5 rounded-md hover:bg-indigo-100 transition-colors"
-                            >
-                              <Edit className="w-4 h-4" /> Edit / Tugaskan
-                            </button>
-                            {user.id !== appUser?.id && user.role !== 'superadmin' && (
-                              <button
-                                onClick={() => handleDelete(user)}
-                                className="text-red-600 hover:text-red-900 flex items-center gap-1 bg-red-50 px-3 py-1.5 rounded-md hover:bg-red-100 transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4" /> Hapus
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-gray-400 italic">Hanya Lihat</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {filteredUsers.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
-                      Tidak ada user yang sesuai dengan filter.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          {hasMore && (
-            <div className="p-4 border-t border-gray-200 flex justify-center">
-              <button
-                onClick={handleLoadMore}
-                disabled={loadingMore}
-                className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 font-medium disabled:opacity-50"
-              >
-                {loadingMore ? 'Memuat...' : 'Muat Lebih Banyak'}
-              </button>
+                              {user.id !== appUser?.id && user.role !== 'superadmin' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDelete(user)}
+                                  className="p-1.5 rounded-full text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                  title="Hapus User"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400 italic">Hanya Lihat</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          )}
-        </div>
-      )}
+
+            {/* Pagination Footer */}
+            <div className="px-4 py-3 border-t border-gray-200 bg-gray-50/70 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-gray-600">
+              <div className="flex flex-wrap items-center gap-2">
+                <span>
+                  Menampilkan <strong className="text-gray-900">{startIndex + 1}</strong> –{' '}
+                  <strong className="text-gray-900">{endIndex}</strong> dari{' '}
+                  <strong className="text-gray-900">{filteredUsers.length}</strong> user
+                </span>
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={resetFilters}
+                    className="text-indigo-600 hover:text-indigo-800 font-medium underline cursor-pointer"
+                  >
+                    Reset
+                  </button>
+                )}
+                {hasMore && (
+                  <button
+                    type="button"
+                    onClick={handleLoadMore}
+                    disabled={loadingMore}
+                    className="px-2.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+                  >
+                    {loadingMore ? 'Memuat...' : 'Muat Data Server Lainnya'}
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => setCurrentPage(1)}
+                  className="px-2 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title="Halaman Pertama"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Sebelumnya
+                </button>
+                <span className="px-2.5 py-1 text-gray-700 font-medium">
+                  Hal {safeCurrentPage} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Selanjutnya
+                </button>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => setCurrentPage(totalPages)}
+                  className="px-2 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title="Halaman Terakhir"
+                >
+                  »
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
 
       {/* Manual WhatsApp Fallback Modal (Tier 3 when Fonnte fails) */}
       <Modal
